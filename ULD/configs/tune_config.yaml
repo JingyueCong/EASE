@@ -3,7 +3,7 @@
 defaults:
   - _self_
   - data: tofu
-  - data_mode: forget_more_retain_perturb
+  - data_mode: dual_a1
   - model: tofu-llama-2
   # - model_mode: uld
   - model_mode: full

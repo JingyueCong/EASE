@@ -3,14 +3,12 @@ from transformers import AutoConfig
 
 from .contrastllm import ContrastLLM
 from .dualcontrastllm import DualContrastLLM
-from .offsetllm import create_offset_model
 from .utils import *
 from ..utils import NameTimer
 
 TRAIN_INIT_FUNCS = {
     "base": create_full_model,
     "uld": create_peft_model,
-    "offset": create_offset_model,
 }
 
 def eval_create_base_model(base_model_config, model_mode_config, ckpt_path, device):
@@ -62,24 +60,6 @@ def eval_create_uld_model(base_model_config, model_mode_config, ckpt_path, devic
         ) 
         return model
 
-def eval_create_offset_model(base_model_config, model_mode_config, ckpt_path, device):
-    with NameTimer("Loading Offset model"):
-        config = AutoConfig.from_pretrained(ckpt_path)
-        if hasattr(config, 'is_offset') and config.is_offset:
-            if hasattr(config, 'weight'):
-                weight = config.weight
-            else:
-                weight = 1.0
-            base_name = config.base_model_name
-            model = create_offset_model(
-                base_name, 
-                device=device, 
-                base_assist_path=config.base_assist_path, 
-                weight=weight, 
-                new_assist_path=ckpt_path
-            )
-            return model
-
 def _load_assistant(base_model_path, assist_ckpt_path, device):
     """Load a small ULD assistant: full small LLM saved next to the LoRA adapter,
     then merge the LoRA weights."""
@@ -124,13 +104,11 @@ def eval_create_dual_uld_model(base_model_config, model_mode_config, ckpt_path, 
 TRAIN_INIT_FUNCS = {
     "base": create_full_model,
     "uld": create_peft_model,
-    "offset": create_offset_model,
     # dual_uld is eval-only: train A1 and A2 separately with model_mode=uld.
 }
 
 EVAL_INIT_FUNCS = {
     "base": eval_create_base_model,
     "uld": eval_create_uld_model,
-    "offset": eval_create_offset_model,
     "dual_uld": eval_create_dual_uld_model,
 }
