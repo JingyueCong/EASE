@@ -60,12 +60,10 @@ EASE/
 │   ├── src/evals/muse.py      # MUSE benchmark eval
 │   └── ...                    # rest is upstream open-unlearning
 │
-└── scripts/                   # cross-cutting experiment drivers
-    ├── run_dual_uld_*.sh      # Llama-3.2 1B/3B TOFU runs via open-unlearning
-    ├── sweep_dual_v2_*.sh     # hyper-parameter sweeps
-    ├── sweep_3b_f*.sh         # forget01/05/10 sweeps for 3B
-    ├── eval_laaj.py           # LLM-as-a-Judge eval
-    └── _probe_dualuld_logits.py
+└── scripts/
+    └── run_dual_uld_1b.sh     # ★ Llama-3.2 1B TOFU run via open-unlearning
+                               #   (override env vars to target 3B / 8B —
+                               #    see "Llama-3.2 ... via open-unlearning" below)
 ```
 
 ## Prerequisites
@@ -86,14 +84,9 @@ All shell scripts expect `EASE_ROOT` to point at this repository:
 export EASE_ROOT=$(pwd)
 ```
 
-If you also want to materialise checkpoint paths, set:
-
-```bash
-export CKPT_DIR=$EASE_ROOT/outputs_trained_models   # any writable location
-```
-
-(Some sweep scripts reference `${CKPT_DIR}` because we did not ship trained
-LoRA weights — running the training step will produce them locally.)
+Trained LoRA checkpoints are not shipped — the training scripts will write
+them to `outputs_trained_models/` (created on first run). Override the
+location via `MODELS_ROOT=...` if you need to.
 
 ## Setup
 
@@ -143,8 +136,49 @@ Output:
   forget/retain/real_authors/world_facts) under
   `outputs/tune_log/.../eval_tofu.log`.
 
-For Llama-3.2 1B / 3B variants (run via the open-unlearning framework
-instead), see `scripts/run_dual_uld_1b.sh` and `scripts/run_dual_uld_3b_f10.sh`.
+### Llama-3.2 1B / 3B / 8B (via the open-unlearning framework)
+
+A single script ships at [scripts/run_dual_uld_1b.sh](scripts/run_dual_uld_1b.sh).
+It trains both assistants for all three forget splits and evaluates with
+open-unlearning's TOFU metrics.
+
+Default settings target **Llama-3.2-1B-Instruct**:
+
+```bash
+GPU=0 bash scripts/run_dual_uld_1b.sh
+```
+
+To run on a **different base model** (3B, 8B, …) override the shell
+variables — no script edit needed. The relevant knobs are env-var driven:
+
+| env var | 1B (default) | 3B | 8B |
+|---|---|---|---|
+| `HF_BASE_PREFIX` | `open-unlearning/tofu_Llama-3.2-1B-Instruct` | `open-unlearning/tofu_Llama-3.2-3B-Instruct` | `open-unlearning/tofu_Llama-3.1-8B-Instruct` |
+| `HF_TOKENIZER`   | `${HF_BASE_PREFIX}_full` | same | same |
+| `NUM_LAYER` (assistant depth, ≈ 25 % of base) | `2` | `7` | `8` |
+| `LORA_R` | `16` | `16` | `16` |
+| `WEIGHT_A1` / `WEIGHT_A2` | `-1.0` / `1.0` | `-0.8` / `0.5` | tune |
+| `TOP_FILTER` | `0.01` | `0.01` | `0.01` |
+| `TRAIN_BS` / `TRAIN_GA` | `4 / 4` | `2 / 8` | `1 / 16` |
+| `TRAIN_EP` | `10` | `5` (A1), `3` (A2) | tune |
+
+Example — 3B run on GPU 1:
+
+```bash
+GPU=1 \
+HF_BASE_PREFIX=open-unlearning/tofu_Llama-3.2-3B-Instruct \
+HF_TOKENIZER=open-unlearning/tofu_Llama-3.2-3B-Instruct_full \
+NUM_LAYER=7 WEIGHT_A2=0.5 \
+TRAIN_BS=2 TRAIN_GA=8 TRAIN_EP=5 \
+MODELS_ROOT=$EASE_ROOT/outputs_trained_models/llama3_3b_dual \
+    bash scripts/run_dual_uld_1b.sh
+```
+
+To run a single split only (skip the others), set `ONLY=forget10` (or
+`forget01` / `forget05`).
+
+For LLaMA-2-7B on the original ULD framework, use the canonical TOFU
+pipeline shown above (`bashes/tofu/dual_uld_pipeline.sh`).
 
 ### Reproducing best TOFU numbers (LLaMA-2-7B)
 
