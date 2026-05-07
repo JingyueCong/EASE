@@ -1,0 +1,7 @@
+# Test top_logit_filter=1.0 (no top-mask, A1 modifies ALL tokens including
+# bottom-k that mia_min_k uses) and w2=0 (pure ULD-style, no R_sub-cancellation).
+# label              w1    w2   topF
+w1m0p9_w20p9_tF1p0     -0.9   0.9   1.0
+w1m0p9_w20_tF0p01      -0.9   0.0   0.01
+w1m0p9_w20_tF1p0       -0.9   0.0   1.0
+w1m1p3_w20_tF1p0       -1.3   0.0   1.0

@@ -1,0 +1,6 @@
+# Standard NTP fine-tuning on both forget-role and retain-role data.
+# Used for vanilla model fine-tuning (e.g., creating a TOFU-trained base for ULD).
+
+forget_loss: GradDescentLossFunc
+retain_loss: GradDescentLossFunc
+retain_weight: 1.0

@@ -1,0 +1,18 @@
+# @package eval.muse
+# Fast subset of MUSE metrics for weight sweeping.
+# Skips forget_verbmem_ROUGE (slowest: ~25min Books, ~50min News).
+
+defaults:
+  - muse_metrics:
+    - forget_knowmem_ROUGE
+    - retain_knowmem_ROUGE
+    - privleak
+    # forget_verbmem_ROUGE  - skipped for sweep
+    # extraction_strength   - skipped for sweep
+
+handler: MUSEEvaluator
+output_dir: ${paths.output_dir}
+metrics: {}
+overwrite: false
+data_split: News
+retain_logs_path: null

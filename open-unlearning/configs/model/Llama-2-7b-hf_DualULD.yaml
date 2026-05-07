@@ -1,0 +1,25 @@
+# Dual-ULD-wrapped Llama-2-7b-hf base + 2 small (4-layer LoRA) assistants for MUSE.
+#
+# At runtime, set:
+#   pretrained_model_name_or_path = muse-bench/MUSE-Books_target  (or _News_target)
+#   a1_path=/path/to/A1/checkpoint-final
+#   a2_path=/path/to/A2/checkpoint-final
+model_args:
+  pretrained_model_name_or_path: muse-bench/MUSE-Books_target
+  attn_implementation: 'sdpa'
+  torch_dtype: bfloat16
+  # Override at runtime
+  a1_path: ???
+  a2_path: ???
+  weight_a1: -0.8
+  weight_a2: 0.8
+  top_logit_filter: 0.01
+model_handler: DualULDForCausalLM
+tokenizer_args:
+  pretrained_model_name_or_path: muse-bench/MUSE-Books_target
+template_args:
+  apply_chat_template: False
+  user_start_tag: "Question: "
+  user_end_tag: "\n"
+  asst_start_tag: "Answer: "
+  asst_end_tag: "\n\n"
