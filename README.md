@@ -49,8 +49,8 @@ EASE/
 │   ├── paraphrase_forget.py   # generate paraphrases via DeepSeek API
 │   ├── perturb_forget.py      # generate perturbations via DeepSeek API
 │   ├── train_assistant.py     # train one assistant (A1 or A2) on Books/News
-│   ├── master_v3.sh           # ★ canonical MUSE training pipeline
-│   ├── sweep_eval.sh          # sweep w1 over a fixed (A1, A2) pair
+│   ├── run_dual_uld_muse.sh   # ★ canonical MUSE pipeline (train A1+A2 + sweep)
+│   ├── sweep_eval.sh          # eval-only sweep over a w1 grid (w2 = |w1|)
 │   ├── aug/                   # paraphrase + perturbation jsonl (provided)
 │   └── rsub/                  # precomputed R_sub indices (provided)
 │
@@ -214,40 +214,41 @@ DEEPSEEK_API_KEY=... python perturb_forget.py    --split Books --n_perturb 2
 Outputs land in `aug/{Books,News}_{paraphrases,perturbations}.jsonl`.
 (Already shipped — skip this step to use ours.)
 
-Step 3 — train A1 and A2 on each split:
+Step 3 — train A1 + A2 and sweep eval weights with one command:
 
 ```bash
 cd $EASE_ROOT/dual_uld_muse
-
-python train_assistant.py \
-    --split Books --role a1 \
-    --epochs 5 --batch_size 1 --grad_accum 4 --num_layer 8 \
-    --paraphrase_path $EASE_ROOT/dual_uld_muse/aug/Books_paraphrases.jsonl \
-    --perturb_path    $EASE_ROOT/dual_uld_muse/aug/Books_perturbations.jsonl
-
-python train_assistant.py \
-    --split Books --role a2 \
-    --epochs 5 --batch_size 1 --grad_accum 4 --num_layer 8
-
-# repeat both with --split News
+bash run_dual_uld_muse.sh                 # default: Books
+SPLIT=News bash run_dual_uld_muse.sh      # News
 ```
 
-Or run the full sequence with the shipped pipeline:
+The script trains both assistants and then runs the eval over a default
+`w1` grid, printing `forget_ROUGE / privleak / retain_ROUGE` per weight.
+Results land in
+`$EASE_ROOT/open-unlearning/saves/eval/muse_Llama-2-7b-hf_<SPLIT>_DualULD_w*/MUSE_SUMMARY.json`.
+
+To use **different hyperparameters**, override env vars (no script edit):
+
+| env var | Books default | News default | meaning |
+|---|---|---|---|
+| `NUM_LAYER` | `8`    | `16`   | assistant transformer depth |
+| `LORA_R`    | `16`   | `64`   | LoRA rank (`LORA_ALPHA` defaults to `2*LORA_R`) |
+| `LR`        | `1e-3` | `5e-4` | learning rate |
+| `EPOCHS_A1` | `5`    | `10`   | A1 epochs |
+| `EPOCHS_A2` | `3`    | `5`    | A2 epochs |
+| `BATCH_SIZE` / `GRAD_ACCUM` | `1` / `4` | `1` / `4` | per-step batch & accumulation |
+| `WS`        | `"-0.3 -0.5 -0.7 -0.9 -1.1"` | same | space-separated `w1` grid (sweep_eval.sh sets `w2 = |w1|`) |
+| `GPU`       | `0`    | `0`    | CUDA device |
+
+Manual eval (skip training, sweep arbitrary weights on existing
+checkpoints):
+
 ```bash
-bash master_v3.sh    # waits for perturb done, retrains all 4 assistants, sweeps
+GPU=0 bash sweep_eval.sh Books "-0.3 -0.5 -0.6 -0.8"
 ```
 
-Step 4 — evaluate via the open-unlearning MUSE harness:
-
-```bash
-cd $EASE_ROOT/dual_uld_muse
-bash sweep_eval.sh Books "-0.3 -0.5 -0.6 -0.8"
-bash sweep_eval.sh News  "-0.3 -0.5 -0.6 -0.8"
-```
-
-Each call sweeps `w1` (with `w2 = |w1|`) and writes
-`MUSE_SUMMARY.json` under
-`$EASE_ROOT/open-unlearning/saves/eval/muse_Llama-2-7b-hf_<SPLIT>_DualULD_w*/`.
+By default `sweep_eval.sh` runs the **fast** eval profile (skips verbmem +
+extraction). For the **full** MUSE eval, pass `EXP=eval/muse/default`.
 
 ## Configuration cheatsheet
 
