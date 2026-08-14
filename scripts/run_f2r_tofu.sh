@@ -4,7 +4,11 @@
 set -euo pipefail
 
 EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-CONDA_BASE="${CONDA_BASE:-$(conda info --base 2>/dev/null || true)}"
+CONDA_BIN="${CONDA_BIN:-$(command -v conda || true)}"
+if [ -z "$CONDA_BIN" ] && [ -x "${HOME}/miniconda3/bin/conda" ]; then
+    CONDA_BIN="${HOME}/miniconda3/bin/conda"
+fi
+CONDA_BASE="${CONDA_BASE:-$(${CONDA_BIN:-false} info --base 2>/dev/null || true)}"
 TRAIN_ENV="${TRAIN_ENV:-ease-f2r-train}"
 EVAL_ENV="${EVAL_ENV:-ease-f2r-eval}"
 TRAIN_PY="${TRAIN_PY:-${CONDA_BASE}/envs/${TRAIN_ENV}/bin/python}"

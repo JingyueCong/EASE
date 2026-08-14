@@ -132,6 +132,10 @@ export EASE_ROOT=$(pwd)
 bash scripts/setup_f2r_server.sh
 ```
 
+If Conda is not installed, the setup script automatically installs Miniconda
+under `$HOME/miniconda3`. Override the location with
+`CONDA_INSTALL_PREFIX=/path/to/miniconda` if needed.
+
 Set HuggingFace access for the Llama-derived checkpoints and a DeepSeek key for
 counterfactual generation, then run the 8-example smoke experiment:
 
