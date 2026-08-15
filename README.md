@@ -192,6 +192,19 @@ Generated JSONL is written under `ULD/data/f2r/`, checkpoints under
 `ULD/outputs_trained_models/`, and final summaries under
 `open-unlearning/saves/eval/<task>/TOFU_SUMMARY.json`.
 
+The final stage uses the complete open-unlearning TOFU suite: Forget Quality,
+Model Utility over retain/real-authors/world-facts, truth ratio, probability,
+ROUGE, privacy leakage, extraction strength, exact memorization, and gibberish
+detection. The matching frozen retain-model log is downloaded automatically
+*after* both assistants are trained. It is evaluation-only and never enters
+training or checkpoint selection. Set `RETAIN_LOGS_PATH=/path/TOFU_EVAL.json`
+to provide a pinned local reference. `RETAIN_LOGS_PATH=null` is allowed only
+for an intentionally incomplete diagnostic run.
+
+Each completed run writes `F2R_REPORT.json`, `F2R_REPORT.csv`, and
+`F2R_REPORT.md` beside the framework's `TOFU_EVAL.json` and
+`TOFU_SUMMARY.json`. Smoke reports are visibly marked as non-reportable.
+
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
 ```bash

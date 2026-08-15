@@ -37,7 +37,8 @@ TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
 TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
 EVAL_BS="${EVAL_BS:-4}"
-RETAIN_LOGS_PATH="${RETAIN_LOGS_PATH:-}"
+RETAIN_LOGS_PATH="${RETAIN_LOGS_PATH:-auto}"
+AUTO_FETCH_RETAIN_LOGS="${AUTO_FETCH_RETAIN_LOGS:-1}"
 HF_ENDPOINT_SETTING="${HF_ENDPOINT:-auto}"
 HF_MIRROR_ENDPOINT="${HF_MIRROR_ENDPOINT:-https://hf-mirror.com}"
 HF_PREFLIGHT="${HF_PREFLIGHT:-1}"
@@ -216,9 +217,38 @@ if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     exit 1
 fi
 
+forget_percent=$((10#${SPLIT#forget}))
+RETAIN_SPLIT="retain$(printf '%02d' "$((100 - forget_percent))")"
+HF_MODEL_NAME="${HF_MODEL_NAME:-${HF_BASE_PREFIX#open-unlearning/tofu_}}"
+REFERENCE_REL="tofu_${HF_MODEL_NAME}_${RETAIN_SPLIT}/TOFU_EVAL.json"
+REFERENCE_DEFAULT="$EASE_ROOT/open-unlearning/saves/eval/$REFERENCE_REL"
+if [ "$RETAIN_LOGS_PATH" = "auto" ]; then
+    RETAIN_LOGS_PATH="$REFERENCE_DEFAULT"
+    if [ ! -f "$RETAIN_LOGS_PATH" ] && [ "$AUTO_FETCH_RETAIN_LOGS" = "1" ]; then
+        echo "      Downloading frozen retain reference: $REFERENCE_REL"
+        "$EVAL_PY" - "$REFERENCE_REL" "$EASE_ROOT/open-unlearning/saves/eval" <<'PY'
+import sys
+from huggingface_hub import snapshot_download
+
+relative_path, output_dir = sys.argv[1:]
+snapshot_download(
+    repo_id="open-unlearning/eval",
+    repo_type="dataset",
+    allow_patterns=[relative_path],
+    local_dir=output_dir,
+)
+PY
+    fi
+fi
+
 echo "[4/4] Evaluating frozen F2R model"
 retain_arg="retain_logs_path=null"
-if [ -n "$RETAIN_LOGS_PATH" ]; then
+if [ "$RETAIN_LOGS_PATH" != "null" ]; then
+    if [ ! -f "$RETAIN_LOGS_PATH" ]; then
+        echo "Missing retain reference log: $RETAIN_LOGS_PATH" >&2
+        echo "Set RETAIN_LOGS_PATH=null only for an explicitly incomplete diagnostic evaluation." >&2
+        exit 1
+    fi
     retain_arg="retain_logs_path=$RETAIN_LOGS_PATH"
 fi
 (cd "$EASE_ROOT/open-unlearning" && \
@@ -243,5 +273,20 @@ fi
         task_name="$TASK_NAME")
 
 SUMMARY="$EASE_ROOT/open-unlearning/saves/eval/$TASK_NAME/TOFU_SUMMARY.json"
-echo "Done. Summary: $SUMMARY"
-if [ -f "$SUMMARY" ]; then cat "$SUMMARY"; fi
+EVAL_DIR="$EASE_ROOT/open-unlearning/saves/eval/$TASK_NAME"
+EVAL_JSON="$EVAL_DIR/TOFU_EVAL.json"
+if [ ! -f "$SUMMARY" ] || [ ! -f "$EVAL_JSON" ]; then
+    echo "Evaluation finished without both expected TOFU output files." >&2
+    exit 1
+fi
+"$EVAL_PY" "$EASE_ROOT/scripts/summarize_f2r_tofu.py" \
+    --eval-json "$EVAL_JSON" \
+    --summary-json "$SUMMARY" \
+    --output-dir "$EVAL_DIR" \
+    --mode "$MODE" \
+    --split "$SPLIT" \
+    --base-model "${HF_BASE_PREFIX}_full" \
+    --a1-checkpoint "$A1_CKPT" \
+    --a2-checkpoint "$A2_CKPT" \
+    --retain-reference "$RETAIN_LOGS_PATH"
+echo "Done. Full report: $EVAL_DIR/F2R_REPORT.md"
