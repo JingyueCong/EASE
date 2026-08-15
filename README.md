@@ -239,6 +239,14 @@ MODE=full GPU=0 bash scripts/run_f2r_tofu_all.sh
 The wrapper stops at the first failed training/evaluation and only creates the
 LaTeX row after all three reports pass the EASE metric-completeness checks.
 
+If model evaluation already completed but report generation failed, reuse the
+existing `TOFU_EVAL.json` without recomputing metrics:
+
+```bash
+EVAL_OVERWRITE=false MODE=smoke SPLIT=forget05 GPU=0 \
+  bash scripts/run_f2r_tofu.sh
+```
+
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
 ```bash

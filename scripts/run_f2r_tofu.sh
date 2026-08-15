@@ -37,6 +37,7 @@ TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
 TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
 EVAL_BS="${EVAL_BS:-4}"
+EVAL_OVERWRITE="${EVAL_OVERWRITE:-true}"
 RETAIN_LOGS_PATH="${RETAIN_LOGS_PATH:-auto}"
 AUTO_FETCH_RETAIN_LOGS="${AUTO_FETCH_RETAIN_LOGS:-1}"
 HF_ENDPOINT_SETTING="${HF_ENDPOINT:-auto}"
@@ -145,6 +146,7 @@ echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  optimizer        : $TRAIN_OPTIM"
+echo "  eval overwrite   : $EVAL_OVERWRITE"
 echo "  Hugging Face     : $HF_ENDPOINT"
 echo "============================================================"
 
@@ -290,7 +292,7 @@ fi
         forget_split="$SPLIT" \
         holdout_split="holdout${SPLIT#forget}" \
         eval.tofu.batch_size="$EVAL_BS" \
-        eval.tofu.overwrite=true \
+        eval.tofu.overwrite="$EVAL_OVERWRITE" \
         "$retain_arg" \
         task_name="$TASK_NAME")
 

@@ -46,6 +46,17 @@ class F2RSummaryTest(unittest.TestCase):
         self.assertFalse(report["validation"]["complete"])
         self.assertIn("forget_quality", report["validation"]["invalid"])
 
+    def test_upstream_truth_ratio_capitalisation_is_normalised(self):
+        metrics = {name: 0.5 for name in summary_module.PRIMARY_METRICS}
+        for canonical, aliases in summary_module.METRIC_ALIASES.items():
+            metrics.pop(canonical)
+            metrics[aliases[0]] = 0.6
+        report = summary_module.build_report({}, metrics, {"mode": "full"})
+        self.assertTrue(report["validation"]["complete"])
+        self.assertEqual(report["metrics"]["retain_truth_ratio"], 0.6)
+        self.assertEqual(report["metrics"]["ra_truth_ratio"], 0.6)
+        self.assertEqual(report["metrics"]["wf_truth_ratio"], 0.6)
+
     def test_write_reports_creates_all_formats(self):
         report = summary_module.build_report(
             {}, {"model_utility": 0.8}, {"mode": "full", "split": "forget05"}

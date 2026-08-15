@@ -63,6 +63,15 @@ DISPLAY_NAMES = {
     "forget_Q_A_gibberish": "Forget Gibberish",
 }
 
+# Open-Unlearning uses an inconsistent capitalisation for the three utility
+# truth-ratio precomputations.  Reports expose stable canonical keys while
+# accepting the exact upstream spellings in TOFU_EVAL.json.
+METRIC_ALIASES = {
+    "retain_truth_ratio": ("retain_Truth_Ratio",),
+    "ra_truth_ratio": ("ra_Truth_Ratio",),
+    "wf_truth_ratio": ("wf_Truth_Ratio",),
+}
+
 
 def load_json(path: Path) -> Dict[str, Any]:
     if not path.is_file():
@@ -80,6 +89,13 @@ def scalar_metrics(eval_logs: Dict[str, Any], summary: Dict[str, Any]) -> Dict[s
         if isinstance(value, dict) and "agg_value" in value:
             value = value["agg_value"]
         metrics[name] = value
+    for canonical, aliases in METRIC_ALIASES.items():
+        if canonical in metrics:
+            continue
+        for alias in aliases:
+            if alias in metrics:
+                metrics[canonical] = metrics[alias]
+                break
     return metrics
 
 
