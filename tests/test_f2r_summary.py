@@ -28,6 +28,19 @@ class F2RSummaryTest(unittest.TestCase):
         self.assertIsNotNone(report["derived"]["memorization_score"])
         self.assertIsNotNone(report["derived"]["aggregate_score"])
         self.assertIn("must not be reported", report["warning"])
+        self.assertFalse(report["validation"]["complete"])
+
+    def test_validation_requires_every_ease_metric(self):
+        metrics = {name: 0.5 for name in summary_module.PRIMARY_METRICS}
+        report = summary_module.build_report({}, metrics, {"mode": "full"})
+        self.assertTrue(report["validation"]["complete"])
+        self.assertEqual(report["validation"]["missing"], [])
+        self.assertEqual(report["validation"]["invalid"], [])
+
+        metrics["forget_quality"] = None
+        report = summary_module.build_report({}, metrics, {"mode": "full"})
+        self.assertFalse(report["validation"]["complete"])
+        self.assertIn("forget_quality", report["validation"]["invalid"])
 
     def test_write_reports_creates_all_formats(self):
         report = summary_module.build_report(
@@ -38,6 +51,8 @@ class F2RSummaryTest(unittest.TestCase):
             self.assertTrue((Path(tmp) / "F2R_REPORT.json").is_file())
             self.assertTrue((Path(tmp) / "F2R_REPORT.csv").is_file())
             self.assertTrue((Path(tmp) / "F2R_REPORT.md").is_file())
+            self.assertTrue((Path(tmp) / "F2R_EASE_TABLE.csv").is_file())
+            self.assertTrue((Path(tmp) / "F2R_EASE_TABLE.md").is_file())
 
 
 if __name__ == "__main__":

@@ -249,6 +249,28 @@ if [ "$RETAIN_LOGS_PATH" != "null" ]; then
         echo "Set RETAIN_LOGS_PATH=null only for an explicitly incomplete diagnostic evaluation." >&2
         exit 1
     fi
+    "$EVAL_PY" - "$RETAIN_LOGS_PATH" <<'PY'
+import json
+import math
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    logs = json.load(handle)
+
+required = ("forget_truth_ratio", "mia_min_k")
+bad = []
+for name in required:
+    metric = logs.get(name)
+    value = metric.get("agg_value") if isinstance(metric, dict) else None
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        bad.append(name)
+if bad:
+    raise SystemExit(
+        f"Retain reference {path} is incomplete; missing/invalid: {', '.join(bad)}"
+    )
+print(f"      Valid retain reference: {path}")
+PY
     retain_arg="retain_logs_path=$RETAIN_LOGS_PATH"
 fi
 (cd "$EASE_ROOT/open-unlearning" && \
@@ -279,6 +301,10 @@ if [ ! -f "$SUMMARY" ] || [ ! -f "$EVAL_JSON" ]; then
     echo "Evaluation finished without both expected TOFU output files." >&2
     exit 1
 fi
+summary_args=()
+if [ "$RETAIN_LOGS_PATH" = "null" ]; then
+    summary_args=(--allow-incomplete)
+fi
 "$EVAL_PY" "$EASE_ROOT/scripts/summarize_f2r_tofu.py" \
     --eval-json "$EVAL_JSON" \
     --summary-json "$SUMMARY" \
@@ -288,5 +314,7 @@ fi
     --base-model "${HF_BASE_PREFIX}_full" \
     --a1-checkpoint "$A1_CKPT" \
     --a2-checkpoint "$A2_CKPT" \
-    --retain-reference "$RETAIN_LOGS_PATH"
+    --retain-reference "$RETAIN_LOGS_PATH" \
+    "${summary_args[@]}"
 echo "Done. Full report: $EVAL_DIR/F2R_REPORT.md"
+echo "      EASE table: $EVAL_DIR/F2R_EASE_TABLE.md"

@@ -8,10 +8,13 @@ import csv
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List
 
 
-PRIMARY_METRICS = [
+# Metrics used by EASE's TOFU evaluation.  Keep this list explicit: silently
+# dropping one of the pre-computations can otherwise still produce a seemingly
+# valid model_utility scalar.
+EASE_CORE_METRICS = [
     "forget_quality",
     "model_utility",
     "forget_truth_ratio",
@@ -26,11 +29,39 @@ PRIMARY_METRICS = [
     "wf_Q_A_Prob_normalised",
     "wf_Q_A_ROUGE",
     "wf_truth_ratio",
+]
+
+# Additional metrics enabled by EASE's Open-Unlearning runner.  These extend
+# the original TOFU table but are evaluated for both EASE and F2R.
+EASE_EXTENDED_METRICS = [
     "privleak",
     "extraction_strength",
     "exact_memorization",
     "forget_Q_A_gibberish",
 ]
+
+PRIMARY_METRICS = EASE_CORE_METRICS + EASE_EXTENDED_METRICS
+
+DISPLAY_NAMES = {
+    "forget_quality": "Forget Quality",
+    "model_utility": "Model Utility",
+    "forget_truth_ratio": "Forget Truth Ratio",
+    "forget_Q_A_Prob": "Forget Probability",
+    "forget_Q_A_ROUGE": "Forget ROUGE",
+    "retain_Q_A_Prob": "Retain Probability",
+    "retain_Q_A_ROUGE": "Retain ROUGE",
+    "retain_truth_ratio": "Retain Truth Ratio",
+    "ra_Q_A_Prob_normalised": "Real Authors Probability",
+    "ra_Q_A_ROUGE": "Real Authors ROUGE",
+    "ra_truth_ratio": "Real Authors Truth Ratio",
+    "wf_Q_A_Prob_normalised": "World Facts Probability",
+    "wf_Q_A_ROUGE": "World Facts ROUGE",
+    "wf_truth_ratio": "World Facts Truth Ratio",
+    "privleak": "Privacy Leakage",
+    "extraction_strength": "Extraction Strength",
+    "exact_memorization": "Exact Memorization",
+    "forget_Q_A_gibberish": "Forget Gibberish",
+}
 
 
 def load_json(path: Path) -> Dict[str, Any]:
@@ -50,6 +81,23 @@ def scalar_metrics(eval_logs: Dict[str, Any], summary: Dict[str, Any]) -> Dict[s
             value = value["agg_value"]
         metrics[name] = value
     return metrics
+
+
+def validate_metrics(metrics: Dict[str, Any], required: Iterable[str]) -> Dict[str, List[str]]:
+    missing = []
+    invalid = []
+    for name in required:
+        if name not in metrics:
+            missing.append(name)
+            continue
+        value = metrics[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            invalid.append(name)
+    return {"missing": missing, "invalid": invalid}
 
 
 def harmonic(values):
@@ -76,6 +124,7 @@ def derived_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_report(eval_logs: Dict[str, Any], summary: Dict[str, Any], metadata: Dict[str, Any]):
     metrics = scalar_metrics(eval_logs, summary)
+    validation = validate_metrics(metrics, PRIMARY_METRICS)
     ordered = {name: metrics.get(name) for name in PRIMARY_METRICS}
     ordered.update({name: value for name, value in sorted(metrics.items()) if name not in ordered})
     return {
@@ -88,6 +137,12 @@ def build_report(eval_logs: Dict[str, Any], summary: Dict[str, Any], metadata: D
             "retain_reference_usage": "post-freeze evaluation only",
         },
         "metadata": metadata,
+        "validation": {
+            "profile": "EASE/Open-Unlearning TOFU",
+            "complete": not validation["missing"] and not validation["invalid"],
+            "required_metrics": PRIMARY_METRICS,
+            **validation,
+        },
         "derived": derived_metrics(metrics),
         "metrics": ordered,
     }
@@ -116,6 +171,14 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         writer.writerow(["metric", "value"])
         writer.writerows(rows)
 
+    with (output_dir / "F2R_EASE_TABLE.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["metric", "key", "value"])
+        for name in PRIMARY_METRICS:
+            writer.writerow([DISPLAY_NAMES[name], name, report["metrics"].get(name)])
+
     metadata = report["metadata"]
     lines = [
         "# F2R TOFU evaluation",
@@ -127,6 +190,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         f"- A1: `{metadata.get('a1_checkpoint')}`",
         f"- A2: `{metadata.get('a2_checkpoint')}`",
         "- Training/selection retain access: `false / false`",
+        f"- EASE metric completeness: `{report['validation']['complete']}`",
         "",
     ]
     if report.get("warning"):
@@ -135,6 +199,27 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
     lines += [f"| {name} | {fmt(value)} |" for name, value in rows]
     lines.append("")
     (output_dir / "F2R_REPORT.md").write_text("\n".join(lines), encoding="utf-8")
+
+    ease_lines = [
+        "# EASE-aligned TOFU evaluation",
+        "",
+        "This table uses the same Open-Unlearning evaluator and metric keys as the EASE baseline.",
+        "",
+        f"- Complete: `{report['validation']['complete']}`",
+        f"- Split: `{metadata.get('split')}`",
+        f"- Retain reference: `{metadata.get('retain_reference')}`",
+        "",
+        "| EASE/TOFU metric | framework key | value |",
+        "|---|---|---:|",
+    ]
+    ease_lines += [
+        f"| {DISPLAY_NAMES[name]} | `{name}` | {fmt(report['metrics'].get(name))} |"
+        for name in PRIMARY_METRICS
+    ]
+    ease_lines.append("")
+    (output_dir / "F2R_EASE_TABLE.md").write_text(
+        "\n".join(ease_lines), encoding="utf-8"
+    )
 
 
 def main() -> None:
@@ -148,6 +233,11 @@ def main() -> None:
     parser.add_argument("--a1-checkpoint", required=True)
     parser.add_argument("--a2-checkpoint", required=True)
     parser.add_argument("--retain-reference", required=True)
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Write a diagnostic report instead of failing when an EASE metric is absent.",
+    )
     args = parser.parse_args()
 
     metadata = {
@@ -160,9 +250,20 @@ def main() -> None:
     }
     report = build_report(load_json(args.eval_json), load_json(args.summary_json), metadata)
     write_reports(report, args.output_dir)
+    validation = report["validation"]
+    if not validation["complete"] and not args.allow_incomplete:
+        problems = []
+        if validation["missing"]:
+            problems.append("missing=" + ",".join(validation["missing"]))
+        if validation["invalid"]:
+            problems.append("invalid=" + ",".join(validation["invalid"]))
+        raise SystemExit(
+            "Incomplete EASE-aligned TOFU evaluation (" + "; ".join(problems) + ")"
+        )
     print(f"Reports: {args.output_dir / 'F2R_REPORT.json'}")
     print(f"         {args.output_dir / 'F2R_REPORT.csv'}")
     print(f"         {args.output_dir / 'F2R_REPORT.md'}")
+    print(f"         {args.output_dir / 'F2R_EASE_TABLE.md'}")
 
 
 if __name__ == "__main__":

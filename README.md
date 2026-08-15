@@ -203,7 +203,14 @@ for an intentionally incomplete diagnostic run.
 
 Each completed run writes `F2R_REPORT.json`, `F2R_REPORT.csv`, and
 `F2R_REPORT.md` beside the framework's `TOFU_EVAL.json` and
-`TOFU_SUMMARY.json`. Smoke reports are visibly marked as non-reportable.
+`TOFU_SUMMARY.json`. It also writes `F2R_EASE_TABLE.{md,csv}`, whose rows use
+the exact Open-Unlearning metric keys used for the EASE baseline: Forget
+Quality, Model Utility, and Probability/ROUGE/Truth Ratio on forget, retain,
+real-authors, and world-facts, followed by the common privacy, extraction,
+memorization, and gibberish diagnostics. A standard run fails if any of these
+metrics or either required retain-reference statistic is missing/invalid, so an
+incomplete evaluation cannot be mistaken for a paper result. Smoke reports are
+visibly marked as non-reportable.
 
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
