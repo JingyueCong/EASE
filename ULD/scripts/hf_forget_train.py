@@ -112,7 +112,7 @@ def main(configs):
         deepspeed=deepspeed_configfile,
         save_steps=trainer_config.get('save_steps', num_update_steps_per_epoch),
         eval_steps=trainer_config.get('eval_steps', num_update_steps_per_epoch),
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         seed=configs.get('seed', 42),
         report_to='wandb',
         run_name=configs.name,
