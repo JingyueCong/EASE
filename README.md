@@ -182,6 +182,10 @@ Important controls:
 - `HF_ENDPOINT` selects a specific Hub endpoint; when unset, the runner tries
   the official endpoint and `HF_MIRROR_ENDPOINT` in order. Set
   `HF_PREFLIGHT=0` only when the required dataset and model are already cached.
+- `CF_JSON_MODE` controls counterfactual API JSON handling. The default `auto`
+  first requests enforced JSON and falls back to prompt-only JSON if an
+  OpenAI-compatible endpoint rejects `response_format` with HTTP 400. Every
+  returned record is still parsed and schema-validated before it is written.
 - Training sets `strict_retain_free=True`: no retain split is loaded for
   optimization or validation. The separate final evaluator may read retain
   data only after checkpoints are frozen.

@@ -20,6 +20,7 @@ GPU="${GPU:-0}"
 VIEWS="${VIEWS:-2}"
 CF_MODEL="${CF_MODEL:-deepseek-chat}"
 CF_BASE_URL="${CF_BASE_URL:-https://api.deepseek.com}"
+CF_JSON_MODE="${CF_JSON_MODE:-auto}"
 CF_ROOT="${CF_ROOT:-${EASE_ROOT}/ULD/data/f2r}"
 CF_PATH="${CF_PATH:-${CF_ROOT}/${SPLIT}_${MODE}.jsonl}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}}"
@@ -143,6 +144,7 @@ echo "F2R TOFU experiment"
 echo "  mode/split       : $MODE / $SPLIT"
 echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
+echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  optimizer        : $TRAIN_OPTIM"
@@ -164,6 +166,7 @@ if [ ! -s "$CF_PATH" ]; then
         --backend openai \
         --model "$CF_MODEL" \
         --base-url "$CF_BASE_URL" \
+        --json-mode "$CF_JSON_MODE" \
         --views "$VIEWS" \
         "${limit_args[@]}"
 else
