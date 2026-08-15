@@ -22,6 +22,7 @@ CF_MODEL="${CF_MODEL:-deepseek-v4-flash}"
 CF_BASE_URL="${CF_BASE_URL:-https://api.deepseek.com}"
 CF_JSON_MODE="${CF_JSON_MODE:-auto}"
 CF_API_KEY_ENV="${CF_API_KEY_ENV:-DEEPSEEK_API_KEY}"
+CF_TEMPERATURE="${CF_TEMPERATURE:-0.8}"
 CF_ROOT="${CF_ROOT:-${EASE_ROOT}/ULD/data/f2r}"
 CF_PATH="${CF_PATH:-${CF_ROOT}/${SPLIT}_${MODE}.jsonl}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}}"
@@ -145,7 +146,7 @@ echo "F2R TOFU experiment"
 echo "  mode/split       : $MODE / $SPLIT"
 echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
-echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE (key=$CF_API_KEY_ENV)"
+echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE / temp=$CF_TEMPERATURE (key=$CF_API_KEY_ENV)"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  optimizer        : $TRAIN_OPTIM"
@@ -169,6 +170,7 @@ if [ ! -s "$CF_PATH" ]; then
         --base-url "$CF_BASE_URL" \
         --api-key-env "$CF_API_KEY_ENV" \
         --json-mode "$CF_JSON_MODE" \
+        --temperature "$CF_TEMPERATURE" \
         --views "$VIEWS" \
         "${limit_args[@]}"
 else

@@ -152,6 +152,7 @@ def generate_openai(
     view: int,
     retries: int,
     json_mode: str,
+    temperature: float,
 ) -> Dict:
     user = (
         f"Source question: {source['question']}\n"
@@ -167,7 +168,7 @@ def generate_openai(
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user},
                 ],
-                temperature=0.8,
+                temperature=temperature,
             )
             if json_mode == "required":
                 request["response_format"] = {"type": "json_object"}
@@ -233,6 +234,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument(
         "--json-mode",
         choices=["auto", "required", "prompt"],
@@ -269,7 +271,13 @@ def main() -> None:
         if args.backend == "mock":
             return generate_mock(row, view)
         return generate_openai(
-            client, args.model, row, view, args.retries, resolved_json_mode
+            client,
+            args.model,
+            row,
+            view,
+            args.retries,
+            resolved_json_mode,
+            args.temperature,
         )
 
     records = []
@@ -287,7 +295,13 @@ def main() -> None:
             try:
                 row, view = first_job
                 first_record = generate_openai(
-                    client, args.model, row, view, args.retries, probe_mode
+                    client,
+                    args.model,
+                    row,
+                    view,
+                    args.retries,
+                    probe_mode,
+                    args.temperature,
                 )
                 records.append(first_record)
                 jobs = jobs[1:]

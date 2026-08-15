@@ -194,6 +194,9 @@ Important controls:
   OpenAI-compatible endpoint without copying its credential into a misleading
   variable name. For a shell-compatible local `.env`, load and export it with
   `set -a; source .env; set +a`; `.env` is ignored by Git.
+- `CF_TEMPERATURE` defaults to `0.8`; set it to a value supported by the chosen
+  deployment (for example `1.0` when an Azure deployment rejects custom
+  sampling temperatures).
 - Training sets `strict_retain_free=True`: no retain split is loaded for
   optimization or validation. The separate final evaluator may read retain
   data only after checkpoints are frozen.
