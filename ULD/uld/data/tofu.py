@@ -6,7 +6,6 @@ from datasets import load_dataset
 
 from .conv_util import create_template
 from .datamodule import TrainDataModule, TorchDataset
-from .f2r import load_f2r_pairs
 
 class ToFU_DataModule(TrainDataModule):
 
@@ -23,9 +22,7 @@ class ToFU_DataModule(TrainDataModule):
         expand_forget=False,
         with_perturb=False, # Our method
         r_sub_indices_path=None,  # Dual-ULD: path to JSON with R_sub indices
-        data_role=None,           # Dual-ULD/F2R: None | a1 | a2 | f2r_a1 | f2r_a2
-        counterfactual_path=None,
-        strict_retain_free=False,
+        data_role=None,           # Dual-ULD: None | 'a1' | 'a2'
         **kwargs,
     ):
         super().__init__()
@@ -50,15 +47,9 @@ class ToFU_DataModule(TrainDataModule):
             forget_eval = forget_eval.remove_columns(cols_to_drop)
         self.forget_eval = forget_eval
 
-        # Strict F2R runs must not touch a retain split during training or
-        # hyperparameter selection. Final utility evaluation is performed by
-        # the separate open-unlearning evaluator after checkpoints are frozen.
-        if strict_retain_free:
-            self.retain_eval = None
-        else:
-            retain_eval = load_dataset('locuslab/TOFU', 'retain_perturbed')['train']
-            retain_eval = retain_eval.remove_columns(['paraphrased_answer', 'paraphrased_question', 'perturbed_answer'])
-            self.retain_eval = retain_eval
+        retain_eval = load_dataset('locuslab/TOFU', 'retain_perturbed')['train']
+        retain_eval = retain_eval.remove_columns(['paraphrased_answer', 'paraphrased_question', 'perturbed_answer'])
+        self.retain_eval = retain_eval
 
         perturb_eval = load_dataset('locuslab/TOFU', split)['train']
         if 'perturbed_answer' in perturb_eval.column_names:
@@ -77,8 +68,6 @@ class ToFU_DataModule(TrainDataModule):
         self.forget_length = len(base_forget_data)
         self.retain_length = 0
         if with_retain:
-            if strict_retain_free:
-                raise ValueError("strict_retain_free=True is incompatible with with_retain=True")
             print("Adding retain data")
             retain_split = "retain" + str(100 - int(split.split("_")[0].replace("forget", ""))).zfill(2)
             retain_train = load_dataset('locuslab/TOFU', retain_split)['train']
@@ -119,44 +108,8 @@ class ToFU_DataModule(TrainDataModule):
             self.retain_length += len(tmpdata)
             base_retain_data = datasets.concatenate_datasets([base_retain_data, tmpdata])
 
-        # -------- F2R: derive both roles from forget-conditioned data only --------
-        if data_role in {'f2r_a1', 'f2r_a2'}:
-            if counterfactual_path is None:
-                raise ValueError(f"{data_role} requires counterfactual_path")
-            if with_retain:
-                raise ValueError(f"{data_role} must run with with_retain=False")
-
-            matched, mismatched, records = load_f2r_pairs(counterfactual_path)
-            matched_data = datasets.Dataset.from_list(matched)
-            mismatched_data = datasets.Dataset.from_list(mismatched)
-            print(
-                f"Loaded F2R supervision: {len(records)} matched and "
-                f"{len(mismatched)} mismatched pairs from {counterfactual_path}"
-            )
-
-            # `forget` is the CE/remember role in remember+uniform; `retain`
-            # is the KL-to-uniform role. These names come from upstream ULD
-            # and do not imply access to the real retain set here.
-            if data_role == 'f2r_a1':
-                ce_data = datasets.concatenate_datasets([
-                    base_forget_data, matched_data,
-                ])
-                uniform_data = datasets.concatenate_datasets([
-                    base_retain_data, mismatched_data,
-                ])
-            else:
-                ce_data = matched_data
-                uniform_data = datasets.concatenate_datasets([
-                    base_forget_data, base_retain_data, mismatched_data,
-                ])
-
-            base_forget_data = ce_data
-            base_retain_data = uniform_data
-            self.forget_length = len(ce_data)
-            self.retain_length = len(uniform_data)
-
         # -------- Dual-ULD: repartition data based on R_sub / data_role --------
-        elif data_role is not None:
+        if data_role is not None:
             if r_sub_indices_path is None:
                 raise ValueError("data_role is set but r_sub_indices_path is missing")
             with open(r_sub_indices_path) as f:
@@ -202,11 +155,10 @@ class ToFU_DataModule(TrainDataModule):
         self.forget_data = base_forget_data
         self.eval_sets = {
             'forget': self.forget_eval,
+            'retain': self.retain_eval,
             'perturb': self.perturb_eval,
             'paraphrase': self.paraphrase_eval,
         }
-        if self.retain_eval is not None:
-            self.eval_sets['retain'] = self.retain_eval
         print("In all ToFU Train: ", self.forget_length, self.retain_length)
 
 
