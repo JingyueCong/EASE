@@ -21,8 +21,5 @@ wandb/
 logs/
 *.log
 
-# Generated F2R supervision (regenerate with ULD/scripts/generate_f2r_pairs.py)
-ULD/data/f2r/*.jsonl
-
 # Local env
 .env
