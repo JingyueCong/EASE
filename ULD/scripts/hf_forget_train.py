@@ -106,7 +106,7 @@ def main(configs):
         logging_steps=1,
         logging_dir=logdir,
         output_dir=checkpoint_dir,
-        optim="paged_adamw_32bit",
+        optim=trainer_config.get('optim', "paged_adamw_32bit"),
         save_only_model=True,
         ddp_find_unused_parameters=False,
         deepspeed=deepspeed_configfile,

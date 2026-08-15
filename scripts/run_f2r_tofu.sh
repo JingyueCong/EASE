@@ -35,6 +35,7 @@ TOP_FILTER="${TOP_FILTER:-0.01}"
 TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
+TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
 EVAL_BS="${EVAL_BS:-4}"
 RETAIN_LOGS_PATH="${RETAIN_LOGS_PATH:-}"
 HF_ENDPOINT_SETTING="${HF_ENDPOINT:-auto}"
@@ -142,6 +143,7 @@ echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
+echo "  optimizer        : $TRAIN_OPTIM"
 echo "  Hugging Face     : $HF_ENDPOINT"
 echo "============================================================"
 
@@ -189,6 +191,7 @@ train_role() {
         trainer.batch_size="$TRAIN_BS" \
         trainer.gradient_accumulation_steps="$TRAIN_GA" \
         trainer.learning_rate="$TRAIN_LR" \
+        trainer.optim="$TRAIN_OPTIM" \
         trainer.max_epochs="$TRAIN_EP" \
         trainer.strategy=gpu \
         OUTPUTMODELDIR="$output_root" \

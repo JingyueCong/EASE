@@ -176,6 +176,9 @@ Important controls:
   require an API key.
 - `TRAIN_PY` and `EVAL_PY` can point to custom Python executables instead of
   the default `ease-f2r-train` and `ease-f2r-eval` conda environments.
+- `TRAIN_OPTIM=adamw_torch` is the F2R default and avoids a system CUDA
+  runtime dependency from bitsandbytes. Set it explicitly only when comparing
+  optimizer implementations.
 - `HF_ENDPOINT` selects a specific Hub endpoint; when unset, the runner tries
   the official endpoint and `HF_MIRROR_ENDPOINT` in order. Set
   `HF_PREFLIGHT=0` only when the required dataset and model are already cached.
