@@ -37,6 +37,9 @@ TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
 EVAL_BS="${EVAL_BS:-4}"
 RETAIN_LOGS_PATH="${RETAIN_LOGS_PATH:-}"
+HF_ENDPOINT_SETTING="${HF_ENDPOINT:-auto}"
+HF_MIRROR_ENDPOINT="${HF_MIRROR_ENDPOINT:-https://hf-mirror.com}"
+HF_PREFLIGHT="${HF_PREFLIGHT:-1}"
 
 case "$MODE" in
     smoke)
@@ -68,6 +71,65 @@ export PYTHONPATH="${EASE_ROOT}/ULD:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM=false
 export WANDB_MODE="${WANDB_MODE:-disabled}"
 
+hf_preflight() {
+    local endpoint="$1"
+    echo "      Checking $endpoint"
+    HF_ENDPOINT="$endpoint" "$TRAIN_PY" - \
+        "${SPLIT}_perturbed" "${HF_BASE_PREFIX}_full" <<'PY'
+import sys
+
+from datasets import load_dataset
+from huggingface_hub import hf_hub_download
+
+config, model_id = sys.argv[1:]
+try:
+    dataset = load_dataset("locuslab/TOFU", config)["train"]
+    hf_hub_download(repo_id=model_id, filename="config.json")
+except Exception as exc:
+    print(f"      {type(exc).__name__}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"      OK: locuslab/TOFU/{config} ({len(dataset)} rows), {model_id}")
+PY
+}
+
+select_hf_endpoint() {
+    if [ "$HF_PREFLIGHT" = "0" ]; then
+        if [ "$HF_ENDPOINT_SETTING" = "auto" ]; then
+            export HF_ENDPOINT="https://huggingface.co"
+        else
+            export HF_ENDPOINT="$HF_ENDPOINT_SETTING"
+        fi
+        echo "[0/4] Hugging Face preflight skipped (HF_ENDPOINT=$HF_ENDPOINT)"
+        return
+    fi
+
+    echo "[0/4] Checking Hugging Face dataset/model access"
+    if [ "$HF_ENDPOINT_SETTING" != "auto" ]; then
+        if hf_preflight "$HF_ENDPOINT_SETTING"; then
+            export HF_ENDPOINT="$HF_ENDPOINT_SETTING"
+            return
+        fi
+        echo "Hugging Face preflight failed for HF_ENDPOINT=$HF_ENDPOINT_SETTING" >&2
+        echo "Check the endpoint, proxy, and HF_TOKEN, or set HF_PREFLIGHT=0 only when all artifacts are cached." >&2
+        exit 1
+    fi
+
+    local endpoint
+    for endpoint in "https://huggingface.co" "$HF_MIRROR_ENDPOINT"; do
+        if hf_preflight "$endpoint"; then
+            export HF_ENDPOINT="$endpoint"
+            echo "      Selected HF_ENDPOINT=$HF_ENDPOINT"
+            return
+        fi
+    done
+    echo "Could not access TOFU and the base-model config through either Hugging Face endpoint." >&2
+    echo "Set a working proxy/endpoint, e.g. HF_ENDPOINT=https://hf-mirror.com, and rerun." >&2
+    echo "Use HF_PREFLIGHT=0 only if both the dataset and model are already cached locally." >&2
+    exit 1
+}
+
+select_hf_endpoint
+
 echo "============================================================"
 echo "F2R TOFU experiment"
 echo "  mode/split       : $MODE / $SPLIT"
@@ -75,6 +137,7 @@ echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
+echo "  Hugging Face     : $HF_ENDPOINT"
 echo "============================================================"
 
 if [ ! -s "$CF_PATH" ]; then

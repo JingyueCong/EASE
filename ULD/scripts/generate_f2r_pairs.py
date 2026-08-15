@@ -81,7 +81,15 @@ def load_sources(args) -> List[Dict[str, str]]:
             "environment or provide --input-jsonl."
         ) from exc
 
-    dataset = load_dataset("locuslab/TOFU", args.split)["train"]
+    try:
+        dataset = load_dataset("locuslab/TOFU", args.split)["train"]
+    except ConnectionError as exc:
+        endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
+        raise SystemExit(
+            f"Could not download locuslab/TOFU/{args.split} from {endpoint}. "
+            "Check the server network/proxy or retry with "
+            "HF_ENDPOINT=https://hf-mirror.com."
+        ) from exc
     return [
         {
             "source_id": f"{args.split}-{idx:05d}",

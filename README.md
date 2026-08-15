@@ -145,6 +145,16 @@ export DEEPSEEK_API_KEY=...
 MODE=smoke GPU=0 bash scripts/run_f2r_tofu.sh
 ```
 
+The runner checks TOFU and the base-model configuration before generation. It
+tries Hugging Face first and then `https://hf-mirror.com`. To skip the first
+attempt on a server that cannot reach Hugging Face directly, select the mirror
+explicitly:
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com MODE=smoke GPU=0 \
+    bash scripts/run_f2r_tofu.sh
+```
+
 After the smoke run succeeds, launch the complete `forget05` experiment:
 
 ```bash
@@ -160,6 +170,9 @@ Important controls:
   require an API key.
 - `TRAIN_PY` and `EVAL_PY` can point to custom Python executables instead of
   the default `ease-f2r-train` and `ease-f2r-eval` conda environments.
+- `HF_ENDPOINT` selects a specific Hub endpoint; when unset, the runner tries
+  the official endpoint and `HF_MIRROR_ENDPOINT` in order. Set
+  `HF_PREFLIGHT=0` only when the required dataset and model are already cached.
 - Training sets `strict_retain_free=True`: no retain split is loaded for
   optimization or validation. The separate final evaluator may read retain
   data only after checkpoints are frozen.
