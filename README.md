@@ -136,6 +136,11 @@ If Conda is not installed, the setup script automatically installs Miniconda
 under `$HOME/miniconda3`. Override the location with
 `CONDA_INSTALL_PREFIX=/path/to/miniconda` if needed.
 
+The training environment pins `transformers==4.51.3` and
+`tokenizers==0.21.4`; the older ULD `4.38.1/0.15.2` tokenizer stack cannot
+parse the Llama-3.2 checkpoint's current `tokenizer.json`. Re-run the setup
+script after pulling if an environment was created by an older revision.
+
 Set HuggingFace access for the Llama-derived checkpoints and a DeepSeek key for
 counterfactual generation, then run the 8-example smoke experiment:
 

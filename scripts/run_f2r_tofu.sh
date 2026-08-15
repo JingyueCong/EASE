@@ -75,20 +75,25 @@ hf_preflight() {
     local endpoint="$1"
     echo "      Checking $endpoint"
     HF_ENDPOINT="$endpoint" "$TRAIN_PY" - \
-        "${SPLIT}_perturbed" "${HF_BASE_PREFIX}_full" <<'PY'
+        "${SPLIT}_perturbed" "${HF_BASE_PREFIX}_full" "$HF_TOKENIZER" <<'PY'
 import sys
 
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
+from transformers import AutoTokenizer
 
-config, model_id = sys.argv[1:]
+config, model_id, tokenizer_id = sys.argv[1:]
 try:
     dataset = load_dataset("locuslab/TOFU", config)["train"]
     hf_hub_download(repo_id=model_id, filename="config.json")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
 except Exception as exc:
     print(f"      {type(exc).__name__}: {exc}", file=sys.stderr)
     raise SystemExit(1)
-print(f"      OK: locuslab/TOFU/{config} ({len(dataset)} rows), {model_id}")
+print(
+    f"      OK: locuslab/TOFU/{config} ({len(dataset)} rows), "
+    f"{model_id}, tokenizer={tokenizer.__class__.__name__}"
+)
 PY
 }
 
@@ -110,7 +115,7 @@ select_hf_endpoint() {
             return
         fi
         echo "Hugging Face preflight failed for HF_ENDPOINT=$HF_ENDPOINT_SETTING" >&2
-        echo "Check the endpoint, proxy, and HF_TOKEN, or set HF_PREFLIGHT=0 only when all artifacts are cached." >&2
+        echo "Check the endpoint, proxy, HF_TOKEN, and tokenizer versions; use HF_PREFLIGHT=0 only when all artifacts are cached and parse correctly." >&2
         exit 1
     fi
 
@@ -122,7 +127,7 @@ select_hf_endpoint() {
             return
         fi
     done
-    echo "Could not access TOFU and the base-model config through either Hugging Face endpoint." >&2
+    echo "Could not load TOFU, the base-model config, and tokenizer through either Hugging Face endpoint." >&2
     echo "Set a working proxy/endpoint, e.g. HF_ENDPOINT=https://hf-mirror.com, and rerun." >&2
     echo "Use HF_PREFLIGHT=0 only if both the dataset and model are already cached locally." >&2
     exit 1

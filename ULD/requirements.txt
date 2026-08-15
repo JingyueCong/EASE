@@ -1,4 +1,4 @@
-transformers==4.38.1
+transformers==4.51.3
 lightning==2.2.1
 pytorch-lightning==2.2.1
 datasets==2.17.1
@@ -9,7 +9,7 @@ evaluate
 sacrebleu
 bitsandbytes
 rich
-peft
+peft==0.15.2
 structlog
 codetiming
 wandb
