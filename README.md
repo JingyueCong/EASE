@@ -117,6 +117,59 @@ python setup_data.py    # downloads MUSE benchmark data into HF cache
 
 ## Running TOFU
 
+### Forget-to-Retain (F2R, no retain-set access)
+
+F2R replaces EASE's retrieved `R_sub` supervision with matched
+counterfactuals generated only from the forget split. A1 memorises
+`forget + matched counterfactual`; A2 memorises only the matched
+counterfactual. Their logit difference isolates forget-specific evidence while
+the shared task/relation/style/difficulty structure cancels.
+
+On a Linux CUDA server, create isolated training and evaluation environments:
+
+```bash
+export EASE_ROOT=$(pwd)
+bash scripts/setup_f2r_server.sh
+```
+
+If Conda is not installed, the setup script automatically installs Miniconda
+under `$HOME/miniconda3`. Override the location with
+`CONDA_INSTALL_PREFIX=/path/to/miniconda` if needed.
+
+Set HuggingFace access for the Llama-derived checkpoints and a DeepSeek key for
+counterfactual generation, then run the 8-example smoke experiment:
+
+```bash
+export HF_TOKEN=...
+export DEEPSEEK_API_KEY=...
+MODE=smoke GPU=0 bash scripts/run_f2r_tofu.sh
+```
+
+After the smoke run succeeds, launch the complete `forget05` experiment:
+
+```bash
+MODE=full SPLIT=forget05 GPU=0 bash scripts/run_f2r_tofu.sh
+```
+
+Important controls:
+
+- `MODE=smoke` uses 8 forget samples and 1 epoch; its data/checkpoints are
+  isolated from `MODE=full` and must not be reported as research results.
+- `VIEWS=2` controls matched counterfactuals per forget sample.
+- `CF_PATH=/path/pairs.jsonl` reuses pre-generated supervision and does not
+  require an API key.
+- `TRAIN_PY` and `EVAL_PY` can point to custom Python executables instead of
+  the default `ease-f2r-train` and `ease-f2r-eval` conda environments.
+- Training sets `strict_retain_free=True`: no retain split is loaded for
+  optimization or validation. The separate final evaluator may read retain
+  data only after checkpoints are frozen.
+- Do not substitute TOFU's supplied `perturbed_answer` data for generated F2R
+  pairs; those examples are benchmark probes and would confound evaluation.
+
+Generated JSONL is written under `ULD/data/f2r/`, checkpoints under
+`ULD/outputs_trained_models/`, and final summaries under
+`open-unlearning/saves/eval/<task>/TOFU_SUMMARY.json`.
+
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
 ```bash
