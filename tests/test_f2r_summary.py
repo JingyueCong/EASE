@@ -17,7 +17,11 @@ class F2RSummaryTest(unittest.TestCase):
         eval_logs = {
             "forget_Q_A_Prob": {"agg_value": 0.2},
             "forget_Q_A_ROUGE": {"agg_value": 0.3},
-            "forget_truth_ratio": {"agg_value": 0.8},
+            "forget_truth_ratio": {"agg_value": 0.4},
+            "extraction_strength": {"agg_value": 0.1},
+            "exact_memorization": {"agg_value": 0.2},
+            "forget_Q_A_PARA_Prob": {"agg_value": 0.3},
+            "forget_Q_A_gibberish": {"agg_value": 0.6},
             "retain_Q_A_Prob": {"agg_value": 0.7},
             "retain_Q_A_ROUGE": {"agg_value": 0.8},
             "retain_truth_ratio": {"agg_value": 0.9},
@@ -28,9 +32,14 @@ class F2RSummaryTest(unittest.TestCase):
         )
         self.assertEqual(report["metrics"]["forget_quality"], 0.6)
         self.assertEqual(report["metrics"]["model_utility"], 0.75)
-        self.assertIsNotNone(report["derived"]["memorization_score"])
-        self.assertIsNotNone(report["derived"]["retain_utility_score"])
-        self.assertIsNotNone(report["derived"]["aggregate_score"])
+        expected_mem = summary_module.harmonic([0.9, 0.8, 0.7, 0.6])
+        expected_util = summary_module.harmonic([0.75, 0.6])
+        self.assertAlmostEqual(report["derived"]["memorization_score"], expected_mem)
+        self.assertAlmostEqual(report["derived"]["retain_utility_score"], expected_util)
+        self.assertAlmostEqual(
+            report["derived"]["aggregate_score"],
+            summary_module.harmonic([expected_mem, expected_util]),
+        )
         self.assertIn("must not be reported", report["warning"])
         self.assertFalse(report["validation"]["complete"])
 

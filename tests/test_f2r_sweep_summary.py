@@ -42,6 +42,11 @@ class F2RSweepSummaryTest(unittest.TestCase):
                                 "metrics": {
                                     "forget_quality": fq,
                                     "model_utility": mu,
+                                    "forget_truth_ratio": 0.4,
+                                    "extraction_strength": 0.1,
+                                    "exact_memorization": 0.2,
+                                    "forget_Q_A_PARA_Prob": 0.3,
+                                    "forget_Q_A_gibberish": 0.6,
                                     "forget_Q_A_ROUGE": 0.2,
                                     "retain_Q_A_ROUGE": 0.8,
                                     "privleak": -5.0,
@@ -53,11 +58,22 @@ class F2RSweepSummaryTest(unittest.TestCase):
                     writer.writerow([tag, -0.8, 0.8, 0.01, tag, report])
 
             rows = sweep_module.load_rows(manifest)
-            sweep_module.mark_pareto(rows)
             by_tag = {row["tag"]: row for row in rows}
-            self.assertTrue(by_tag["balanced"]["pareto"])
-            self.assertTrue(by_tag["high_fq"]["pareto"])
-            self.assertFalse(by_tag["dominated"]["pareto"])
+            self.assertNotEqual(by_tag["balanced"]["aggregate_score"], 0.6)
+            self.assertAlmostEqual(
+                by_tag["balanced"]["memorization_score"],
+                sweep_module.harmonic([0.9, 0.8, 0.7, 0.6]),
+            )
+
+            frontier = [
+                {"memorization_score": 0.5, "retain_utility_score": 0.5, "aggregate_score": 0.5},
+                {"memorization_score": 0.8, "retain_utility_score": 0.3, "aggregate_score": 0.44},
+                {"memorization_score": 0.4, "retain_utility_score": 0.4, "aggregate_score": 0.4},
+            ]
+            sweep_module.mark_pareto(frontier)
+            self.assertTrue(frontier[0]["pareto"])
+            self.assertTrue(frontier[1]["pareto"])
+            self.assertFalse(frontier[2]["pareto"])
 
             sweep_module.write_outputs(rows, root / "out")
             self.assertTrue((root / "out" / "F2R_SWEEP.csv").is_file())
@@ -70,6 +86,7 @@ class F2RSweepSummaryTest(unittest.TestCase):
             )
             markdown = (root / "out" / "F2R_SWEEP.md").read_text(encoding="utf-8")
             self.assertIn("Agg. ↑", markdown)
+            self.assertIn("Fluency ↑", markdown)
             self.assertIn("R.R-L ↑", markdown)
             all_metrics = (root / "out" / "F2R_SWEEP_ALL_METRICS.csv").read_text(
                 encoding="utf-8"

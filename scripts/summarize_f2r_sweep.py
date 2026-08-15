@@ -11,10 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-def harmonic(left: float, right: float) -> float:
-    left = max(float(left), 1e-12)
-    right = max(float(right), 1e-12)
-    return 2.0 / (1.0 / left + 1.0 / right)
+def harmonic(values: List[float]) -> float:
+    values = [max(float(value), 1e-12) for value in values]
+    return len(values) / sum(1.0 / value for value in values)
 
 
 def finite_metric(report: Dict[str, Any], name: str, path: Path) -> float:
@@ -28,15 +27,22 @@ def finite_metric(report: Dict[str, Any], name: str, path: Path) -> float:
     return float(value)
 
 
-def finite_derived(report: Dict[str, Any], name: str, path: Path) -> float:
-    value = report.get("derived", {}).get(name)
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(float(value))
-    ):
-        raise ValueError(f"{path}: missing/invalid derived metric {name}")
-    return float(value)
+def paper_derived(report: Dict[str, Any], path: Path) -> Dict[str, float]:
+    extraction = finite_metric(report, "extraction_strength", path)
+    exact = finite_metric(report, "exact_memorization", path)
+    paraphrased_prob = finite_metric(report, "forget_Q_A_PARA_Prob", path)
+    truth_ratio = finite_metric(report, "forget_truth_ratio", path)
+    model_utility = finite_metric(report, "model_utility", path)
+    fluency = finite_metric(report, "forget_Q_A_gibberish", path)
+    memorization = harmonic(
+        [1.0 - extraction, 1.0 - exact, 1.0 - paraphrased_prob, 1.0 - truth_ratio]
+    )
+    utility = harmonic([model_utility, fluency])
+    return {
+        "memorization_score": memorization,
+        "retain_utility_score": utility,
+        "aggregate_score": harmonic([memorization, utility]),
+    }
 
 
 def load_rows(manifest: Path) -> List[Dict[str, Any]]:
@@ -49,15 +55,15 @@ def load_rows(manifest: Path) -> List[Dict[str, Any]]:
             try:
                 with report_path.open(encoding="utf-8") as report_handle:
                     report = json.load(report_handle)
-                aggregate = finite_derived(report, "aggregate_score", report_path)
-                memorization = finite_derived(
-                    report, "memorization_score", report_path
-                )
-                retain_utility = finite_derived(
-                    report, "retain_utility_score", report_path
-                )
+                derived = paper_derived(report, report_path)
+                aggregate = derived["aggregate_score"]
+                memorization = derived["memorization_score"]
+                retain_utility = derived["retain_utility_score"]
                 fq = finite_metric(report, "forget_quality", report_path)
                 mu = finite_metric(report, "model_utility", report_path)
+                fluency = finite_metric(
+                    report, "forget_Q_A_gibberish", report_path
+                )
                 forget_rouge = finite_metric(
                     report, "forget_Q_A_ROUGE", report_path
                 )
@@ -71,16 +77,16 @@ def load_rows(manifest: Path) -> List[Dict[str, Any]]:
                     forget_rouge_percent=100.0 * forget_rouge,
                     retain_utility_score=retain_utility,
                     model_utility=mu,
+                    forget_fluency=fluency,
                     retain_rouge_percent=100.0 * retain_rouge,
-                    fq_mu_hmean=harmonic(fq, mu),
-                    all_derived=dict(report.get("derived", {})),
+                    all_derived=derived,
                     all_metrics=dict(report.get("metrics", {})),
                 )
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 row.update(
                     forget_quality=None,
                     model_utility=None,
-                    fq_mu_hmean=None,
+                    forget_fluency=None,
                     all_derived={},
                     all_metrics={},
                     error=str(exc),
@@ -90,17 +96,17 @@ def load_rows(manifest: Path) -> List[Dict[str, Any]]:
 
 
 def mark_pareto(rows: List[Dict[str, Any]]) -> None:
-    valid = [row for row in rows if row["forget_quality"] is not None]
+    valid = [row for row in rows if row.get("aggregate_score") is not None]
     for row in rows:
         row["pareto"] = False
     for candidate in valid:
         dominated = any(
             other is not candidate
-            and other["forget_quality"] >= candidate["forget_quality"]
-            and other["model_utility"] >= candidate["model_utility"]
+            and other["memorization_score"] >= candidate["memorization_score"]
+            and other["retain_utility_score"] >= candidate["retain_utility_score"]
             and (
-                other["forget_quality"] > candidate["forget_quality"]
-                or other["model_utility"] > candidate["model_utility"]
+                other["memorization_score"] > candidate["memorization_score"]
+                or other["retain_utility_score"] > candidate["retain_utility_score"]
             )
             for other in valid
         )
@@ -121,8 +127,8 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
     mark_pareto(rows)
     rows.sort(
         key=lambda row: (
-            row["fq_mu_hmean"] is not None,
-            row["fq_mu_hmean"] or -1.0,
+            row.get("aggregate_score") is not None,
+            row.get("aggregate_score") or -1.0,
         ),
         reverse=True,
     )
@@ -137,8 +143,8 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
         "forget_rouge_percent",
         "retain_utility_score",
         "model_utility",
+        "forget_fluency",
         "retain_rouge_percent",
-        "fq_mu_hmean",
         "pareto",
         "task_name",
         "report",
@@ -214,9 +220,9 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
         "",
         "> Diagnostic only: FQ and MU use the frozen retain reference. Selecting a configuration from this table means `selection_retain_access=true`.",
         "",
-        "The seven principal columns exactly follow `Table/llama3_1B.tex`. F.R-L and R.R-L are percentages. `FQ-MU H` is diagnostic only; `Pareto=yes` means no evaluated configuration is better on both FQ and MU.",
+        "Agg., Mem., and Util. follow LLM Beliefs Appendix E.2.1: `Mem=HM(1-ES,1-EM,1-ParaProb,1-TR)`, `Util=HM(MU,Fluency)`, and `Agg=HM(Mem,Util)`. F.R-L and R.R-L are percentages. `Pareto=yes` means no evaluated configuration is better on both paper Mem. and Util.",
         "",
-        "| config | w1 | w2 | filter | Agg. ↑ | Mem. ↑ | F.Q. ↑ | F.R-L ↓ | Util. ↑ | M.U. ↑ | R.R-L ↑ | FQ-MU H | Pareto | status |",
+        "| config | w1 | w2 | filter | Agg. ↑ | Mem. ↑ | Util. ↑ | F.Q. ↑ | F.R-L ↓ | M.U. ↑ | Fluency ↑ | R.R-L ↑ | Pareto | status |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|---|",
     ]
     for row in rows:
@@ -225,12 +231,12 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
             f"| {row['tag']} | {row['weight_a1']} | {row['weight_a2']} | "
             f"{row['top_filter']} | {fmt(row.get('aggregate_score'))} | "
             f"{fmt(row.get('memorization_score'))} | "
+            f"{fmt(row.get('retain_utility_score'))} | "
             f"{fmt(row['forget_quality'])} | "
             f"{fmt(row.get('forget_rouge_percent'))} | "
-            f"{fmt(row.get('retain_utility_score'))} | "
             f"{fmt(row['model_utility'])} | "
+            f"{fmt(row.get('forget_fluency'))} | "
             f"{fmt(row.get('retain_rouge_percent'))} | "
-            f"{fmt(row['fq_mu_hmean'])} | "
             f"{'yes' if row['pareto'] else 'no'} | {status} |"
         )
     lines.append("")

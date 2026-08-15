@@ -271,6 +271,23 @@ D_{KL}(p_{\theta_0}\|p_{\theta_u})}_{\text{control distortion}}
 在预先固定的网格上选择最大 \(\mathcal J\) 的配置。最终论文同时报告完整
 forget–utility Pareto curve，避免只展示用测试 retain 指标反向挑出的单点。
 
+### 9.1 固定的论文评估聚合
+
+所有 TOFU 主表、扫参诊断与最终报告统一采用 LLM Beliefs 附录 E.2.1 的层级调和平均：
+
+\[
+\mathrm{Mem}=HM(1-ES,1-EM,1-P_{para},1-TR_f),
+\]
+
+\[
+\mathrm{Util}=HM(MU,\mathrm{Fluency}),\qquad
+\mathrm{Agg}=HM(\mathrm{Mem},\mathrm{Util}).
+\]
+
+其中 Fluency 是 forget generation 被分类为 `clean` 的概率；上游框架目前仍将该字段
+命名为 `forget_Q_A_gibberish`。FQ、privacy leakage、forget/retain ROUGE 等指标继续完整
+报告，但不进入 Agg。论文不得再使用其他自定义 Mem/Util/Agg 公式与 baseline 比较。
+
 ## 10. 完整算法
 
 **输入**：冻结基础模型 \(f_{\theta_0}\)、forget set \(\mathcal F\)、views \(V\)、候选层
@@ -496,4 +513,3 @@ tests/
 6. 只有 CIRU 在至少两个 split 上表现出稳定机制信号后，再扩展 generalized
    eigenspace、3B、MUSE 和多 seed；
 7. 最终用 `scripts/build_tofu_main_row.py` 从三个完整 JSON 自动生成论文行。
-

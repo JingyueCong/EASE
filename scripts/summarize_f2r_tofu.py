@@ -38,6 +38,7 @@ EASE_EXTENDED_METRICS = [
     "extraction_strength",
     "exact_memorization",
     "forget_Q_A_gibberish",
+    "forget_Q_A_PARA_Prob",
 ]
 
 PRIMARY_METRICS = EASE_CORE_METRICS + EASE_EXTENDED_METRICS
@@ -60,7 +61,8 @@ DISPLAY_NAMES = {
     "privleak": "Privacy Leakage",
     "extraction_strength": "Extraction Strength",
     "exact_memorization": "Exact Memorization",
-    "forget_Q_A_gibberish": "Forget Gibberish",
+    "forget_Q_A_gibberish": "Forget Fluency (Clean Probability)",
+    "forget_Q_A_PARA_Prob": "Forget Paraphrased Probability",
 }
 
 # Open-Unlearning uses an inconsistent capitalisation for the three utility
@@ -124,18 +126,19 @@ def harmonic(values):
 
 
 def derived_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
-    forget_prob = metrics.get("forget_Q_A_Prob")
-    forget_rouge = metrics.get("forget_Q_A_ROUGE")
+    extraction = metrics.get("extraction_strength")
+    exact = metrics.get("exact_memorization")
+    paraphrased_prob = metrics.get("forget_Q_A_PARA_Prob")
     forget_truth = metrics.get("forget_truth_ratio")
-    retain_prob = metrics.get("retain_Q_A_Prob")
-    retain_rouge = metrics.get("retain_Q_A_ROUGE")
-    retain_truth = metrics.get("retain_truth_ratio")
-    if all(isinstance(v, (int, float)) for v in (forget_prob, forget_rouge, forget_truth)):
-        memorization = harmonic([1.0 - forget_prob, 1.0 - forget_rouge, forget_truth])
+    model_utility = metrics.get("model_utility")
+    fluency = metrics.get("forget_Q_A_gibberish")
+    memorization_inputs = (extraction, exact, paraphrased_prob, forget_truth)
+    if all(isinstance(v, (int, float)) for v in memorization_inputs):
+        memorization = harmonic([1.0 - value for value in memorization_inputs])
     else:
         memorization = None
-    if all(isinstance(v, (int, float)) for v in (retain_prob, retain_rouge, retain_truth)):
-        retain_utility = harmonic([retain_prob, retain_rouge, retain_truth])
+    if all(isinstance(v, (int, float)) for v in (model_utility, fluency)):
+        retain_utility = harmonic([model_utility, fluency])
     else:
         retain_utility = None
     return {
@@ -160,6 +163,7 @@ def build_report(eval_logs: Dict[str, Any], summary: Dict[str, Any], metadata: D
                 metadata.get("selection_retain_access", False)
             ),
             "retain_reference_usage": "post-freeze evaluation only",
+            "aggregation": "LLM Beliefs Appendix E.2.1 hierarchical harmonic mean",
         },
         "metadata": metadata,
         "validation": {
@@ -215,6 +219,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         f"- Retain reference: `{metadata.get('retain_reference')}` (post-freeze evaluation only)",
         f"- A1: `{metadata.get('a1_checkpoint')}`",
         f"- A2: `{metadata.get('a2_checkpoint')}`",
+        "- Aggregation: `Mem=HM(1-ES,1-EM,1-ParaProb,1-TR); Util=HM(MU,Fluency); Agg=HM(Mem,Util)`",
         (
             "- Inference: "
             f"`weight_a1={metadata.get('weight_a1')}, "

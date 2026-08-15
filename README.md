@@ -236,12 +236,14 @@ metrics or either required retain-reference statistic is missing/invalid, so an
 incomplete evaluation cannot be mistaken for a paper result. Smoke reports are
 visibly marked as non-reportable.
 
-For the seven-column main-table schema in `Table/llama3_1B.tex`, the derived
-scores are fixed as `Mem = H(1-forget probability, 1-forget ROUGE, forget truth
-ratio)`, `Util = H(retain probability, retain ROUGE, retain truth ratio)`, and
-`Agg = H(Mem, Util)`. `M.U.` remains Open-Unlearning's official Model Utility
-over retain, real-authors, and world-facts and is therefore not interchangeable
-with `Util`. After all three full runs, generate an auditable LaTeX row with:
+For all paper tables and sweep selection, the derived scores follow LLM Beliefs
+Appendix E.2.1: `Mem = H(1-extraction strength, 1-exact memorization,
+1-paraphrased probability, 1-forget truth ratio)`, `Util = H(model utility,
+fluency)`, and `Agg = H(Mem, Util)`. Fluency is the probability of classifier
+class 0 (`clean`) currently stored under the upstream key
+`forget_Q_A_gibberish`. FQ, privacy, and the other complete diagnostics remain
+reportable but do not enter Agg. After all three full runs, generate an
+auditable LaTeX row with:
 
 ```bash
 python scripts/build_tofu_main_row.py \
@@ -275,13 +277,26 @@ The default grid evaluates symmetric weight pairs
 `0.1`. Override them with shell-compatible lists, for example
 `WEIGHT_PAIRS="-0.6:0.4 -0.8:0.6" TOP_FILTERS="0.005 0.01"`. Each task writes
 a complete EASE-aligned evaluation. `F2R_SWEEP.{csv,md}` follows the seven
-columns in `Table/llama3_1B.tex` (Agg., Mem., F.Q., F.R-L, Util., M.U., and
-R.R-L), then includes the diagnostic FQ/MU harmonic mean and Pareto membership.
+columns in `Table/llama3_1B.tex`, with Agg./Mem./Util. computed by the fixed
+LLM Beliefs hierarchy above. Sweep rows are ranked by Agg., and Pareto
+membership is computed over paper Mem. and Util.
 `F2R_SWEEP_ALL_METRICS.{csv,md}` provides long-form exports of every derived
 and EASE/Open-Unlearning metric for every configuration.
 Because both FQ and MU inspect the frozen retain reference, these sweep reports
 are explicitly marked `selection_retain_access=true`; use them as diagnostics
 or select on a separate development setting before making retain-free claims.
+
+Reports created before the fixed LLM Beliefs aggregation was adopted can be
+updated without rerunning GPU evaluation:
+
+```bash
+python scripts/refresh_f2r_aggregation.py \
+  --root open-unlearning/saves/eval
+```
+
+Use `--dry-run` first to print the corrected Mem./Util./Agg. values without
+changing generated reports. Sweep summaries always recompute this hierarchy
+from raw metrics, so stale derived fields cannot affect ranking.
 
 If model evaluation already completed but report generation failed, reuse the
 existing `TOFU_EVAL.json` without recomputing metrics:
