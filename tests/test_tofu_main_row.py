@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,6 +13,12 @@ spec.loader.exec_module(row_module)
 
 
 class TOFUMainRowTest(unittest.TestCase):
+    def test_missing_report_has_actionable_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missing.json"
+            with self.assertRaisesRegex(FileNotFoundError, "MODE=full SPLIT=forget01"):
+                row_module.load_report(path, "forget01", False)
+
     def test_table_values_follow_declared_schema(self):
         report = {
             "derived": {

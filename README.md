@@ -230,6 +230,15 @@ python scripts/build_tofu_main_row.py \
 The exporter rejects smoke runs, incomplete evaluations, split mismatches, and
 non-finite values. It never reads the simulated/manual baseline cells.
 
+To run all three full splits sequentially and create that row in one command:
+
+```bash
+MODE=full GPU=0 bash scripts/run_f2r_tofu_all.sh
+```
+
+The wrapper stops at the first failed training/evaluation and only creates the
+LaTeX row after all three reports pass the EASE metric-completeness checks.
+
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
 ```bash

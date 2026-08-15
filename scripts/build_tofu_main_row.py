@@ -14,6 +14,11 @@ SPLITS = ("forget01", "forget05", "forget10")
 
 
 def load_report(path: Path, split: str, allow_smoke: bool) -> Dict[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"{path} does not exist; run MODE=full SPLIT={split} "
+            "bash scripts/run_f2r_tofu.sh first"
+        )
     with path.open(encoding="utf-8") as handle:
         report = json.load(handle)
     metadata = report.get("metadata", {})
@@ -78,12 +83,15 @@ def main() -> None:
     args = parser.parse_args()
 
     paths = {split: getattr(args, split) for split in SPLITS}
-    values = [
-        table_values(
-            load_report(paths[split], split, args.allow_smoke), paths[split]
-        )
-        for split in SPLITS
-    ]
+    try:
+        values = [
+            table_values(
+                load_report(paths[split], split, args.allow_smoke), paths[split]
+            )
+            for split in SPLITS
+        ]
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        parser.error(str(exc))
     row = latex_row(args.method, values) + "\n"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(row, encoding="utf-8")
