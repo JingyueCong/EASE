@@ -43,6 +43,7 @@ class F2RSweepSummaryTest(unittest.TestCase):
                                     "forget_quality": fq,
                                     "model_utility": mu,
                                     "forget_truth_ratio": 0.4,
+                                    "forget_truth_ratio_knowledge": 0.2,
                                     "extraction_strength": 0.1,
                                     "exact_memorization": 0.2,
                                     "forget_Q_A_PARA_Prob": 0.3,
@@ -62,7 +63,7 @@ class F2RSweepSummaryTest(unittest.TestCase):
             self.assertNotEqual(by_tag["balanced"]["aggregate_score"], 0.6)
             self.assertAlmostEqual(
                 by_tag["balanced"]["memorization_score"],
-                sweep_module.harmonic([0.9, 0.8, 0.7, 0.6]),
+                sweep_module.harmonic([0.9, 0.8, 0.7, 0.8]),
             )
 
             frontier = [

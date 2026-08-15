@@ -7,7 +7,13 @@ import argparse
 import json
 from pathlib import Path
 
-from summarize_f2r_tofu import derived_metrics, write_reports
+from summarize_f2r_tofu import (
+    PRIMARY_METRICS,
+    derived_metrics,
+    scalar_metrics,
+    validate_metrics,
+    write_reports,
+)
 
 
 def refresh(path: Path, dry_run: bool = False) -> None:
@@ -16,12 +22,30 @@ def refresh(path: Path, dry_run: bool = False) -> None:
     metrics = report.get("metrics")
     if not isinstance(metrics, dict):
         raise ValueError(f"{path}: missing metrics object")
+    eval_path = path.parent / "TOFU_EVAL.json"
+    eval_logs = {}
+    if eval_path.is_file():
+        with eval_path.open(encoding="utf-8") as handle:
+            eval_logs = json.load(handle)
+    metrics.update(scalar_metrics(eval_logs, metrics))
     derived = derived_metrics(metrics)
     if any(value is None for value in derived.values()):
         raise ValueError(f"{path}: missing an LLM Beliefs aggregation input")
     report["derived"] = derived
+    validation = validate_metrics(metrics, PRIMARY_METRICS)
+    report.setdefault("validation", {}).update(
+        {
+            "complete": not validation["missing"] and not validation["invalid"],
+            "required_metrics": PRIMARY_METRICS,
+            **validation,
+        }
+    )
     report.setdefault("protocol", {})["aggregation"] = (
         "LLM Beliefs Appendix E.2.1 hierarchical harmonic mean"
+    )
+    report["protocol"]["truth_ratio_variant"] = (
+        "OpenUnlearning knowledge TR = p(paraphrased correct) / "
+        "[p(paraphrased correct) + p(perturbed)]"
     )
     if not dry_run:
         write_reports(report, path.parent)

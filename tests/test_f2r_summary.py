@@ -18,6 +18,7 @@ class F2RSummaryTest(unittest.TestCase):
             "forget_Q_A_Prob": {"agg_value": 0.2},
             "forget_Q_A_ROUGE": {"agg_value": 0.3},
             "forget_truth_ratio": {"agg_value": 0.4},
+            "forget_truth_ratio_knowledge": {"agg_value": 0.25},
             "extraction_strength": {"agg_value": 0.1},
             "exact_memorization": {"agg_value": 0.2},
             "forget_Q_A_PARA_Prob": {"agg_value": 0.3},
@@ -32,7 +33,7 @@ class F2RSummaryTest(unittest.TestCase):
         )
         self.assertEqual(report["metrics"]["forget_quality"], 0.6)
         self.assertEqual(report["metrics"]["model_utility"], 0.75)
-        expected_mem = summary_module.harmonic([0.9, 0.8, 0.7, 0.6])
+        expected_mem = summary_module.harmonic([0.9, 0.8, 0.7, 0.75])
         expected_util = summary_module.harmonic([0.75, 0.6])
         self.assertAlmostEqual(report["derived"]["memorization_score"], expected_mem)
         self.assertAlmostEqual(report["derived"]["retain_utility_score"], expected_util)
@@ -54,6 +55,24 @@ class F2RSummaryTest(unittest.TestCase):
         report = summary_module.build_report({}, metrics, {"mode": "full"})
         self.assertFalse(report["validation"]["complete"])
         self.assertIn("forget_quality", report["validation"]["invalid"])
+
+    def test_derives_openunlearning_knowledge_truth_ratio_from_old_logs(self):
+        eval_logs = {
+            "forget_Q_A_PARA_Prob": {
+                "value_by_index": {
+                    "0": {"avg_loss": 1.0},
+                    "1": {"avg_loss": [2.0, 4.0]},
+                }
+            },
+            "forget_Q_A_PERT_Prob": {
+                "value_by_index": {
+                    "0": {"avg_loss": [1.0, 1.0]},
+                    "1": {"avg_loss": [3.0, 3.0]},
+                }
+            },
+        }
+        metrics = summary_module.scalar_metrics(eval_logs, {})
+        self.assertAlmostEqual(metrics["forget_truth_ratio_knowledge"], 0.5)
 
     def test_selection_access_is_recorded_from_metadata(self):
         report = summary_module.build_report(

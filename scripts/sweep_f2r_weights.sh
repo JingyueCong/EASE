@@ -7,12 +7,23 @@ MODE="${MODE:-full}"
 SPLIT="${SPLIT:-forget05}"
 GPUS="${GPUS:-${GPU:-0}}"
 WEIGHT_PAIRS="${WEIGHT_PAIRS:--0.4:0.4 -0.6:0.6 -0.8:0.8 -1.0:1.0}"
+WEIGHT_A1_GRID="${WEIGHT_A1_GRID:-}"
+WEIGHT_A2_GRID="${WEIGHT_A2_GRID:-}"
 TOP_FILTERS="${TOP_FILTERS:-0.01 0.1}"
 SWEEP_NAME="${SWEEP_NAME:-weights_$(date +%Y%m%d_%H%M%S)}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}}"
 CF_PATH="${CF_PATH:-${EASE_ROOT}/ULD/data/f2r/${SPLIT}_${MODE}.jsonl}"
 RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${SWEEP_NAME}}"
 RUNNER="${EASE_ROOT}/scripts/run_f2r_tofu.sh"
+RESUME="${RESUME:-true}"
+case "$SPLIT" in
+    forget01) DEFAULT_TARGET_AGG="0.57" ;;
+    forget05) DEFAULT_TARGET_AGG="0.58" ;;
+    forget10) DEFAULT_TARGET_AGG="0.61" ;;
+    *) DEFAULT_TARGET_AGG="" ;;
+esac
+TARGET_AGG="${TARGET_AGG:-$DEFAULT_TARGET_AGG}"
+TARGET_MARGIN="${TARGET_MARGIN:-0.005}"
 
 latest_checkpoint() {
     find "$1" -name 'checkpoint-*' -type d 2>/dev/null \
@@ -34,7 +45,22 @@ if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
 fi
 
 read -r -a GPU_LIST <<< "$GPUS"
-read -r -a PAIR_LIST <<< "$WEIGHT_PAIRS"
+if [ -n "$WEIGHT_A1_GRID" ] || [ -n "$WEIGHT_A2_GRID" ]; then
+    if [ -z "$WEIGHT_A1_GRID" ] || [ -z "$WEIGHT_A2_GRID" ]; then
+        echo "Set both WEIGHT_A1_GRID and WEIGHT_A2_GRID for a Cartesian sweep." >&2
+        exit 1
+    fi
+    read -r -a A1_LIST <<< "$WEIGHT_A1_GRID"
+    read -r -a A2_LIST <<< "$WEIGHT_A2_GRID"
+    PAIR_LIST=()
+    for a1 in "${A1_LIST[@]}"; do
+        for a2 in "${A2_LIST[@]}"; do
+            PAIR_LIST+=("${a1}:${a2}")
+        done
+    done
+else
+    read -r -a PAIR_LIST <<< "$WEIGHT_PAIRS"
+fi
 read -r -a FILTER_LIST <<< "$TOP_FILTERS"
 if [ "${#GPU_LIST[@]}" -eq 0 ]; then
     echo "GPUS must contain at least one GPU id." >&2
@@ -54,11 +80,19 @@ echo "  top filters   : $TOP_FILTERS"
 echo "  A1            : $A1_CKPT"
 echo "  A2            : $A2_CKPT"
 echo "  results       : $RESULTS_DIR"
+echo "  BS-S target   : ${TARGET_AGG:-not set}"
+echo "  target margin : $TARGET_MARGIN"
+echo "  resume        : $RESUME"
 echo "  protocol      : selection_retain_access=true"
 echo "============================================================"
 
 run_one() {
-    local gpu="$1" tag="$2" w1="$3" w2="$4" filter="$5" task_name="$6"
+    local gpu="$1" tag="$2" w1="$3" w2="$4" filter="$5" task_name="$6" report="$7"
+    if [ "$RESUME" = "true" ] && [ -s "$report" ] \
+        && grep -q '"forget_truth_ratio_knowledge"' "$report"; then
+        echo "[$(date '+%H:%M:%S')] reuse $tag (complete LLM-Beliefs report)"
+        return
+    fi
     echo "[$(date '+%H:%M:%S')] start $tag on GPU $gpu"
     MODE="$MODE" SPLIT="$SPLIT" GPU="$gpu" \
         CF_PATH="$CF_PATH" MODELS_ROOT="$MODELS_ROOT" \
@@ -96,7 +130,7 @@ for pair in "${PAIR_LIST[@]}"; do
         task_name="tofu_Llama-3.2-1B-Instruct_${SPLIT}_F2R_sweep_${SWEEP_NAME}_${tag}"
         report="${EASE_ROOT}/open-unlearning/saves/eval/${task_name}/F2R_REPORT.json"
         echo "$tag,$w1,$w2,$filter,$task_name,$report" >> "$MANIFEST"
-        run_one "$gpu" "$tag" "$w1" "$w2" "$filter" "$task_name" &
+        run_one "$gpu" "$tag" "$w1" "$w2" "$filter" "$task_name" "$report" &
         pids+=("$!")
         INDEX=$((INDEX + 1))
         if [ "${#pids[@]}" -eq "${#GPU_LIST[@]}" ]; then
@@ -114,8 +148,12 @@ if [ -z "$CONDA_BIN" ] && [ -x "${HOME}/miniconda3/bin/conda" ]; then
 fi
 CONDA_BASE="${CONDA_BASE:-$(${CONDA_BIN:-false} info --base 2>/dev/null || true)}"
 EVAL_PY="${EVAL_PY:-${CONDA_BASE}/envs/${EVAL_ENV:-ease-f2r-eval}/bin/python}"
+summary_args=(--manifest "$MANIFEST" --output-dir "$RESULTS_DIR")
+if [ -n "$TARGET_AGG" ]; then
+    summary_args+=(--target-agg "$TARGET_AGG" --target-margin "$TARGET_MARGIN")
+fi
 "$EVAL_PY" "$EASE_ROOT/scripts/summarize_f2r_sweep.py" \
-    --manifest "$MANIFEST" --output-dir "$RESULTS_DIR" || FAILURES=$((FAILURES + 1))
+    "${summary_args[@]}" || FAILURES=$((FAILURES + 1))
 
 echo "Sweep table: $RESULTS_DIR/F2R_SWEEP.md"
 if [ "$FAILURES" -gt 0 ]; then

@@ -276,7 +276,7 @@ forget–utility Pareto curve，避免只展示用测试 retain 指标反向挑�
 所有 TOFU 主表、扫参诊断与最终报告统一采用 LLM Beliefs 附录 E.2.1 的层级调和平均：
 
 \[
-\mathrm{Mem}=HM(1-ES,1-EM,1-P_{para},1-TR_f),
+\mathrm{Mem}=HM(1-ES,1-EM,1-P_{para},1-TR_{knowledge}),
 \]
 
 \[
@@ -287,6 +287,10 @@ forget–utility Pareto curve，避免只展示用测试 retain 指标反向挑�
 其中 Fluency 是 forget generation 被分类为 `clean` 的概率；上游框架目前仍将该字段
 命名为 `forget_Q_A_gibberish`。FQ、privacy leakage、forget/retain ROUGE 等指标继续完整
 报告，但不进入 Agg。论文不得再使用其他自定义 Mem/Util/Agg 公式与 baseline 比较。
+这里的 (TR_{knowledge}) 必须使用 OpenUnlearning 新定义
+(p(y_{para}\mid x)/(p(y_{para}\mid x)+p(y_{pert}\mid x)))，而不是原始 TOFU
+中对 wrong/correct ratio 使用 `closer_to_1_better` 后得到的 `forget_truth_ratio`。
+后者继续用于 FQ 的分布比较，两种 TR 在报告和代码中不得混用。
 
 ## 10. 完整算法
 

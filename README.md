@@ -238,7 +238,7 @@ visibly marked as non-reportable.
 
 For all paper tables and sweep selection, the derived scores follow LLM Beliefs
 Appendix E.2.1: `Mem = H(1-extraction strength, 1-exact memorization,
-1-paraphrased probability, 1-forget truth ratio)`, `Util = H(model utility,
+1-paraphrased probability, 1-knowledge truth ratio)`, `Util = H(model utility,
 fluency)`, and `Agg = H(Mem, Util)`. Fluency is the probability of classifier
 class 0 (`clean`) currently stored under the upstream key
 `forget_Q_A_gibberish`. FQ, privacy, and the other complete diagnostics remain
@@ -280,6 +280,43 @@ a complete EASE-aligned evaluation. `F2R_SWEEP.{csv,md}` follows the seven
 columns in `Table/llama3_1B.tex`, with Agg./Mem./Util. computed by the fixed
 LLM Beliefs hierarchy above. Sweep rows are ranked by Agg., and Pareto
 membership is computed over paper Mem. and Util.
+The sweep uses OpenUnlearning's knowledge Truth Ratio,
+`p(paraphrased_correct)/(p(paraphrased_correct)+p(perturbed))`, for Mem while
+retaining the original TOFU closeness-to-one Truth Ratio for FQ. It also records
+the BS-S Agg. target (`0.57/0.58/0.61` for forget01/05/10), the margin to that
+target, and whether a configuration beats it. Because the paper reports only
+two decimals, `Beat target=yes` conservatively requires the reported target plus
+`0.005` by default (override with `TARGET_MARGIN`).
+
+For a broader four-GPU Cartesian search on forget05, use:
+
+```bash
+MODE=full SPLIT=forget05 GPUS="0 1 2 3" \
+WEIGHT_A1_GRID="-0.4 -0.6 -0.8 -1.0 -1.2" \
+WEIGHT_A2_GRID="0.2 0.4 0.6 0.8 1.0 1.2" \
+TOP_FILTERS="0.005 0.01 0.03 0.1" RESUME=true \
+SWEEP_NAME=beat_bss_forget05 \
+  bash scripts/sweep_f2r_weights.sh
+```
+
+This is an inference-only search and therefore reuses the frozen assistants.
+It can find a better operating point but cannot guarantee beating BS-S; if its
+Pareto frontier remains below the target, the next stage must sweep training
+choices such as counterfactual views, assistant layers, LoRA rank, and learning
+rate on a development split.
+
+The recommended target-aware two-stage search is one command:
+
+```bash
+MODE=full SPLIT=forget05 GPUS="0 1 2 3" \
+SEARCH_NAME=beat_bss_forget05 RESUME=true \
+  bash scripts/sweep_f2r_beat_bss.sh
+```
+
+It evaluates a coarse Cartesian grid first (48 configurations by default). If
+none exceeds the forget05 BS-S target `Agg=0.58`, it automatically evaluates a
+27-configuration local grid around the best coarse point. Completed reports are
+reused after interruption.
 `F2R_SWEEP_ALL_METRICS.{csv,md}` provides long-form exports of every derived
 and EASE/Open-Unlearning metric for every configuration.
 Because both FQ and MU inspect the frozen retain reference, these sweep reports

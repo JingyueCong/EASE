@@ -1,0 +1,15 @@
+# @package eval.tofu.metrics.forget_truth_ratio_knowledge
+# OpenUnlearning's knowledge-oriented Truth Ratio used by the Memorization
+# score in Appendix F.1 and by LLM Beliefs Appendix E.2.1.
+defaults:
+  - .@pre_compute.forget_Q_A_PARA_Prob: forget_Q_A_PARA_Prob
+  - .@pre_compute.forget_Q_A_PERT_Prob: forget_Q_A_PERT_Prob
+
+pre_compute:
+  forget_Q_A_PARA_Prob:
+    access_key: correct
+  forget_Q_A_PERT_Prob:
+    access_key: wrong
+
+handler: truth_ratio
+aggregator: prob_mean

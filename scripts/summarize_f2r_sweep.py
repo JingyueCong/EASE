@@ -31,7 +31,7 @@ def paper_derived(report: Dict[str, Any], path: Path) -> Dict[str, float]:
     extraction = finite_metric(report, "extraction_strength", path)
     exact = finite_metric(report, "exact_memorization", path)
     paraphrased_prob = finite_metric(report, "forget_Q_A_PARA_Prob", path)
-    truth_ratio = finite_metric(report, "forget_truth_ratio", path)
+    truth_ratio = finite_metric(report, "forget_truth_ratio_knowledge", path)
     model_utility = finite_metric(report, "model_utility", path)
     fluency = finite_metric(report, "forget_Q_A_gibberish", path)
     memorization = harmonic(
@@ -45,7 +45,11 @@ def paper_derived(report: Dict[str, Any], path: Path) -> Dict[str, float]:
     }
 
 
-def load_rows(manifest: Path) -> List[Dict[str, Any]]:
+def load_rows(
+    manifest: Path,
+    target_agg: float | None = None,
+    target_margin: float = 0.0,
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     with manifest.open(encoding="utf-8", newline="") as handle:
         for item in csv.DictReader(handle):
@@ -70,6 +74,9 @@ def load_rows(manifest: Path) -> List[Dict[str, Any]]:
                 retain_rouge = finite_metric(
                     report, "retain_Q_A_ROUGE", report_path
                 )
+                required_agg = (
+                    target_agg + target_margin if target_agg is not None else None
+                )
                 row.update(
                     aggregate_score=aggregate,
                     memorization_score=memorization,
@@ -81,6 +88,15 @@ def load_rows(manifest: Path) -> List[Dict[str, Any]]:
                     retain_rouge_percent=100.0 * retain_rouge,
                     all_derived=derived,
                     all_metrics=dict(report.get("metrics", {})),
+                    target_agg=target_agg,
+                    target_margin=target_margin if target_agg is not None else None,
+                    required_agg=required_agg,
+                    delta_to_target=(aggregate - target_agg)
+                    if target_agg is not None
+                    else None,
+                    beats_target=(aggregate >= required_agg)
+                    if required_agg is not None
+                    else None,
                 )
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 row.update(
@@ -89,6 +105,13 @@ def load_rows(manifest: Path) -> List[Dict[str, Any]]:
                     forget_fluency=None,
                     all_derived={},
                     all_metrics={},
+                    target_agg=target_agg,
+                    target_margin=target_margin if target_agg is not None else None,
+                    required_agg=(target_agg + target_margin)
+                    if target_agg is not None
+                    else None,
+                    delta_to_target=None,
+                    beats_target=None,
                     error=str(exc),
                 )
             rows.append(row)
@@ -137,6 +160,11 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
         "weight_a1",
         "weight_a2",
         "top_filter",
+        "target_agg",
+        "target_margin",
+        "required_agg",
+        "delta_to_target",
+        "beats_target",
         "aggregate_score",
         "memorization_score",
         "forget_quality",
@@ -220,16 +248,19 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
         "",
         "> Diagnostic only: FQ and MU use the frozen retain reference. Selecting a configuration from this table means `selection_retain_access=true`.",
         "",
-        "Agg., Mem., and Util. follow LLM Beliefs Appendix E.2.1: `Mem=HM(1-ES,1-EM,1-ParaProb,1-TR)`, `Util=HM(MU,Fluency)`, and `Agg=HM(Mem,Util)`. F.R-L and R.R-L are percentages. `Pareto=yes` means no evaluated configuration is better on both paper Mem. and Util.",
+        "Agg., Mem., and Util. follow LLM Beliefs Appendix E.2.1: `Mem=HM(1-ES,1-EM,1-ParaProb,1-knowledge-TR)`, `Util=HM(MU,Fluency)`, and `Agg=HM(Mem,Util)`. The TR term is OpenUnlearning's `p(correct)/(p(correct)+p(perturbed))` variant. F.R-L and R.R-L are percentages. `Pareto=yes` means no evaluated configuration is better on both paper Mem. and Util.",
         "",
-        "| config | w1 | w2 | filter | Agg. ↑ | Mem. ↑ | Util. ↑ | F.Q. ↑ | F.R-L ↓ | M.U. ↑ | Fluency ↑ | R.R-L ↑ | Pareto | status |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|---|",
+        "| config | w1 | w2 | filter | Agg. ↑ | vs reported BS-S | Required Agg. | Beat target | Mem. ↑ | Util. ↑ | F.Q. ↑ | F.R-L ↓ | M.U. ↑ | Fluency ↑ | R.R-L ↑ | Pareto | status |",
+        "|---|---:|---:|---:|---:|---:|---:|:---:|---:|---:|---:|---:|---:|---:|---:|:---:|---|",
     ]
     for row in rows:
         status = "OK" if not row["error"] else row["error"].replace("|", "\\|")
         lines.append(
             f"| {row['tag']} | {row['weight_a1']} | {row['weight_a2']} | "
             f"{row['top_filter']} | {fmt(row.get('aggregate_score'))} | "
+            f"{fmt(row.get('delta_to_target'))} | "
+            f"{fmt(row.get('required_agg'))} | "
+            f"{'yes' if row.get('beats_target') else 'no'} | "
             f"{fmt(row.get('memorization_score'))} | "
             f"{fmt(row.get('retain_utility_score'))} | "
             f"{fmt(row['forget_quality'])} | "
@@ -247,8 +278,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument(
+        "--target-agg",
+        type=float,
+        help="LLM-Beliefs BS-S Agg. target for this split; beating requires a strictly larger score.",
+    )
+    parser.add_argument(
+        "--target-margin",
+        type=float,
+        default=0.005,
+        help="Safety margin for a two-decimal published target (default: 0.005).",
+    )
     args = parser.parse_args()
-    rows = load_rows(args.manifest)
+    rows = load_rows(args.manifest, args.target_agg, args.target_margin)
     write_outputs(rows, args.output_dir)
     failures = sum(bool(row["error"]) for row in rows)
     print(args.output_dir / "F2R_SWEEP.csv")

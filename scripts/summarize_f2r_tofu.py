@@ -39,6 +39,7 @@ EASE_EXTENDED_METRICS = [
     "exact_memorization",
     "forget_Q_A_gibberish",
     "forget_Q_A_PARA_Prob",
+    "forget_truth_ratio_knowledge",
 ]
 
 PRIMARY_METRICS = EASE_CORE_METRICS + EASE_EXTENDED_METRICS
@@ -63,6 +64,7 @@ DISPLAY_NAMES = {
     "exact_memorization": "Exact Memorization",
     "forget_Q_A_gibberish": "Forget Fluency (Clean Probability)",
     "forget_Q_A_PARA_Prob": "Forget Paraphrased Probability",
+    "forget_truth_ratio_knowledge": "Forget Knowledge Truth Ratio (OpenUnlearning)",
 }
 
 # Open-Unlearning uses an inconsistent capitalisation for the three utility
@@ -98,7 +100,56 @@ def scalar_metrics(eval_logs: Dict[str, Any], summary: Dict[str, Any]) -> Dict[s
             if alias in metrics:
                 metrics[canonical] = metrics[alias]
                 break
+    if "forget_truth_ratio_knowledge" not in metrics:
+        knowledge_truth_ratio = derive_knowledge_truth_ratio(eval_logs)
+        if knowledge_truth_ratio is not None:
+            metrics["forget_truth_ratio_knowledge"] = knowledge_truth_ratio
     return metrics
+
+
+def _mean_numeric(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    if isinstance(value, list):
+        values = [_mean_numeric(item) for item in value]
+        if values and all(item is not None for item in values):
+            return sum(values) / len(values)
+    return None
+
+
+def derive_knowledge_truth_ratio(eval_logs: Dict[str, Any]) -> float | None:
+    """Recover OpenUnlearning's correct/(correct+perturbed) Truth Ratio.
+
+    Older evaluation configs only emitted TOFU's closeness-to-one Truth Ratio,
+    but retained the two probability precomputations needed to reproduce the
+    newer OpenUnlearning variant exactly without another model pass.
+    """
+
+    correct = eval_logs.get("forget_Q_A_PARA_Prob", {}).get("value_by_index")
+    wrong = eval_logs.get("forget_Q_A_PERT_Prob", {}).get("value_by_index")
+    if not isinstance(correct, dict) or not isinstance(wrong, dict):
+        return None
+    if list(correct) != list(wrong):
+        return None
+    ratios = []
+    for index in correct:
+        correct_item = correct[index]
+        wrong_item = wrong[index]
+        if not isinstance(correct_item, dict) or not isinstance(wrong_item, dict):
+            continue
+        correct_loss = _mean_numeric(correct_item.get("avg_loss"))
+        wrong_loss = _mean_numeric(wrong_item.get("avg_loss"))
+        if correct_loss is None or wrong_loss is None:
+            continue
+        delta = correct_loss - wrong_loss
+        if delta >= 0:
+            exp_neg = math.exp(-delta)
+            ratios.append(exp_neg / (1.0 + exp_neg))
+        else:
+            ratios.append(1.0 / (1.0 + math.exp(delta)))
+    return sum(ratios) / len(ratios) if ratios else None
 
 
 def validate_metrics(metrics: Dict[str, Any], required: Iterable[str]) -> Dict[str, List[str]]:
@@ -129,7 +180,7 @@ def derived_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     extraction = metrics.get("extraction_strength")
     exact = metrics.get("exact_memorization")
     paraphrased_prob = metrics.get("forget_Q_A_PARA_Prob")
-    forget_truth = metrics.get("forget_truth_ratio")
+    forget_truth = metrics.get("forget_truth_ratio_knowledge")
     model_utility = metrics.get("model_utility")
     fluency = metrics.get("forget_Q_A_gibberish")
     memorization_inputs = (extraction, exact, paraphrased_prob, forget_truth)
@@ -164,6 +215,10 @@ def build_report(eval_logs: Dict[str, Any], summary: Dict[str, Any], metadata: D
             ),
             "retain_reference_usage": "post-freeze evaluation only",
             "aggregation": "LLM Beliefs Appendix E.2.1 hierarchical harmonic mean",
+            "truth_ratio_variant": (
+                "OpenUnlearning knowledge TR = p(paraphrased correct) / "
+                "[p(paraphrased correct) + p(perturbed)]"
+            ),
         },
         "metadata": metadata,
         "validation": {
@@ -219,7 +274,8 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         f"- Retain reference: `{metadata.get('retain_reference')}` (post-freeze evaluation only)",
         f"- A1: `{metadata.get('a1_checkpoint')}`",
         f"- A2: `{metadata.get('a2_checkpoint')}`",
-        "- Aggregation: `Mem=HM(1-ES,1-EM,1-ParaProb,1-TR); Util=HM(MU,Fluency); Agg=HM(Mem,Util)`",
+        "- Aggregation: `Mem=HM(1-ES,1-EM,1-ParaProb,1-knowledge-TR); Util=HM(MU,Fluency); Agg=HM(Mem,Util)`",
+        "- Truth Ratio in Mem: `OpenUnlearning knowledge TR = p(correct)/(p(correct)+p(perturbed))`",
         (
             "- Inference: "
             f"`weight_a1={metadata.get('weight_a1')}, "
