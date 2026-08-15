@@ -46,6 +46,12 @@ class F2RSummaryTest(unittest.TestCase):
         self.assertFalse(report["validation"]["complete"])
         self.assertIn("forget_quality", report["validation"]["invalid"])
 
+    def test_selection_access_is_recorded_from_metadata(self):
+        report = summary_module.build_report(
+            {}, {}, {"mode": "full", "selection_retain_access": True}
+        )
+        self.assertTrue(report["protocol"]["selection_retain_access"])
+
     def test_upstream_truth_ratio_capitalisation_is_normalised(self):
         metrics = {name: 0.5 for name in summary_module.PRIMARY_METRICS}
         for canonical, aliases in summary_module.METRIC_ALIASES.items():

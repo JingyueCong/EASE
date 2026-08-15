@@ -156,7 +156,9 @@ def build_report(eval_logs: Dict[str, Any], summary: Dict[str, Any], metadata: D
         else None,
         "protocol": {
             "training_retain_access": False,
-            "selection_retain_access": False,
+            "selection_retain_access": bool(
+                metadata.get("selection_retain_access", False)
+            ),
             "retain_reference_usage": "post-freeze evaluation only",
         },
         "metadata": metadata,
@@ -203,6 +205,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
             writer.writerow([DISPLAY_NAMES[name], name, report["metrics"].get(name)])
 
     metadata = report["metadata"]
+    protocol = report["protocol"]
     lines = [
         "# F2R TOFU evaluation",
         "",
@@ -212,7 +215,17 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         f"- Retain reference: `{metadata.get('retain_reference')}` (post-freeze evaluation only)",
         f"- A1: `{metadata.get('a1_checkpoint')}`",
         f"- A2: `{metadata.get('a2_checkpoint')}`",
-        "- Training/selection retain access: `false / false`",
+        (
+            "- Inference: "
+            f"`weight_a1={metadata.get('weight_a1')}, "
+            f"weight_a2={metadata.get('weight_a2')}, "
+            f"top_filter={metadata.get('top_filter')}`"
+        ),
+        (
+            "- Training/selection retain access: "
+            f"`{str(protocol['training_retain_access']).lower()} / "
+            f"{str(protocol['selection_retain_access']).lower()}`"
+        ),
         f"- EASE metric completeness: `{report['validation']['complete']}`",
         "",
     ]
@@ -256,6 +269,15 @@ def main() -> None:
     parser.add_argument("--a1-checkpoint", required=True)
     parser.add_argument("--a2-checkpoint", required=True)
     parser.add_argument("--retain-reference", required=True)
+    parser.add_argument("--weight-a1", type=float)
+    parser.add_argument("--weight-a2", type=float)
+    parser.add_argument("--top-filter", type=float)
+    parser.add_argument(
+        "--selection-retain-access",
+        choices=("true", "false"),
+        default="false",
+        help="Whether retain-reference metrics were inspected for model selection.",
+    )
     parser.add_argument(
         "--allow-incomplete",
         action="store_true",
@@ -270,6 +292,10 @@ def main() -> None:
         "a1_checkpoint": args.a1_checkpoint,
         "a2_checkpoint": args.a2_checkpoint,
         "retain_reference": args.retain_reference,
+        "weight_a1": args.weight_a1,
+        "weight_a2": args.weight_a2,
+        "top_filter": args.top_filter,
+        "selection_retain_access": args.selection_retain_access == "true",
     }
     report = build_report(load_json(args.eval_json), load_json(args.summary_json), metadata)
     write_reports(report, args.output_dir)

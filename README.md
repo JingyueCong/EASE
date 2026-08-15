@@ -263,6 +263,23 @@ MODE=full GPU=0 bash scripts/run_f2r_tofu_all.sh
 The wrapper stops at the first failed training/evaluation and only creates the
 LaTeX row after all three reports pass the EASE metric-completeness checks.
 
+To sweep inference weights without retraining A1/A2, run (four GPUs shown):
+
+```bash
+MODE=full SPLIT=forget05 GPUS="0 1 2 3" \
+  bash scripts/sweep_f2r_weights.sh
+```
+
+The default grid evaluates symmetric weight pairs
+`(-0.4,+0.4),(-0.6,+0.6),(-0.8,+0.8),(-1.0,+1.0)` with filters `0.01` and
+`0.1`. Override them with shell-compatible lists, for example
+`WEIGHT_PAIRS="-0.6:0.4 -0.8:0.6" TOP_FILTERS="0.005 0.01"`. Each task writes
+a complete EASE-aligned evaluation, while `F2R_SWEEP.{csv,md}` collects Forget
+Quality, Model Utility, their diagnostic harmonic mean, and Pareto membership.
+Because both FQ and MU inspect the frozen retain reference, these sweep reports
+are explicitly marked `selection_retain_access=true`; use them as diagnostics
+or select on a separate development setting before making retain-free claims.
+
 If model evaluation already completed but report generation failed, reuse the
 existing `TOFU_EVAL.json` without recomputing metrics:
 

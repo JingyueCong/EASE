@@ -79,11 +79,17 @@ TRAIN_LR="${TRAIN_LR:-1e-3}"
 TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
 EVAL_BS="${EVAL_BS:-4}"
 EVAL_OVERWRITE="${EVAL_OVERWRITE:-true}"
+SELECTION_RETAIN_ACCESS="${SELECTION_RETAIN_ACCESS:-false}"
 RETAIN_LOGS_PATH="${RETAIN_LOGS_PATH:-auto}"
 AUTO_FETCH_RETAIN_LOGS="${AUTO_FETCH_RETAIN_LOGS:-1}"
 HF_ENDPOINT_SETTING="${HF_ENDPOINT:-auto}"
 HF_MIRROR_ENDPOINT="${HF_MIRROR_ENDPOINT:-https://hf-mirror.com}"
 HF_PREFLIGHT="${HF_PREFLIGHT:-1}"
+
+case "$SELECTION_RETAIN_ACCESS" in
+    true|false) ;;
+    *) echo "SELECTION_RETAIN_ACCESS must be true or false (got: $SELECTION_RETAIN_ACCESS)" >&2; exit 1 ;;
+esac
 
 case "$MODE" in
     smoke)
@@ -190,6 +196,7 @@ echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  optimizer        : $TRAIN_OPTIM"
 echo "  eval overwrite   : $EVAL_OVERWRITE"
+echo "  selection access : $SELECTION_RETAIN_ACCESS"
 echo "  Hugging Face     : $HF_ENDPOINT"
 echo "============================================================"
 
@@ -363,6 +370,10 @@ fi
     --a1-checkpoint "$A1_CKPT" \
     --a2-checkpoint "$A2_CKPT" \
     --retain-reference "$RETAIN_LOGS_PATH" \
+    --weight-a1 "$WEIGHT_A1" \
+    --weight-a2 "$WEIGHT_A2" \
+    --top-filter "$TOP_FILTER" \
+    --selection-retain-access "$SELECTION_RETAIN_ACCESS" \
     "${summary_args[@]}"
 echo "Done. Full report: $EVAL_DIR/F2R_REPORT.md"
 echo "      EASE table: $EVAL_DIR/F2R_EASE_TABLE.md"
