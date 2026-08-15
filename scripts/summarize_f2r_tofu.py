@@ -111,14 +111,21 @@ def derived_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     forget_prob = metrics.get("forget_Q_A_Prob")
     forget_rouge = metrics.get("forget_Q_A_ROUGE")
     forget_truth = metrics.get("forget_truth_ratio")
-    utility = metrics.get("model_utility")
+    retain_prob = metrics.get("retain_Q_A_Prob")
+    retain_rouge = metrics.get("retain_Q_A_ROUGE")
+    retain_truth = metrics.get("retain_truth_ratio")
     if all(isinstance(v, (int, float)) for v in (forget_prob, forget_rouge, forget_truth)):
         memorization = harmonic([1.0 - forget_prob, 1.0 - forget_rouge, forget_truth])
     else:
         memorization = None
+    if all(isinstance(v, (int, float)) for v in (retain_prob, retain_rouge, retain_truth)):
+        retain_utility = harmonic([retain_prob, retain_rouge, retain_truth])
+    else:
+        retain_utility = None
     return {
         "memorization_score": memorization,
-        "aggregate_score": harmonic([memorization, utility]),
+        "retain_utility_score": retain_utility,
+        "aggregate_score": harmonic([memorization, retain_utility]),
     }
 
 

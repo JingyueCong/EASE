@@ -212,6 +212,24 @@ metrics or either required retain-reference statistic is missing/invalid, so an
 incomplete evaluation cannot be mistaken for a paper result. Smoke reports are
 visibly marked as non-reportable.
 
+For the seven-column main-table schema in `Table/llama3_1B.tex`, the derived
+scores are fixed as `Mem = H(1-forget probability, 1-forget ROUGE, forget truth
+ratio)`, `Util = H(retain probability, retain ROUGE, retain truth ratio)`, and
+`Agg = H(Mem, Util)`. `M.U.` remains Open-Unlearning's official Model Utility
+over retain, real-authors, and world-facts and is therefore not interchangeable
+with `Util`. After all three full runs, generate an auditable LaTeX row with:
+
+```bash
+python scripts/build_tofu_main_row.py \
+  --forget01 open-unlearning/saves/eval/<forget01-task>/F2R_REPORT.json \
+  --forget05 open-unlearning/saves/eval/<forget05-task>/F2R_REPORT.json \
+  --forget10 open-unlearning/saves/eval/<forget10-task>/F2R_REPORT.json \
+  --method CIRU --output Table/ciru_llama3_1B_row.tex
+```
+
+The exporter rejects smoke runs, incomplete evaluations, split mismatches, and
+non-finite values. It never reads the simulated/manual baseline cells.
+
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
 ```bash

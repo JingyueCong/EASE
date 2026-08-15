@@ -18,6 +18,9 @@ class F2RSummaryTest(unittest.TestCase):
             "forget_Q_A_Prob": {"agg_value": 0.2},
             "forget_Q_A_ROUGE": {"agg_value": 0.3},
             "forget_truth_ratio": {"agg_value": 0.8},
+            "retain_Q_A_Prob": {"agg_value": 0.7},
+            "retain_Q_A_ROUGE": {"agg_value": 0.8},
+            "retain_truth_ratio": {"agg_value": 0.9},
         }
         summary = {"model_utility": 0.75, "forget_quality": 0.6}
         report = summary_module.build_report(
@@ -26,6 +29,7 @@ class F2RSummaryTest(unittest.TestCase):
         self.assertEqual(report["metrics"]["forget_quality"], 0.6)
         self.assertEqual(report["metrics"]["model_utility"], 0.75)
         self.assertIsNotNone(report["derived"]["memorization_score"])
+        self.assertIsNotNone(report["derived"]["retain_utility_score"])
         self.assertIsNotNone(report["derived"]["aggregate_score"])
         self.assertIn("must not be reported", report["warning"])
         self.assertFalse(report["validation"]["complete"])
