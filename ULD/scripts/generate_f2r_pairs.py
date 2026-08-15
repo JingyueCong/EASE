@@ -226,7 +226,7 @@ def main() -> None:
     source.add_argument("--input-jsonl")
     parser.add_argument("--output", required=True)
     parser.add_argument("--backend", choices=["openai", "mock"], default="openai")
-    parser.add_argument("--model", default="deepseek-chat")
+    parser.add_argument("--model", default="deepseek-v4-flash")
     parser.add_argument("--base-url", default="https://api.deepseek.com")
     parser.add_argument("--api-key-env", default="DEEPSEEK_API_KEY")
     parser.add_argument("--views", type=int, default=2)

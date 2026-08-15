@@ -186,6 +186,9 @@ Important controls:
   first requests enforced JSON and falls back to prompt-only JSON if an
   OpenAI-compatible endpoint rejects `response_format` with HTTP 400. Every
   returned record is still parsed and schema-validated before it is written.
+- `CF_MODEL` defaults to `deepseek-v4-flash`. The legacy `deepseek-chat` and
+  `deepseek-reasoner` identifiers were retired by DeepSeek in July 2026; set
+  `CF_MODEL=deepseek-v4-pro` only when intentionally comparing generators.
 - Training sets `strict_retain_free=True`: no retain split is loaded for
   optimization or validation. The separate final evaluator may read retain
   data only after checkpoints are frozen.
