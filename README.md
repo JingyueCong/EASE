@@ -189,6 +189,11 @@ Important controls:
 - `CF_MODEL` defaults to `deepseek-v4-flash`. The legacy `deepseek-chat` and
   `deepseek-reasoner` identifiers were retired by DeepSeek in July 2026; set
   `CF_MODEL=deepseek-v4-pro` only when intentionally comparing generators.
+- `CF_API_KEY_ENV` names the environment variable containing the selected
+  generator credential (default: `DEEPSEEK_API_KEY`). This permits another
+  OpenAI-compatible endpoint without copying its credential into a misleading
+  variable name. For a shell-compatible local `.env`, load and export it with
+  `set -a; source .env; set +a`; `.env` is ignored by Git.
 - Training sets `strict_retain_free=True`: no retain split is loaded for
   optimization or validation. The separate final evaluator may read retain
   data only after checkpoints are frozen.

@@ -21,6 +21,7 @@ VIEWS="${VIEWS:-2}"
 CF_MODEL="${CF_MODEL:-deepseek-v4-flash}"
 CF_BASE_URL="${CF_BASE_URL:-https://api.deepseek.com}"
 CF_JSON_MODE="${CF_JSON_MODE:-auto}"
+CF_API_KEY_ENV="${CF_API_KEY_ENV:-DEEPSEEK_API_KEY}"
 CF_ROOT="${CF_ROOT:-${EASE_ROOT}/ULD/data/f2r}"
 CF_PATH="${CF_PATH:-${CF_ROOT}/${SPLIT}_${MODE}.jsonl}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}}"
@@ -144,7 +145,7 @@ echo "F2R TOFU experiment"
 echo "  mode/split       : $MODE / $SPLIT"
 echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
-echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE"
+echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE (key=$CF_API_KEY_ENV)"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  optimizer        : $TRAIN_OPTIM"
@@ -153,8 +154,8 @@ echo "  Hugging Face     : $HF_ENDPOINT"
 echo "============================================================"
 
 if [ ! -s "$CF_PATH" ]; then
-    if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-        echo "DEEPSEEK_API_KEY is required to generate $CF_PATH" >&2
+    if [ -z "${!CF_API_KEY_ENV:-}" ]; then
+        echo "$CF_API_KEY_ENV is required to generate $CF_PATH" >&2
         exit 1
     fi
     echo "[1/4] Generating matched counterfactual supervision"
@@ -166,6 +167,7 @@ if [ ! -s "$CF_PATH" ]; then
         --backend openai \
         --model "$CF_MODEL" \
         --base-url "$CF_BASE_URL" \
+        --api-key-env "$CF_API_KEY_ENV" \
         --json-mode "$CF_JSON_MODE" \
         --views "$VIEWS" \
         "${limit_args[@]}"
