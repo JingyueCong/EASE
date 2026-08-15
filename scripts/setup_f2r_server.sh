@@ -55,7 +55,8 @@ echo "[2/4] Installing EASE training package and generator dependency"
 "$CONDA_BIN" run -n "$TRAIN_ENV" python -m pip install \
     -r "$EASE_ROOT/ULD/requirements.txt" \
     accelerate==0.31.0 bitsandbytes==0.43.1 deepspeed==0.14.2 \
-    pandas==2.2.2 peft==0.11.1 openai
+    numpy==1.26.4 pandas==2.2.2 peft==0.11.1 \
+    setuptools==69.5.1 wheel==0.43.0 openai
 "$CONDA_BIN" run -n "$TRAIN_ENV" python -m pip install \
     -e "$EASE_ROOT/ULD" --no-deps
 
@@ -64,12 +65,12 @@ if ! "$CONDA_BIN" env list | awk '{print $1}' | grep -qx "$EVAL_ENV"; then
     "$CONDA_BIN" create -n "$EVAL_ENV" python=3.11 pip -y
 fi
 "$CONDA_BIN" run -n "$EVAL_ENV" python -m pip install \
-    -r "$EASE_ROOT/open-unlearning/requirements.txt" peft
+    -r "$EASE_ROOT/open-unlearning/requirements.txt" peft==0.15.2
 "$CONDA_BIN" run -n "$EVAL_ENV" python -m pip install -e "$EASE_ROOT/open-unlearning"
 
 echo "[4/4] Environment check"
 "$CONDA_BIN" run -n "$TRAIN_ENV" python -c \
-    'import torch,transformers,datasets,peft; print("train:", torch.__version__, transformers.__version__, "cuda=", torch.cuda.is_available())'
+    'import numpy,torch,transformers,datasets,peft,pkg_resources; a=torch.from_numpy(numpy.zeros(1)); print("train:", torch.__version__, transformers.__version__, "numpy=", numpy.__version__, "cuda=", torch.cuda.is_available())'
 "$CONDA_BIN" run -n "$EVAL_ENV" python -c \
     'import torch,transformers,datasets,peft; print("eval:", torch.__version__, transformers.__version__, "cuda=", torch.cuda.is_available())'
 
