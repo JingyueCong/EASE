@@ -33,7 +33,20 @@ class F2RSweepSummaryTest(unittest.TestCase):
                     report = root / f"{tag}.json"
                     report.write_text(
                         json.dumps(
-                            {"metrics": {"forget_quality": fq, "model_utility": mu}}
+                            {
+                                "derived": {
+                                    "aggregate_score": 0.6,
+                                    "memorization_score": 0.7,
+                                    "retain_utility_score": 0.55,
+                                },
+                                "metrics": {
+                                    "forget_quality": fq,
+                                    "model_utility": mu,
+                                    "forget_Q_A_ROUGE": 0.2,
+                                    "retain_Q_A_ROUGE": 0.8,
+                                    "privleak": -5.0,
+                                },
+                            }
                         ),
                         encoding="utf-8",
                     )
@@ -49,6 +62,19 @@ class F2RSweepSummaryTest(unittest.TestCase):
             sweep_module.write_outputs(rows, root / "out")
             self.assertTrue((root / "out" / "F2R_SWEEP.csv").is_file())
             self.assertTrue((root / "out" / "F2R_SWEEP.md").is_file())
+            self.assertTrue(
+                (root / "out" / "F2R_SWEEP_ALL_METRICS.csv").is_file()
+            )
+            self.assertTrue(
+                (root / "out" / "F2R_SWEEP_ALL_METRICS.md").is_file()
+            )
+            markdown = (root / "out" / "F2R_SWEEP.md").read_text(encoding="utf-8")
+            self.assertIn("Agg. ↑", markdown)
+            self.assertIn("R.R-L ↑", markdown)
+            all_metrics = (root / "out" / "F2R_SWEEP_ALL_METRICS.csv").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("metrics/privleak", all_metrics)
 
 
 if __name__ == "__main__":

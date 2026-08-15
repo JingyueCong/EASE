@@ -274,8 +274,11 @@ The default grid evaluates symmetric weight pairs
 `(-0.4,+0.4),(-0.6,+0.6),(-0.8,+0.8),(-1.0,+1.0)` with filters `0.01` and
 `0.1`. Override them with shell-compatible lists, for example
 `WEIGHT_PAIRS="-0.6:0.4 -0.8:0.6" TOP_FILTERS="0.005 0.01"`. Each task writes
-a complete EASE-aligned evaluation, while `F2R_SWEEP.{csv,md}` collects Forget
-Quality, Model Utility, their diagnostic harmonic mean, and Pareto membership.
+a complete EASE-aligned evaluation. `F2R_SWEEP.{csv,md}` follows the seven
+columns in `Table/llama3_1B.tex` (Agg., Mem., F.Q., F.R-L, Util., M.U., and
+R.R-L), then includes the diagnostic FQ/MU harmonic mean and Pareto membership.
+`F2R_SWEEP_ALL_METRICS.{csv,md}` provides long-form exports of every derived
+and EASE/Open-Unlearning metric for every configuration.
 Because both FQ and MU inspect the frozen retain reference, these sweep reports
 are explicitly marked `selection_retain_access=true`; use them as diagnostics
 or select on a separate development setting before making retain-free claims.
