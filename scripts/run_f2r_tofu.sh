@@ -4,6 +4,16 @@
 set -euo pipefail
 
 EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ENV_FILE="${ENV_FILE:-${EASE_ROOT}/.env}"
+if [ "${LOAD_DOTENV:-1}" = "1" ] && [ -f "$ENV_FILE" ]; then
+    echo "Loading environment: $ENV_FILE"
+    set -a
+    # .env is a trusted, shell-compatible local file and is ignored by Git.
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+fi
+
 CONDA_BIN="${CONDA_BIN:-$(command -v conda || true)}"
 if [ -z "$CONDA_BIN" ] && [ -x "${HOME}/miniconda3/bin/conda" ]; then
     CONDA_BIN="${HOME}/miniconda3/bin/conda"
@@ -18,11 +28,39 @@ MODE="${MODE:-smoke}"                 # smoke | full
 SPLIT="${SPLIT:-forget05}"            # forget01 | forget05 | forget10
 GPU="${GPU:-0}"
 VIEWS="${VIEWS:-2}"
-CF_MODEL="${CF_MODEL:-deepseek-v4-flash}"
-CF_BASE_URL="${CF_BASE_URL:-https://api.deepseek.com}"
+CF_PROVIDER="${CF_PROVIDER:-auto}"
+if [ "$CF_PROVIDER" = "auto" ]; then
+    if [ -n "${OPENAI_BASE_URL:-${OPENAI_API_BASE:-}}" ] \
+        && [ -n "${OPENAI_API_KEY:-}" ] \
+        && [ -n "${GENERATION_MODEL:-${DEFAULT_MODEL:-}}" ]; then
+        CF_PROVIDER="azure"
+    else
+        CF_PROVIDER="deepseek"
+    fi
+fi
+
+case "$CF_PROVIDER" in
+    azure)
+        CF_MODEL="${CF_MODEL:-${GENERATION_MODEL:-${DEFAULT_MODEL:-}}}"
+        CF_BASE_URL="${CF_BASE_URL:-${OPENAI_BASE_URL:-${OPENAI_API_BASE:-}}}"
+        CF_API_KEY_ENV="${CF_API_KEY_ENV:-OPENAI_API_KEY}"
+        CF_TEMPERATURE="${CF_TEMPERATURE:-1.0}"
+        ;;
+    deepseek)
+        CF_MODEL="${CF_MODEL:-deepseek-v4-flash}"
+        CF_BASE_URL="${CF_BASE_URL:-https://api.deepseek.com}"
+        CF_API_KEY_ENV="${CF_API_KEY_ENV:-DEEPSEEK_API_KEY}"
+        CF_TEMPERATURE="${CF_TEMPERATURE:-0.8}"
+        ;;
+    *) echo "CF_PROVIDER must be auto, azure, or deepseek (got: $CF_PROVIDER)" >&2; exit 1 ;;
+esac
+
+if [ -z "$CF_MODEL" ] || [ -z "$CF_BASE_URL" ]; then
+    echo "Incomplete $CF_PROVIDER counterfactual API configuration." >&2
+    echo "Set CF_MODEL/CF_BASE_URL or the provider-specific .env variables." >&2
+    exit 1
+fi
 CF_JSON_MODE="${CF_JSON_MODE:-auto}"
-CF_API_KEY_ENV="${CF_API_KEY_ENV:-DEEPSEEK_API_KEY}"
-CF_TEMPERATURE="${CF_TEMPERATURE:-0.8}"
 CF_ROOT="${CF_ROOT:-${EASE_ROOT}/ULD/data/f2r}"
 CF_PATH="${CF_PATH:-${CF_ROOT}/${SPLIT}_${MODE}.jsonl}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}}"
@@ -146,6 +184,7 @@ echo "F2R TOFU experiment"
 echo "  mode/split       : $MODE / $SPLIT"
 echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
+echo "  CF provider      : $CF_PROVIDER"
 echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE / temp=$CF_TEMPERATURE (key=$CF_API_KEY_ENV)"
 echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"

@@ -151,6 +151,15 @@ export DEEPSEEK_API_KEY=...
 MODE=smoke GPU=0 bash scripts/run_f2r_tofu.sh
 ```
 
+Alternatively, copy `.env.example` to the Git-ignored `.env`, fill in local
+credentials, and run the same command without manually exporting them. The
+runner loads `${EASE_ROOT}/.env` automatically. With `CF_PROVIDER=auto`, a
+complete `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`GENERATION_MODEL` configuration is
+selected as Azure; otherwise DeepSeek is used. Set `CF_PROVIDER` explicitly
+when both providers are configured. Use `ENV_FILE=/path/to/file` to select a
+different file or `LOAD_DOTENV=0` to disable loading. Because the file is
+shell-sourced, it must be trusted and shell-compatible.
+
 The runner checks TOFU and the base-model configuration before generation. It
 tries Hugging Face first and then `https://hf-mirror.com`. To skip the first
 attempt on a server that cannot reach Hugging Face directly, select the mirror
@@ -192,8 +201,8 @@ Important controls:
 - `CF_API_KEY_ENV` names the environment variable containing the selected
   generator credential (default: `DEEPSEEK_API_KEY`). This permits another
   OpenAI-compatible endpoint without copying its credential into a misleading
-  variable name. For a shell-compatible local `.env`, load and export it with
-  `set -a; source .env; set +a`; `.env` is ignored by Git.
+  variable name. `.env` is ignored by Git and automatically loaded by the F2R
+  runner.
 - `CF_TEMPERATURE` defaults to `0.8`; set it to a value supported by the chosen
   deployment (for example `1.0` when an Azure deployment rejects custom
   sampling temperatures).
