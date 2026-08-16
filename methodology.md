@@ -523,3 +523,47 @@ tests/
 6. 只有 CIRU 在至少两个 split 上表现出稳定机制信号后，再扩展 generalized
    eigenspace、3B、MUSE 和多 seed；
 7. 最终用 `scripts/build_tofu_main_row.py` 从三个完整 JSON 自动生成论文行。
+
+## 18. 已实现的 F2R-AG 过渡实验
+
+为验证“共享残差抵消”和“输入相关干预”是否能先移动 F2R 的 Pareto 前沿，代码中加入
+一个仍工作在 logit 空间的过渡方法 F2R-AG。它不是第 4--8 节定义的完整 CIRU，也不应
+作为 DiD 因果识别结果汇报。
+
+### 18.1 Residual alignment
+
+在 matched counterfactual (C^+) 的答案 token 上，对 top-filter 支持集内的 A1/A2
+logits 分别中心化为 \(\bar z_1,\bar z_2\)。对每个词表维度学习带岭约束的对角尺度：
+
+\[
+s_v=\frac{\sum_{C^+}\bar z_{2,v}
+          \left(-\frac{w_1}{w_2}\bar z_{1,v}\right)+\lambda}
+         {\sum_{C^+}\bar z_{2,v}^2+\lambda}.
+\]
+
+低观测 token 回退到 \(s_v=1\)，并对尺度裁剪以避免稀疏维度放大。推理时
+
+\[
+z'_2=z_2+(s-1)\odot\bar z_2,
+\qquad \Delta_{\mathrm{align}}=w_1z_1+w_2z'_2.
+\]
+
+该目标直接使 (C^+) 上的加权共享残差趋近于零，但因 (s) 是词表维度校准而不是新的
+全局 (w_2)，它不等价于继续做标量权重扫参。
+
+### 18.2 Learned gate
+
+门控器使用六个逐 token 残差统计量：组合残差 RMS/最大值、A1/A2 RMS、A1--A2
+cosine 和两者 RMS 比值。用 forget 答案作为正类，用 (C^+) 与 (C^-) 作为负类，
+训练带 L2 正则的逻辑门控器：
+
+\[
+g_\phi(x_t)=\sigma(\phi^\top \operatorname{standardize}(f_t)+b),
+\qquad z_{t}^{\mathrm{final}}=z_t^{\mathrm{base}}+g_\phi(x_t)\Delta_t.
+\]
+
+训练 alignment 和 gate 都不访问真实 retain 样本或 retain 指标。完整阶梯固定同一组
+A1/A2 checkpoint、(w_1,w_2) 与 top-filter，顺序评估
+`F2R -> +Alignment -> +Gate -> +Alignment+Gate`。最终 LLM-Beliefs/OpenUnlearning
+指标比较仍会查看冻结 retain reference，因此该开发实验明确标为
+`selection_retain_access=true`。

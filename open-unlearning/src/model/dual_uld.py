@@ -24,6 +24,8 @@ from torch.nn import CrossEntropyLoss
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
+from model.f2r_calibration import calibrated_residual, load_calibration
+
 logger = logging.getLogger("model.dual_uld")
 
 
@@ -91,6 +93,9 @@ class DualULDForCausalLM(LlamaForCausalLM):
         weight_a1: float = -1.0,
         weight_a2: float = 1.0,
         top_logit_filter: float = 0.1,
+        calibration_path: Optional[str] = None,
+        alignment_enabled: bool = False,
+        gate_enabled: bool = False,
         **kwargs,
     ):
         for name, val in (("a1_path", a1_path), ("a2_path", a2_path)):
@@ -143,6 +148,21 @@ class DualULDForCausalLM(LlamaForCausalLM):
         model._dual_w1 = float(weight_a1)
         model._dual_w2 = float(weight_a2)
         model._dual_top_filter = float(top_logit_filter)
+        model._dual_alignment_enabled = bool(alignment_enabled)
+        model._dual_gate_enabled = bool(gate_enabled)
+        calibration = None
+        if model._dual_alignment_enabled or model._dual_gate_enabled:
+            if not calibration_path or calibration_path == "null":
+                raise ValueError(
+                    "F2R alignment/gating requires model.model_args.calibration_path"
+                )
+            calibration = load_calibration(
+                calibration_path,
+                device=device,
+                dtype=next(model.parameters()).dtype,
+                vocab_size=model.config.vocab_size,
+            )
+        object.__setattr__(model, "_dual_calibration", calibration)
 
         model.generation_config.use_cache = False
         model.config.use_cache = False
@@ -151,7 +171,9 @@ class DualULDForCausalLM(LlamaForCausalLM):
             f"DualULDForCausalLM ready: base={pretrained_model_name_or_path} "
             f"a1={a1_path} a2={a2_path} "
             f"weight_a1={weight_a1} weight_a2={weight_a2} "
-            f"top_logit_filter={top_logit_filter}"
+            f"top_logit_filter={top_logit_filter} "
+            f"alignment={alignment_enabled} gate={gate_enabled} "
+            f"calibration={calibration_path}"
         )
         return model
 
@@ -214,8 +236,21 @@ class DualULDForCausalLM(LlamaForCausalLM):
             base_logits, mask = _relative_top_filter(base_logits, self._dual_top_filter)
             a1_logits = a1_logits.clone(); a1_logits[mask] = 0.0
             a2_logits = a2_logits.clone(); a2_logits[mask] = 0.0
+            active = ~mask
+        else:
+            active = torch.ones_like(base_logits, dtype=torch.bool)
 
-        logits = base_logits + self._dual_w1 * a1_logits + self._dual_w2 * a2_logits
+        delta, _ = calibrated_residual(
+            a1_logits,
+            a2_logits,
+            active,
+            self._dual_w1,
+            self._dual_w2,
+            self._dual_calibration,
+            alignment_enabled=self._dual_alignment_enabled,
+            gate_enabled=self._dual_gate_enabled,
+        )
+        logits = base_logits + delta
 
         loss = None
         if labels is not None:

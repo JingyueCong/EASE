@@ -270,6 +270,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         "",
         f"- Mode: `{metadata.get('mode')}`",
         f"- Split: `{metadata.get('split')}`",
+        f"- Variant: `{metadata.get('variant', 'F2R')}`",
         f"- Base model: `{metadata.get('base_model')}`",
         f"- Retain reference: `{metadata.get('retain_reference')}` (post-freeze evaluation only)",
         f"- A1: `{metadata.get('a1_checkpoint')}`",
@@ -296,6 +297,12 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
             f"`weight_a1={metadata.get('weight_a1')}, "
             f"weight_a2={metadata.get('weight_a2')}, "
             f"top_filter={metadata.get('top_filter')}`"
+        ),
+        (
+            "- Calibration: "
+            f"`alignment={metadata.get('alignment_enabled')}, "
+            f"gate={metadata.get('gate_enabled')}, "
+            f"artifact={metadata.get('calibration_path')}`"
         ),
         (
             "- Training/selection retain access: "
@@ -348,6 +355,10 @@ def main() -> None:
     parser.add_argument("--weight-a1", type=float)
     parser.add_argument("--weight-a2", type=float)
     parser.add_argument("--top-filter", type=float)
+    parser.add_argument("--variant", default="F2R")
+    parser.add_argument("--calibration-path", default="null")
+    parser.add_argument("--alignment-enabled", choices=("true", "false"), default="false")
+    parser.add_argument("--gate-enabled", choices=("true", "false"), default="false")
     parser.add_argument("--views", type=int)
     parser.add_argument("--a1-num-layer", type=int)
     parser.add_argument("--a2-num-layer", type=int)
@@ -386,6 +397,10 @@ def main() -> None:
         "weight_a1": args.weight_a1,
         "weight_a2": args.weight_a2,
         "top_filter": args.top_filter,
+        "variant": args.variant,
+        "calibration_path": args.calibration_path,
+        "alignment_enabled": args.alignment_enabled == "true",
+        "gate_enabled": args.gate_enabled == "true",
         "views": args.views,
         "a1_num_layer": args.a1_num_layer,
         "a2_num_layer": args.a2_num_layer,

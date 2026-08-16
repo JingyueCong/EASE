@@ -338,7 +338,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--sweep-kind",
-        choices=("inference", "training"),
+        choices=("inference", "training", "method-ladder"),
         default="inference",
     )
     args = parser.parse_args()

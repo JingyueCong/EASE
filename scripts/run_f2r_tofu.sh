@@ -76,6 +76,10 @@ LORA_DROPOUT="${LORA_DROPOUT:-0.05}"
 WEIGHT_A1="${WEIGHT_A1:--1.0}"
 WEIGHT_A2="${WEIGHT_A2:-1.0}"
 TOP_FILTER="${TOP_FILTER:-0.01}"
+F2R_VARIANT="${F2R_VARIANT:-F2R}"
+CALIBRATION_PATH="${CALIBRATION_PATH:-null}"
+ALIGNMENT_ENABLED="${ALIGNMENT_ENABLED:-false}"
+GATE_ENABLED="${GATE_ENABLED:-false}"
 TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
@@ -95,6 +99,18 @@ case "$SELECTION_RETAIN_ACCESS" in
     true|false) ;;
     *) echo "SELECTION_RETAIN_ACCESS must be true or false (got: $SELECTION_RETAIN_ACCESS)" >&2; exit 1 ;;
 esac
+for flag_name in ALIGNMENT_ENABLED GATE_ENABLED; do
+    flag_value="${!flag_name}"
+    case "$flag_value" in
+        true|false) ;;
+        *) echo "$flag_name must be true or false (got: $flag_value)" >&2; exit 1 ;;
+    esac
+done
+if { [ "$ALIGNMENT_ENABLED" = "true" ] || [ "$GATE_ENABLED" = "true" ]; } \
+    && [ ! -s "$CALIBRATION_PATH" ]; then
+    echo "Missing calibration artifact: $CALIBRATION_PATH" >&2
+    exit 1
+fi
 
 case "$MODE" in
     smoke)
@@ -225,6 +241,8 @@ echo "  A2 assistant     : layers=$A2_NUM_LAYER, LoRA=$A2_LORA_R/$A2_LORA_ALPHA,
 echo "  A1 optimization  : lr=$A1_TRAIN_LR, epochs=$A1_TRAIN_EP, uniform-weight=$A1_RETAIN_WEIGHT, bs/ga=$A1_TRAIN_BS/$A1_TRAIN_GA, seed=$A1_SEED"
 echo "  A2 optimization  : lr=$A2_TRAIN_LR, epochs=$A2_TRAIN_EP, uniform-weight=$A2_RETAIN_WEIGHT, bs/ga=$A2_TRAIN_BS/$A2_TRAIN_GA, seed=$A2_SEED"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
+echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
+echo "  calibration      : $CALIBRATION_PATH"
 echo "  optimizer        : $TRAIN_OPTIM"
 echo "  eval overwrite   : $EVAL_OVERWRITE"
 echo "  selection access : $SELECTION_RETAIN_ACCESS"
@@ -411,6 +429,9 @@ fi
         model.model_args.weight_a1="$WEIGHT_A1" \
         model.model_args.weight_a2="$WEIGHT_A2" \
         model.model_args.top_logit_filter="$TOP_FILTER" \
+        model.model_args.calibration_path="$CALIBRATION_PATH" \
+        model.model_args.alignment_enabled="$ALIGNMENT_ENABLED" \
+        model.model_args.gate_enabled="$GATE_ENABLED" \
         model.model_args.attn_implementation=sdpa \
         model.tokenizer_args.pretrained_model_name_or_path="$HF_TOKENIZER" \
         forget_split="$SPLIT" \
@@ -444,6 +465,10 @@ fi
     --weight-a1 "$WEIGHT_A1" \
     --weight-a2 "$WEIGHT_A2" \
     --top-filter "$TOP_FILTER" \
+    --variant "$F2R_VARIANT" \
+    --calibration-path "$CALIBRATION_PATH" \
+    --alignment-enabled "$ALIGNMENT_ENABLED" \
+    --gate-enabled "$GATE_ENABLED" \
     --views "$VIEWS" \
     --a1-num-layer "$A1_NUM_LAYER" \
     --a2-num-layer "$A2_NUM_LAYER" \

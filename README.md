@@ -362,6 +362,30 @@ Because both FQ and MU inspect the frozen retain reference, these sweep reports
 are explicitly marked `selection_retain_access=true`; use them as diagnostics
 or select on a separate development setting before making retain-free claims.
 
+### F2R residual-alignment / learned-gate ladder
+
+After freezing the `lr1e3_e5` assistants and the best inference operating point,
+run the four methods sequentially:
+
+```bash
+MODE=full SPLIT=forget05 GPU=0 RESUME=true \
+  bash scripts/run_f2r_alignment_gate_ladder.sh
+```
+
+The stages are `F2R`, `F2R_Alignment`, `F2R_Gate`, and
+`F2R_AlignmentGate`. Alignment learns a ridge-regularised vocabulary-diagonal
+A2 calibration using matched counterfactual answers only. The logistic gate is
+trained token-wise with forget answers as positives and generated C+/C- answers
+as negatives. Neither calibration uses retain examples or retain metrics.
+The final benchmark comparison does use the frozen retain reference and is
+therefore labelled `selection_retain_access=true`.
+
+The runner waits until the selected GPU has at least 14 GiB free, reuses every
+completed stage after interruption, and writes the comparison to
+`open-unlearning/saves/sweeps/forget05_alignment_gate/F2R_SWEEP.md`. Override
+`MODELS_ROOT`, `MIN_FREE_GPU_MIB`, or `CALIBRATION_BS` when needed. Use
+`DRY_RUN=true` to inspect the exact stage order without loading a model.
+
 Reports created before the fixed LLM Beliefs aggregation was adopted can be
 updated without rerunning GPU evaluation:
 
