@@ -292,6 +292,12 @@ forget–utility Pareto curve，避免只展示用测试 retain 指标反向挑�
 中对 wrong/correct ratio 使用 `closer_to_1_better` 后得到的 `forget_truth_ratio`。
 后者继续用于 FQ 的分布比较，两种 TR 在报告和代码中不得混用。
 
+训练超参选择必须记录 A1/A2 各自的层数、LoRA rank/alpha、学习率、epoch 与
+uniform regularization 权重。默认 rank sweep 保持 `LoRA alpha = 2r`，以免把容量变化
+与 LoRA scaling 变化混为一谈。每个训练配置使用独立模型目录与机器可读签名；禁止在
+参数改变后复用旧 checkpoint。A1/A2 非对称超参属于主要方法自由度：A1 可更强地建模
+forget-specific signal，A2 应更保守地建模 matched-control shared structure。
+
 ## 10. 完整算法
 
 **输入**：冻结基础模型 \(f_{\theta_0}\)、forget set \(\mathcal F\)、views \(V\)、候选层

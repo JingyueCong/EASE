@@ -11,6 +11,26 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
+TRAINING_METADATA_FIELDS = [
+    "views",
+    "a1_num_layer",
+    "a2_num_layer",
+    "a1_lora_r",
+    "a2_lora_r",
+    "a1_lora_alpha",
+    "a2_lora_alpha",
+    "a1_train_lr",
+    "a2_train_lr",
+    "a1_train_ep",
+    "a2_train_ep",
+    "a1_retain_weight",
+    "a2_retain_weight",
+    "a1_seed",
+    "a2_seed",
+    "models_root",
+]
+
+
 def harmonic(values: List[float]) -> float:
     values = [max(float(value), 1e-12) for value in values]
     return len(values) / sum(1.0 / value for value in values)
@@ -145,7 +165,11 @@ def fmt(value: Any) -> str:
     return f"{value:.6f}"
 
 
-def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
+def write_outputs(
+    rows: List[Dict[str, Any]],
+    output_dir: Path,
+    sweep_kind: str = "inference",
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     mark_pareto(rows)
     rows.sort(
@@ -155,11 +179,17 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
         ),
         reverse=True,
     )
+    active_training_fields = [
+        field
+        for field in TRAINING_METADATA_FIELDS
+        if any(row.get(field) not in (None, "") for row in rows)
+    ]
     fields = [
         "tag",
         "weight_a1",
         "weight_a2",
         "top_filter",
+        *active_training_fields,
         "target_agg",
         "target_margin",
         "required_agg",
@@ -192,7 +222,15 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
     ) as handle:
         writer = csv.writer(handle)
         writer.writerow(
-            ["tag", "weight_a1", "weight_a2", "top_filter", "metric", "value"]
+            [
+                "tag",
+                "weight_a1",
+                "weight_a2",
+                "top_filter",
+                *active_training_fields,
+                "metric",
+                "value",
+            ]
         )
         for row in rows:
             for prefix, values in (
@@ -206,13 +244,14 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
                             row["weight_a1"],
                             row["weight_a2"],
                             row["top_filter"],
+                            *(row.get(field, "") for field in active_training_fields),
                             f"{prefix}/{name}",
                             value,
                         ]
                     )
 
     all_lines = [
-        "# F2R inference sweep: all EASE/Open-Unlearning metrics",
+        f"# F2R {sweep_kind} sweep: all EASE/Open-Unlearning metrics",
         "",
         "Every section below comes from that configuration's complete `F2R_REPORT.json`.",
         "",
@@ -226,9 +265,17 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
                 f"top_filter={row['top_filter']}`"
             ),
             "",
-            "| metric | value |",
-            "|---|---:|",
         ]
+        if active_training_fields:
+            all_lines += [
+                "Training: `"
+                + ", ".join(
+                    f"{field}={row.get(field)}" for field in active_training_fields
+                )
+                + "`",
+                "",
+            ]
+        all_lines += ["| metric | value |", "|---|---:|"]
         for prefix, values in (
             ("derived", row["all_derived"]),
             ("metrics", row["all_metrics"]),
@@ -244,7 +291,7 @@ def write_outputs(rows: List[Dict[str, Any]], output_dir: Path) -> None:
     )
 
     lines = [
-        "# F2R inference sweep: EASE Llama-3.2-1B main-table metrics",
+        f"# F2R {sweep_kind} sweep: EASE Llama-3.2-1B main-table metrics",
         "",
         "> Diagnostic only: FQ and MU use the frozen retain reference. Selecting a configuration from this table means `selection_retain_access=true`.",
         "",
@@ -289,9 +336,14 @@ def main() -> None:
         default=0.005,
         help="Safety margin for a two-decimal published target (default: 0.005).",
     )
+    parser.add_argument(
+        "--sweep-kind",
+        choices=("inference", "training"),
+        default="inference",
+    )
     args = parser.parse_args()
     rows = load_rows(args.manifest, args.target_agg, args.target_margin)
-    write_outputs(rows, args.output_dir)
+    write_outputs(rows, args.output_dir, args.sweep_kind)
     failures = sum(bool(row["error"]) for row in rows)
     print(args.output_dir / "F2R_SWEEP.csv")
     print(args.output_dir / "F2R_SWEEP.md")

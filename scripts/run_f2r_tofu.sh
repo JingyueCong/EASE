@@ -65,11 +65,14 @@ CF_ROOT="${CF_ROOT:-${EASE_ROOT}/ULD/data/f2r}"
 CF_PATH="${CF_PATH:-${CF_ROOT}/${SPLIT}_${MODE}.jsonl}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}}"
 TASK_NAME="${TASK_NAME:-tofu_Llama-3.2-1B-Instruct_${SPLIT}_F2R_${MODE}}"
+TRAIN_RUN_TAG="${TRAIN_RUN_TAG:-$(basename "$MODELS_ROOT")}"
 
 HF_BASE_PREFIX="${HF_BASE_PREFIX:-open-unlearning/tofu_Llama-3.2-1B-Instruct}"
 HF_TOKENIZER="${HF_TOKENIZER:-${HF_BASE_PREFIX}_full}"
 NUM_LAYER="${NUM_LAYER:-2}"
 LORA_R="${LORA_R:-16}"
+LORA_ALPHA="${LORA_ALPHA:-}"
+LORA_DROPOUT="${LORA_DROPOUT:-0.05}"
 WEIGHT_A1="${WEIGHT_A1:--1.0}"
 WEIGHT_A2="${WEIGHT_A2:-1.0}"
 TOP_FILTER="${TOP_FILTER:-0.01}"
@@ -77,6 +80,8 @@ TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
 TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
+RETAIN_WEIGHT="${RETAIN_WEIGHT:-5.0}"
+SEED="${SEED:-42}"
 EVAL_BS="${EVAL_BS:-4}"
 EVAL_OVERWRITE="${EVAL_OVERWRITE:-true}"
 SELECTION_RETAIN_ACCESS="${SELECTION_RETAIN_ACCESS:-false}"
@@ -102,6 +107,29 @@ case "$MODE" in
         ;;
     *) echo "MODE must be smoke or full (got: $MODE)" >&2; exit 1 ;;
 esac
+
+# Every shared training parameter can be overridden per assistant. Keeping
+# these explicit prevents accidental coupling in asymmetric-control studies.
+A1_NUM_LAYER="${A1_NUM_LAYER:-$NUM_LAYER}"
+A2_NUM_LAYER="${A2_NUM_LAYER:-$NUM_LAYER}"
+A1_LORA_R="${A1_LORA_R:-$LORA_R}"
+A2_LORA_R="${A2_LORA_R:-$LORA_R}"
+A1_LORA_ALPHA="${A1_LORA_ALPHA:-${LORA_ALPHA:-$((2 * A1_LORA_R))}}"
+A2_LORA_ALPHA="${A2_LORA_ALPHA:-${LORA_ALPHA:-$((2 * A2_LORA_R))}}"
+A1_LORA_DROPOUT="${A1_LORA_DROPOUT:-$LORA_DROPOUT}"
+A2_LORA_DROPOUT="${A2_LORA_DROPOUT:-$LORA_DROPOUT}"
+A1_TRAIN_LR="${A1_TRAIN_LR:-$TRAIN_LR}"
+A2_TRAIN_LR="${A2_TRAIN_LR:-$TRAIN_LR}"
+A1_TRAIN_EP="${A1_TRAIN_EP:-$TRAIN_EP}"
+A2_TRAIN_EP="${A2_TRAIN_EP:-$TRAIN_EP}"
+A1_RETAIN_WEIGHT="${A1_RETAIN_WEIGHT:-$RETAIN_WEIGHT}"
+A2_RETAIN_WEIGHT="${A2_RETAIN_WEIGHT:-$RETAIN_WEIGHT}"
+A1_TRAIN_BS="${A1_TRAIN_BS:-$TRAIN_BS}"
+A2_TRAIN_BS="${A2_TRAIN_BS:-$TRAIN_BS}"
+A1_TRAIN_GA="${A1_TRAIN_GA:-$TRAIN_GA}"
+A2_TRAIN_GA="${A2_TRAIN_GA:-$TRAIN_GA}"
+A1_SEED="${A1_SEED:-$SEED}"
+A2_SEED="${A2_SEED:-$SEED}"
 
 for executable in "$TRAIN_PY" "$EVAL_PY"; do
     if [ ! -x "$executable" ]; then
@@ -192,7 +220,10 @@ echo "  GPU              : $GPU"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
 echo "  CF provider      : $CF_PROVIDER"
 echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE / temp=$CF_TEMPERATURE (key=$CF_API_KEY_ENV)"
-echo "  assistants       : layers=$NUM_LAYER, LoRA-r=$LORA_R"
+echo "  A1 assistant     : layers=$A1_NUM_LAYER, LoRA=$A1_LORA_R/$A1_LORA_ALPHA, dropout=$A1_LORA_DROPOUT"
+echo "  A2 assistant     : layers=$A2_NUM_LAYER, LoRA=$A2_LORA_R/$A2_LORA_ALPHA, dropout=$A2_LORA_DROPOUT"
+echo "  A1 optimization  : lr=$A1_TRAIN_LR, epochs=$A1_TRAIN_EP, uniform-weight=$A1_RETAIN_WEIGHT, bs/ga=$A1_TRAIN_BS/$A1_TRAIN_GA, seed=$A1_SEED"
+echo "  A2 optimization  : lr=$A2_TRAIN_LR, epochs=$A2_TRAIN_EP, uniform-weight=$A2_RETAIN_WEIGHT, bs/ga=$A2_TRAIN_BS/$A2_TRAIN_GA, seed=$A2_SEED"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  optimizer        : $TRAIN_OPTIM"
 echo "  eval overwrite   : $EVAL_OVERWRITE"
@@ -226,7 +257,41 @@ fi
 train_role() {
     local role="$1"
     local output_root="${MODELS_ROOT}/${role}"
+    local role_upper="${role^^}"
+    local num_layer_var="${role_upper}_NUM_LAYER"
+    local lora_r_var="${role_upper}_LORA_R"
+    local lora_alpha_var="${role_upper}_LORA_ALPHA"
+    local lora_dropout_var="${role_upper}_LORA_DROPOUT"
+    local train_lr_var="${role_upper}_TRAIN_LR"
+    local train_ep_var="${role_upper}_TRAIN_EP"
+    local retain_weight_var="${role_upper}_RETAIN_WEIGHT"
+    local train_bs_var="${role_upper}_TRAIN_BS"
+    local train_ga_var="${role_upper}_TRAIN_GA"
+    local seed_var="${role_upper}_SEED"
+    local role_num_layer="${!num_layer_var}"
+    local role_lora_r="${!lora_r_var}"
+    local role_lora_alpha="${!lora_alpha_var}"
+    local role_lora_dropout="${!lora_dropout_var}"
+    local role_train_lr="${!train_lr_var}"
+    local role_train_ep="${!train_ep_var}"
+    local role_retain_weight="${!retain_weight_var}"
+    local role_train_bs="${!train_bs_var}"
+    local role_train_ga="${!train_ga_var}"
+    local role_seed="${!seed_var}"
+    local signature
+    signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|seed=$role_seed"
+    local signature_file="${output_root}/F2R_TRAIN_SIGNATURE.txt"
     if find "$output_root" -name 'checkpoint-*' -type d 2>/dev/null | grep -q .; then
+        if [ -f "$signature_file" ] && [ "$(<"$signature_file")" != "$signature" ]; then
+            echo "Checkpoint configuration mismatch under $output_root" >&2
+            echo "stored:  $(<"$signature_file")" >&2
+            echo "current: $signature" >&2
+            echo "Use a unique MODELS_ROOT for every training configuration." >&2
+            exit 1
+        fi
+        if [ ! -f "$signature_file" ]; then
+            echo "      WARNING: reusing legacy unsigned $role checkpoint under $output_root" >&2
+        fi
         echo "      Reusing existing $role checkpoint under $output_root"
         return
     fi
@@ -240,19 +305,25 @@ train_role() {
         model.model_path="${HF_BASE_PREFIX}_full" \
         model.tokenizer_path="$HF_TOKENIZER" \
         model_mode=uld \
-        model_mode.num_layer="$NUM_LAYER" \
-        model_mode.Lora.r="$LORA_R" \
+        model_mode.num_layer="$role_num_layer" \
+        model_mode.Lora.r="$role_lora_r" \
+        model_mode.Lora.alpha="$role_lora_alpha" \
+        model_mode.Lora.dropout="$role_lora_dropout" \
         unlearn_loss=remember+uniform \
-        unlearn_loss.retain_weight=5.0 \
-        trainer.batch_size="$TRAIN_BS" \
-        trainer.gradient_accumulation_steps="$TRAIN_GA" \
-        trainer.learning_rate="$TRAIN_LR" \
+        unlearn_loss.retain_weight="$role_retain_weight" \
+        trainer.batch_size="$role_train_bs" \
+        trainer.gradient_accumulation_steps="$role_train_ga" \
+        trainer.learning_rate="$role_train_lr" \
         trainer.optim="$TRAIN_OPTIM" \
-        trainer.max_epochs="$TRAIN_EP" \
+        trainer.max_epochs="$role_train_ep" \
+        trainer.seed="$role_seed" \
+        seed="$role_seed" \
         trainer.strategy=gpu \
         OUTPUTMODELDIR="$output_root" \
         postfix="$role" \
-        "hydra.run.dir=outputs/tune_log/f2r_${role}_${SPLIT}/\${now:%Y-%m-%d_%H-%M-%S}"
+        "hydra.run.dir=outputs/tune_log/f2r_${role}_${SPLIT}_${TRAIN_RUN_TAG}/\${now:%Y-%m-%d_%H-%M-%S}"
+    mkdir -p "$output_root"
+    printf '%s\n' "$signature" > "$signature_file"
 }
 
 echo "[2/4] Training A1"
@@ -373,6 +444,21 @@ fi
     --weight-a1 "$WEIGHT_A1" \
     --weight-a2 "$WEIGHT_A2" \
     --top-filter "$TOP_FILTER" \
+    --views "$VIEWS" \
+    --a1-num-layer "$A1_NUM_LAYER" \
+    --a2-num-layer "$A2_NUM_LAYER" \
+    --a1-lora-r "$A1_LORA_R" \
+    --a2-lora-r "$A2_LORA_R" \
+    --a1-lora-alpha "$A1_LORA_ALPHA" \
+    --a2-lora-alpha "$A2_LORA_ALPHA" \
+    --a1-train-lr "$A1_TRAIN_LR" \
+    --a2-train-lr "$A2_TRAIN_LR" \
+    --a1-train-ep "$A1_TRAIN_EP" \
+    --a2-train-ep "$A2_TRAIN_EP" \
+    --a1-retain-weight "$A1_RETAIN_WEIGHT" \
+    --a2-retain-weight "$A2_RETAIN_WEIGHT" \
+    --a1-seed "$A1_SEED" \
+    --a2-seed "$A2_SEED" \
     --selection-retain-access "$SELECTION_RETAIN_ACCESS" \
     "${summary_args[@]}"
 echo "Done. Full report: $EVAL_DIR/F2R_REPORT.md"

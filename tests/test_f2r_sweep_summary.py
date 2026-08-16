@@ -27,7 +27,16 @@ class F2RSweepSummaryTest(unittest.TestCase):
             with manifest.open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(
-                    ["tag", "weight_a1", "weight_a2", "top_filter", "task_name", "report"]
+                    [
+                        "tag",
+                        "weight_a1",
+                        "weight_a2",
+                        "top_filter",
+                        "task_name",
+                        "report",
+                        "a1_train_lr",
+                        "models_root",
+                    ]
                 )
                 for tag, fq, mu in configs:
                     report = root / f"{tag}.json"
@@ -56,7 +65,9 @@ class F2RSweepSummaryTest(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
-                    writer.writerow([tag, -0.8, 0.8, 0.01, tag, report])
+                    writer.writerow(
+                        [tag, -0.8, 0.8, 0.01, tag, report, "3e-4", f"models/{tag}"]
+                    )
 
             rows = sweep_module.load_rows(manifest)
             by_tag = {row["tag"]: row for row in rows}
@@ -78,6 +89,11 @@ class F2RSweepSummaryTest(unittest.TestCase):
 
             sweep_module.write_outputs(rows, root / "out")
             self.assertTrue((root / "out" / "F2R_SWEEP.csv").is_file())
+            sweep_csv = (root / "out" / "F2R_SWEEP.csv").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("a1_train_lr", sweep_csv.splitlines()[0])
+            self.assertIn("models/balanced", sweep_csv)
             self.assertTrue((root / "out" / "F2R_SWEEP.md").is_file())
             self.assertTrue(
                 (root / "out" / "F2R_SWEEP_ALL_METRICS.csv").is_file()

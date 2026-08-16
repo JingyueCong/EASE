@@ -317,6 +317,45 @@ It evaluates a coarse Cartesian grid first (48 configurations by default). If
 none exceeds the forget05 BS-S target `Agg=0.58`, it automatically evaluates a
 27-configuration local grid around the best coarse point. Completed reports are
 reused after interruption.
+
+If inference tuning remains below target, run the four-GPU assistant-training
+sweep. It evaluates 12 deliberately chosen configurations covering lower
+learning rates/epochs, smaller assistant capacity, stronger uniform
+regularization, and asymmetric A1/A2 training:
+
+```bash
+MODE=full SPLIT=forget05 GPUS="0 1 2 3" \
+SWEEP_NAME=train_stage1_forget05 RESUME=true \
+WEIGHT_A1=-0.7 WEIGHT_A2=0.2 TOP_FILTER=0.0025 \
+  bash scripts/sweep_f2r_training.sh
+```
+
+Each configuration receives a unique `MODELS_ROOT`; the existing frozen
+counterfactual file is reused, and completed training/evaluation reports resume
+safely. The output is
+`open-unlearning/saves/sweeps/forget05_train_stage1_forget05/F2R_SWEEP.md`,
+with the exact training parameters retained in `manifest.csv`, `F2R_SWEEP.csv`,
+and every per-configuration `F2R_REPORT.json`.
+
+The single-run script also exposes shared and role-specific overrides:
+
+| Shared default | A1/A2 override |
+|---|---|
+| `NUM_LAYER` | `A1_NUM_LAYER`, `A2_NUM_LAYER` |
+| `LORA_R` | `A1_LORA_R`, `A2_LORA_R` |
+| `LORA_ALPHA` | `A1_LORA_ALPHA`, `A2_LORA_ALPHA` |
+| `LORA_DROPOUT` | `A1_LORA_DROPOUT`, `A2_LORA_DROPOUT` |
+| `TRAIN_LR` | `A1_TRAIN_LR`, `A2_TRAIN_LR` |
+| `TRAIN_EP` | `A1_TRAIN_EP`, `A2_TRAIN_EP` |
+| `RETAIN_WEIGHT` | `A1_RETAIN_WEIGHT`, `A2_RETAIN_WEIGHT` |
+| `TRAIN_BS`, `TRAIN_GA` | `A1_TRAIN_BS/GA`, `A2_TRAIN_BS/GA` |
+| `SEED` | `A1_SEED`, `A2_SEED` |
+
+When `LORA_ALPHA` is not set, each assistant uses `alpha=2*rank`, keeping LoRA
+scaling comparable across rank choices. Newly trained model roots contain an
+`F2R_TRAIN_SIGNATURE.txt`; a later run with incompatible parameters fails
+instead of silently reusing the wrong checkpoint. Legacy checkpoints without a
+signature remain reusable with an explicit warning.
 `F2R_SWEEP_ALL_METRICS.{csv,md}` provides long-form exports of every derived
 and EASE/Open-Unlearning metric for every configuration.
 Because both FQ and MU inspect the frozen retain reference, these sweep reports

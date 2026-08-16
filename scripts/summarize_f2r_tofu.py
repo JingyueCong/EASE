@@ -274,6 +274,21 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
         f"- Retain reference: `{metadata.get('retain_reference')}` (post-freeze evaluation only)",
         f"- A1: `{metadata.get('a1_checkpoint')}`",
         f"- A2: `{metadata.get('a2_checkpoint')}`",
+        (
+            "- A1 training: "
+            f"`layers={metadata.get('a1_num_layer')}, "
+            f"LoRA={metadata.get('a1_lora_r')}/{metadata.get('a1_lora_alpha')}, "
+            f"lr={metadata.get('a1_train_lr')}, epochs={metadata.get('a1_train_ep')}, "
+            f"uniform_weight={metadata.get('a1_retain_weight')}, seed={metadata.get('a1_seed')}`"
+        ),
+        (
+            "- A2 training: "
+            f"`layers={metadata.get('a2_num_layer')}, "
+            f"LoRA={metadata.get('a2_lora_r')}/{metadata.get('a2_lora_alpha')}, "
+            f"lr={metadata.get('a2_train_lr')}, epochs={metadata.get('a2_train_ep')}, "
+            f"uniform_weight={metadata.get('a2_retain_weight')}, seed={metadata.get('a2_seed')}`"
+        ),
+        f"- Counterfactual views: `{metadata.get('views')}`",
         "- Aggregation: `Mem=HM(1-ES,1-EM,1-ParaProb,1-knowledge-TR); Util=HM(MU,Fluency); Agg=HM(Mem,Util)`",
         "- Truth Ratio in Mem: `OpenUnlearning knowledge TR = p(correct)/(p(correct)+p(perturbed))`",
         (
@@ -333,6 +348,21 @@ def main() -> None:
     parser.add_argument("--weight-a1", type=float)
     parser.add_argument("--weight-a2", type=float)
     parser.add_argument("--top-filter", type=float)
+    parser.add_argument("--views", type=int)
+    parser.add_argument("--a1-num-layer", type=int)
+    parser.add_argument("--a2-num-layer", type=int)
+    parser.add_argument("--a1-lora-r", type=int)
+    parser.add_argument("--a2-lora-r", type=int)
+    parser.add_argument("--a1-lora-alpha", type=int)
+    parser.add_argument("--a2-lora-alpha", type=int)
+    parser.add_argument("--a1-train-lr", type=float)
+    parser.add_argument("--a2-train-lr", type=float)
+    parser.add_argument("--a1-train-ep", type=int)
+    parser.add_argument("--a2-train-ep", type=int)
+    parser.add_argument("--a1-retain-weight", type=float)
+    parser.add_argument("--a2-retain-weight", type=float)
+    parser.add_argument("--a1-seed", type=int)
+    parser.add_argument("--a2-seed", type=int)
     parser.add_argument(
         "--selection-retain-access",
         choices=("true", "false"),
@@ -356,6 +386,21 @@ def main() -> None:
         "weight_a1": args.weight_a1,
         "weight_a2": args.weight_a2,
         "top_filter": args.top_filter,
+        "views": args.views,
+        "a1_num_layer": args.a1_num_layer,
+        "a2_num_layer": args.a2_num_layer,
+        "a1_lora_r": args.a1_lora_r,
+        "a2_lora_r": args.a2_lora_r,
+        "a1_lora_alpha": args.a1_lora_alpha,
+        "a2_lora_alpha": args.a2_lora_alpha,
+        "a1_train_lr": args.a1_train_lr,
+        "a2_train_lr": args.a2_train_lr,
+        "a1_train_ep": args.a1_train_ep,
+        "a2_train_ep": args.a2_train_ep,
+        "a1_retain_weight": args.a1_retain_weight,
+        "a2_retain_weight": args.a2_retain_weight,
+        "a1_seed": args.a1_seed,
+        "a2_seed": args.a2_seed,
         "selection_retain_access": args.selection_retain_access == "true",
     }
     report = build_report(load_json(args.eval_json), load_json(args.summary_json), metadata)
