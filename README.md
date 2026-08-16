@@ -395,8 +395,9 @@ SWEEP_NAME=alignment_gate_8h RESUME=true \
   bash scripts/sweep_f2r_alignment_gate_8h.sh
 ```
 
-It evaluates 8 alignment settings, 8 gate settings, and 16 alignment+gate
-settings (32 complete evaluations). Each GPU receives an independent setting;
+It exposes a 192-candidate pool: 24 alignment settings, 24 gate settings, and
+144 alignment+gate settings. The eight-hour launch budget determines how many
+are actually evaluated when server throughput varies. Each GPU receives an independent setting;
 no new job is launched during the final 45 minutes, while active jobs are
 allowed to finish cleanly. The sweep is resumable and records ridge/scale/count
 and gate regularisation/steps/learning-rate values in its manifest and output

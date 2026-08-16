@@ -224,38 +224,60 @@ finish_phase() {
     if [ "${#pids[@]}" -gt 0 ]; then wait_batch; fi
 }
 
-ALIGNMENT_CONFIGS=(
-    "align_r1_s3_o4:1:3:4"
-    "align_r1_s4_o8:1:4:8"
-    "align_r10_s3_o4:10:3:4"
-    "align_r10_s4_o8:10:4:8"
-    "align_r100_s3_o4:100:3:4"
-    "align_r100_s4_o8:100:4:8"
-    "align_r10_s2_o8:10:2:8"
-    "align_r10_s6_o16:10:6:16"
-)
-GATE_CONFIGS=(
-    "gate_l1em4_n400_lr3em2:1e-4:400:0.03"
-    "gate_l1em4_n800_lr3em2:1e-4:800:0.03"
-    "gate_l1em3_n400_lr3em2:1e-3:400:0.03"
-    "gate_l1em3_n800_lr3em2:1e-3:800:0.03"
-    "gate_l1em2_n400_lr3em2:1e-2:400:0.03"
-    "gate_l1em2_n800_lr3em2:1e-2:800:0.03"
-    "gate_l1em3_n1200_lr1em2:1e-3:1200:0.01"
-    "gate_l1em3_n1200_lr5em2:1e-3:1200:0.05"
-)
-COMBINATION_ALIGNMENTS=(
-    align_r1_s4_o8
-    align_r10_s4_o8
-    align_r100_s4_o8
-    align_r10_s6_o16
-)
-COMBINATION_GATES=(
-    "gate_l1em4_n800_lr3em2:1e-4:800:0.03"
-    "gate_l1em3_n800_lr3em2:1e-3:800:0.03"
-    "gate_l1em2_n800_lr3em2:1e-2:800:0.03"
-    "gate_l1em3_n1200_lr1em2:1e-3:1200:0.01"
-)
+# Measured on the target 4x4090 server, one calibration+evaluation takes
+# roughly 8--11 minutes.  This 192-candidate pool therefore fills an eight-hour
+# four-GPU window; MAX_HOURS remains the hard launch budget if throughput varies.
+ALIGNMENT_CONFIGS=()
+for ridge_spec in "r0p1:0.1" "r1:1" "r10:10" "r100:100"; do
+    IFS=: read -r ridge_tag ridge <<< "$ridge_spec"
+    for scale_max in 2 3 4; do
+        for min_obs in 4 8; do
+            ALIGNMENT_CONFIGS+=(
+                "align_${ridge_tag}_s${scale_max}_o${min_obs}:${ridge}:${scale_max}:${min_obs}"
+            )
+        done
+    done
+done
+
+GATE_CONFIGS=()
+for l2_spec in "l1em5:1e-5" "l1em4:1e-4" "l1em3:1e-3" "l1em2:1e-2"; do
+    IFS=: read -r l2_tag gate_l2 <<< "$l2_spec"
+    for gate_steps in 400 800 1200; do
+        for lr_spec in "lr1em2:0.01" "lr3em2:0.03"; do
+            IFS=: read -r lr_tag gate_lr <<< "$lr_spec"
+            GATE_CONFIGS+=(
+                "gate_${l2_tag}_n${gate_steps}_${lr_tag}:${gate_l2}:${gate_steps}:${gate_lr}"
+            )
+        done
+    done
+done
+
+COMBINATION_ALIGNMENTS=()
+for ridge_tag in r1 r10 r100; do
+    for scale_max in 2 4; do
+        for min_obs in 4 8; do
+            COMBINATION_ALIGNMENTS+=(
+                "align_${ridge_tag}_s${scale_max}_o${min_obs}"
+            )
+        done
+    done
+done
+
+COMBINATION_GATES=()
+for l2_spec in "l1em4:1e-4" "l1em3:1e-3" "l1em2:1e-2"; do
+    IFS=: read -r l2_tag gate_l2 <<< "$l2_spec"
+    for gate_steps in 400 800; do
+        for lr_spec in "lr1em2:0.01" "lr3em2:0.03"; do
+            IFS=: read -r lr_tag gate_lr <<< "$lr_spec"
+            COMBINATION_GATES+=(
+                "gate_${l2_tag}_n${gate_steps}_${lr_tag}:${gate_l2}:${gate_steps}:${gate_lr}"
+            )
+        done
+    done
+done
+
+COMBINATION_COUNT=$((${#COMBINATION_ALIGNMENTS[@]} * ${#COMBINATION_GATES[@]}))
+PLANNED_COUNT=$((${#ALIGNMENT_CONFIGS[@]} + ${#GATE_CONFIGS[@]} + COMBINATION_COUNT))
 
 # Include the completed fixed-parameter anchor when the preceding method ladder
 # has already produced it. It costs no additional GPU time.
@@ -270,7 +292,7 @@ echo "F2R-AG four-GPU calibration sweep"
 echo "  split/mode       : $SPLIT / $MODE"
 echo "  GPUs             : $GPUS"
 echo "  launch budget    : $MAX_HOURS hours (no new job in final $MIN_JOB_MINUTES min)"
-echo "  planned configs  : 8 alignment + 8 gate + 16 combined = 32"
+echo "  planned configs  : ${#ALIGNMENT_CONFIGS[@]} alignment + ${#GATE_CONFIGS[@]} gate + $COMBINATION_COUNT combined = $PLANNED_COUNT"
 echo "  operating point  : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  frozen assistants: $MODELS_ROOT"
 echo "  results          : $RESULTS_DIR"
