@@ -28,6 +28,15 @@ TRAINING_METADATA_FIELDS = [
     "a1_seed",
     "a2_seed",
     "models_root",
+    "calibration_kind",
+    "alignment_ridge",
+    "alignment_scale_max",
+    "alignment_min_observations",
+    "gate_l2",
+    "gate_steps",
+    "gate_learning_rate",
+    "calibration_path",
+    "alignment_input",
 ]
 
 
@@ -338,7 +347,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--sweep-kind",
-        choices=("inference", "training", "method-ladder"),
+        choices=("inference", "training", "method-ladder", "calibration"),
         default="inference",
     )
     args = parser.parse_args()

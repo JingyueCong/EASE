@@ -386,6 +386,23 @@ completed stage after interruption, and writes the comparison to
 `MODELS_ROOT`, `MIN_FREE_GPU_MIB`, or `CALIBRATION_BS` when needed. Use
 `DRY_RUN=true` to inspect the exact stage order without loading a model.
 
+After the fixed method ladder is complete, the four-GPU calibration sweep uses
+an approximately eight-hour launch budget:
+
+```bash
+MODE=full SPLIT=forget05 GPUS="0 1 2 3" MAX_HOURS=8 \
+SWEEP_NAME=alignment_gate_8h RESUME=true \
+  bash scripts/sweep_f2r_alignment_gate_8h.sh
+```
+
+It evaluates 8 alignment settings, 8 gate settings, and 16 alignment+gate
+settings (32 complete evaluations). Each GPU receives an independent setting;
+no new job is launched during the final 45 minutes, while active jobs are
+allowed to finish cleanly. The sweep is resumable and records ridge/scale/count
+and gate regularisation/steps/learning-rate values in its manifest and output
+tables. Because every setting is ranked with the frozen benchmark retain
+reference, this is a diagnostic `selection_retain_access=true` sweep.
+
 Reports created before the fixed LLM Beliefs aggregation was adopted can be
 updated without rerunning GPU evaluation:
 

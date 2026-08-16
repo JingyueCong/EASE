@@ -48,10 +48,12 @@ latest_checkpoint() {
         | sort -n | tail -1 | cut -d' ' -f2-
 }
 
-A1_DEFAULT_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
-A2_DEFAULT_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
-A1_CKPT="${A1_CKPT:-$A1_DEFAULT_CKPT}"
-A2_CKPT="${A2_CKPT:-$A2_DEFAULT_CKPT}"
+if [ -z "${A1_CKPT:-}" ]; then
+    A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1" || true)"
+fi
+if [ -z "${A2_CKPT:-}" ]; then
+    A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2" || true)"
+fi
 if [ "$DRY_RUN" != "true" ]; then
     for path in "$CF_PATH" "$A1_CKPT" "$A2_CKPT"; do
         if [ ! -e "$path" ]; then
