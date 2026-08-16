@@ -430,6 +430,34 @@ config 和 checkpoint；模拟数字只能标记为 mock，不得用于论文结
 8. 不同 generator 与规则/模板 generator；
 9. \(1/2/4/8\) counterfactual views。
 
+### 13.1 数据预算匹配与 causal core-set
+
+`forget05` 的 Llama-3 EASE 训练读取 200 条真实 retain，其中 80 条属于
+\(R_{sub}\)，其余 120 条作为 \(R_{far}\) 约束；早期 Llama-2 扫描采用
+\(|R_{sub}|=40\)。默认 F2R 的两视图设置则包含 400 条 matched counterfactual。
+因此必须报告总记录数为 40/80/200/400 的 nested random-budget 对照，固定其他训练和
+推理参数，并同时报告 raw sequence/token budget。
+
+Random-budget 只回答“更多 synthetic supervision 是否带来收益”，不是主方法。CIRU 的
+causal-budget 版本先为每个 source 生成完整 \(C_{11},C_{01},C_{10},C_{00}\) 候选池，
+再在冻结基础模型的表示上计算第 5 节的 DiD 残差。不能仅按
+\(\|\delta_{i,v}\|\) 取最大的 40 个，因为极端残差可能来自匹配失败或离群样本。主选择
+准则应是带 hard audit 和覆盖约束的 D-optimal core-set：
+
+\[
+S_K^*=\arg\max_{|S|=K}
+\log\det\!\left(\epsilon I+\sum_{(i,v)\in S}
+\widetilde\delta_{i,v}\widetilde\delta_{i,v}^{\top}\right)
+-\lambda\sum_{(i,v)\in S}q_{i,v}^{\mathrm{nuis}}
+-\mu\,\mathrm{Redundancy}(S).
+\]
+
+其中 \(q^{\mathrm{nuis}}\) 只使用 relation/style/difficulty/length matching、答案泄漏、
+placebo validity 与 control overlap 审计；不得使用 retain utility、最终 Agg 或测试集
+retain 指标。选择还应限制每个 source 的 views 数并覆盖 relation family。论文至少比较
+`random-40/80`、`semantic-top-40/80`、`residual-norm-top-40/80` 与
+`causal-D-optimal-40/80`，才能把收益归因于 causal design 而不是样本数量。
+
 ### 13.2 干预消融
 
 1. SVD vs contrastive generalized eigenspace；

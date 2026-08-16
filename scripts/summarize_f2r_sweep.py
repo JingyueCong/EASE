@@ -13,6 +13,10 @@ from typing import Any, Dict, List
 
 TRAINING_METADATA_FIELDS = [
     "views",
+    "counterfactual_budget",
+    "counterfactual_sources",
+    "counterfactual_path",
+    "counterfactual_seed",
     "a1_num_layer",
     "a2_num_layer",
     "a1_lora_r",

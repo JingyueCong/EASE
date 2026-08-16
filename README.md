@@ -216,6 +216,32 @@ Generated JSONL is written under `ULD/data/f2r/`, checkpoints under
 `ULD/outputs_trained_models/`, and final summaries under
 `open-unlearning/saves/eval/<task>/TOFU_SUMMARY.json`.
 
+#### Counterfactual-budget control
+
+For forget05, EASE reads 200 real retain examples and designates either 40
+(legacy Llama-2 scans) or 80 (the Llama-3 runner) as the local `R_sub`.  The
+default F2R file instead contains 400 generated records (200 sources x two
+views).  Run the budget-matched control before attributing improvements to the
+counterfactual construction:
+
+```bash
+GPUS="0 1 2 3" BUDGETS="40 80 200 400" \
+  bash scripts/sweep_f2r_cf_budget.sh
+```
+
+The script never calls the generator again.  It constructs deterministic,
+nested subsets of the existing full JSONL: 40/80 use distinct source examples,
+200 uses one view for every forget05 source, and 400 uses both views.  All four
+assistants are trained concurrently with fixed training and inference
+hyperparameters, so this first-stage table isolates supervision budget.  The
+selection seed and exact input/output hashes are saved in
+`ULD/data/f2r/budgets/<split>_seed<seed>/budget_manifest.csv`.
+
+This is a **random budget control**, not the causal selector proposed for CIRU.
+A valid causal core-set requires all four cells `C11/C01/C10/C00`; current F2R
+pairs do not include `C10`, so ranking the present pairs by residual magnitude
+must not be described as causal identification.
+
 The final stage uses the complete open-unlearning TOFU suite: Forget Quality,
 Model Utility over retain/real-authors/world-facts, truth ratio, probability,
 ROUGE, privacy leakage, extraction strength, exact memorization, and gibberish
