@@ -362,6 +362,19 @@ set is worse:
 GPUS="0 1 2 3" bash scripts/sweep_f2d_stepmatch.sh
 ```
 
+Because the 15-epoch equal-step run improves Mem but collapses Util, the next
+prespecified search evaluates the intermediate region
+`epochs={7,9} x A2_uniform={5,2}` while holding A1 uniform weight, learning
+rate, architecture, and inference weights fixed:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_f2d_intermediate.sh
+```
+
+This is a four-configuration training experiment, not an inference sweep. Its
+best frozen assistant pair should receive a separate weight/filter sweep only
+after all four complete reports have been compared.
+
 All four configurations use 15 epochs, A1 uniform weight 5, and the same
 frozen inference point. They vary only A2 uniform weight over `5/2/1/0.5`.
 This tests whether the 40 positive C01 examples were overwhelmed by A2's 280

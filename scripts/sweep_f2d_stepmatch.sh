@@ -24,6 +24,7 @@ MODELS_SWEEP_ROOT="${MODELS_SWEEP_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/
 RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${SWEEP_NAME}}"
 RESUME="${RESUME:-true}"
 EVAL_BS="${EVAL_BS:-4}"
+F2D_VARIANT="${F2D_VARIANT:-F2D-C01+Placebo-StepMatch}"
 
 CONDA_BIN="${CONDA_BIN:-$(command -v conda || true)}"
 if [ -z "$CONDA_BIN" ] && [ -x "${HOME}/miniconda3/bin/conda" ]; then
@@ -53,12 +54,11 @@ ep15_a2u1:2:2:16:16:1e-3:1e-3:15:15:5:1 \
 ep15_a2u0p5:2:2:16:16:1e-3:1e-3:15:15:5:0.5}"
 
 echo "============================================================"
-echo "F2D-40 equal-step / A2-balance sweep"
+echo "F2D-40 epoch / A2-balance sweep"
 echo "  split / units    : $SPLIT / $UNITS"
 echo "  GPUs             : $GPUS"
 echo "  frozen F2D data  : $F2D_PATH"
-echo "  training         : 15 epochs, A1 uniform=5"
-echo "  A2 uniform grid  : 5 / 2 / 1 / 0.5"
+echo "  training configs : $TRAIN_CONFIGS"
 echo "  inference point  : -1.2 / 0.4 / 0.0025"
 echo "  results          : $RESULTS_DIR"
 echo "  protocol         : training_retain_access=false; diagnostic selection=true"
@@ -70,7 +70,7 @@ exec env \
     CF_PATH="$F2D_PATH" MODELS_SWEEP_ROOT="$MODELS_SWEEP_ROOT" \
     RESULTS_DIR="$RESULTS_DIR" TRAIN_CONFIGS="$TRAIN_CONFIGS" \
     WEIGHT_A1=-1.2 WEIGHT_A2=0.4 TOP_FILTER=0.0025 \
-    F2R_VARIANT="F2D-C01+Placebo-StepMatch" \
+    F2R_VARIANT="$F2D_VARIANT" \
     TARGET_AGG=0.58 TARGET_MARGIN=0.005 \
     EVAL_BS="$EVAL_BS" SEED="$SEED" RESUME="$RESUME" \
     bash "$EASE_ROOT/scripts/sweep_f2r_training.sh"
