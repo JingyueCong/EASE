@@ -4,6 +4,10 @@ set -euo pipefail
 
 EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${ENV_FILE:-${EASE_ROOT}/.env}"
+# Capture experiment-specific overrides before .env is sourced. Generic .env
+# files from CIRU-40 runs often contain UNITS=40 and must not retarget this
+# fixed full-coverage sweep.
+REQUESTED_UNITS="${F2D_DID_UNITS:-200}"
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
     set -a
@@ -14,13 +18,18 @@ fi
 
 SPLIT="${SPLIT:-forget05}"
 SEED="${SEED:-42}"
-UNITS="${UNITS:-200}"
+UNITS="$REQUESTED_UNITS"
 TRAIN_TAG="${TRAIN_TAG:-b200_s48_u1}"
 TRAINING_SWEEP_NAME="${TRAINING_SWEEP_NAME:-f2d_did200_full_authorblock_seed42}"
 MANIFEST="${MANIFEST:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${TRAINING_SWEEP_NAME}/manifest.csv}"
 CF_PATH="${CF_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_ciru${UNITS}_seed${SEED}_full_authorblock_v1.jsonl}"
 SEARCH_NAME="${SEARCH_NAME:-f2d_did200_s48_infer}"
 CHECKPOINT_STEP="${CHECKPOINT_STEP:-48}"
+
+if [ "$UNITS" -ne 200 ]; then
+    echo "F2D-DiD full-coverage inference requires F2D_DID_UNITS=200." >&2
+    exit 1
+fi
 
 if [ ! -s "$MANIFEST" ]; then
     echo "Missing training manifest: $MANIFEST" >&2
