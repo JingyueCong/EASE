@@ -323,6 +323,19 @@ artifact, evaluates one alpha per GPU, and writes
 `CIRU_ALPHA_SWEEP.{csv,md}`. This is an inference sensitivity analysis; it
 does not spend additional generator calls or fit a new causal subspace.
 
+After locating a useful no-gate alpha, localise the intervention to recover
+utility. The default four-GPU structure sweep fixes `alpha=1.5` and compares
+single layers 8/12/15 at rank 8 against layers 8/12/15 at rank 4:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_ciru_structure.sh
+```
+
+Each candidate estimates a distinct subspace from the same audited strict-v2
+data and receives a complete frozen evaluation. The manifest records exact
+layers, rank, alpha, artifact, and report paths; all Open-Unlearning metrics
+are exported alongside the LLM-Beliefs aggregation.
+
 The first F2D-40 run reaches only `checkpoint-50` at five epochs, whereas the
 400-pair F2R comparison reaches approximately `checkpoint-155`. Run the
 equal-step/A2-balance experiment before concluding that the smaller factorial

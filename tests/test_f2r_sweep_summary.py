@@ -36,6 +36,10 @@ class F2RSweepSummaryTest(unittest.TestCase):
                         "report",
                         "a1_train_lr",
                         "models_root",
+                        "causal_layers",
+                        "causal_rank",
+                        "intervention_alpha",
+                        "method_artifact",
                     ]
                 )
                 for tag, fq, mu in configs:
@@ -66,7 +70,20 @@ class F2RSweepSummaryTest(unittest.TestCase):
                         encoding="utf-8",
                     )
                     writer.writerow(
-                        [tag, -0.8, 0.8, 0.01, tag, report, "3e-4", f"models/{tag}"]
+                        [
+                            tag,
+                            -0.8,
+                            0.8,
+                            0.01,
+                            tag,
+                            report,
+                            "3e-4",
+                            f"models/{tag}",
+                            "8 12 15",
+                            4,
+                            1.5,
+                            f"artifacts/{tag}.npz",
+                        ]
                     )
 
             rows = sweep_module.load_rows(manifest)
@@ -93,6 +110,8 @@ class F2RSweepSummaryTest(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("a1_train_lr", sweep_csv.splitlines()[0])
+            self.assertIn("causal_layers", sweep_csv.splitlines()[0])
+            self.assertIn("artifacts/balanced.npz", sweep_csv)
             self.assertIn("models/balanced", sweep_csv)
             self.assertTrue((root / "out" / "F2R_SWEEP.md").is_file())
             self.assertTrue(

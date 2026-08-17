@@ -522,6 +522,11 @@ A1 uniform weight 为 5，并比较 A2 uniform weight \(5/2/1/0.5\)。这一消�
 数据结构预先设定，不使用 retain 指标选择范围；最终配置选择仍须标注 diagnostic
 `selection_retain_access=true`。
 
+CIRU strict-v2 的 no-gate alpha 扫描显示 α=1.5 能显著改善 Mem，但三层同时干预时
+MU 下降。下一步结构定位固定 α=1.5，比较单层 8/12/15（rank 8）与三层低秩
+8/12/15（rank 4）。该扫描的配置范围由干预局部性假设预先确定，全部使用相同 40 个
+四格单元；每个结构重新估计独立 subspace，不能复用不同 layers/rank 的 artifact。
+
 ### 13.3 因果假设审计
 
 - 四单元的 relation/style/difficulty/length matching score；

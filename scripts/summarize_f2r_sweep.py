@@ -41,6 +41,11 @@ TRAINING_METADATA_FIELDS = [
     "gate_learning_rate",
     "calibration_path",
     "alignment_input",
+    "causal_units",
+    "causal_layers",
+    "causal_rank",
+    "intervention_alpha",
+    "method_artifact",
 ]
 
 
@@ -351,7 +356,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--sweep-kind",
-        choices=("inference", "training", "method-ladder", "calibration"),
+        choices=(
+            "inference",
+            "training",
+            "method-ladder",
+            "calibration",
+            "ciru-structure",
+        ),
         default="inference",
     )
     args = parser.parse_args()
