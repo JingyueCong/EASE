@@ -156,6 +156,14 @@ if { [ -n "$A1_CHECKPOINT_OVERRIDE" ] && [ -z "$A2_CHECKPOINT_OVERRIDE" ]; } \
     echo "Set both A1_CHECKPOINT_OVERRIDE and A2_CHECKPOINT_OVERRIDE, or neither." >&2
     exit 1
 fi
+if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
+    if [ ! -d "$A1_CHECKPOINT_OVERRIDE" ] || [ ! -d "$A2_CHECKPOINT_OVERRIDE" ]; then
+        echo "Assistant checkpoint override does not exist." >&2
+        echo "A1: $A1_CHECKPOINT_OVERRIDE" >&2
+        echo "A2: $A2_CHECKPOINT_OVERRIDE" >&2
+        exit 1
+    fi
+fi
 
 for executable in "$TRAIN_PY" "$EVAL_PY"; do
     if [ ! -x "$executable" ]; then
@@ -360,10 +368,15 @@ train_role() {
     printf '%s\n' "$signature" > "$signature_file"
 }
 
-echo "[2/4] Training A1"
-(cd "$EASE_ROOT/ULD" && train_role a1)
-echo "[3/4] Training A2"
-(cd "$EASE_ROOT/ULD" && train_role a2)
+if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
+    echo "[2/4] Skipping A1 training (explicit frozen checkpoint)"
+    echo "[3/4] Skipping A2 training (explicit frozen checkpoint)"
+else
+    echo "[2/4] Training A1"
+    (cd "$EASE_ROOT/ULD" && train_role a1)
+    echo "[3/4] Training A2"
+    (cd "$EASE_ROOT/ULD" && train_role a2)
+fi
 
 latest_checkpoint() {
     find "$1" -name 'checkpoint-*' -type d \
