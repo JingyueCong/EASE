@@ -527,6 +527,20 @@ MU 下降。下一步结构定位固定 α=1.5，比较单层 8/12/15（rank 8�
 8/12/15（rank 4）。该扫描的配置范围由干预局部性假设预先确定，全部使用相同 40 个
 四格单元；每个结构重新估计独立 subspace，不能复用不同 layers/rank 的 artifact。
 
+进一步的标量细扫在 α=1.45 达到 `Agg=0.476082`、`Mem=0.418066`、
+`Util=0.552793`，比 α=1.5 提升约 0.0047，但仍低于当前 F2R 的 0.486978。这说明
+单一强度主要沿 Mem--Util 前沿移动，继续细化一个标量的预期收益有限。因此实现
+层特异干预
+
+\[
+h_{\ell+1}'=h_{\ell+1}-\alpha_\ell P_\ell(h_{\ell+1}-\mu_\ell),
+\]
+
+并固定原始 strict-v2 rank-8 artifact，只扫描四个预先指定的
+`(alpha_8, alpha_12, alpha_15)` 组合。首轮保持第 15 层为 1.5，逐步减弱第 8/12 层，
+以检验“深层承担 forget-specific removal、浅层过强干预损害 utility”的机制假设。
+这一扫描仍使用最终 retain 指标作诊断选择，不能据此声称 selection retain-free。
+
 ### 13.3 因果假设审计
 
 - 四单元的 relation/style/difficulty/length matching score；

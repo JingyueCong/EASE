@@ -45,6 +45,7 @@ TRAINING_METADATA_FIELDS = [
     "causal_layers",
     "causal_rank",
     "intervention_alpha",
+    "intervention_layer_alphas",
     "method_artifact",
 ]
 
@@ -362,6 +363,7 @@ def main() -> None:
             "method-ladder",
             "calibration",
             "ciru-structure",
+            "ciru-layer-alpha",
         ),
         default="inference",
     )

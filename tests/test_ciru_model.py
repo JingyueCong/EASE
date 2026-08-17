@@ -39,6 +39,18 @@ NAMES = {
 
 
 class CIRUModelTest(unittest.TestCase):
+    def test_layer_alpha_parser_accepts_slash_separated_overrides(self):
+        self.assertEqual(
+            ciru_model.parse_layer_alphas("8:0.75/12:1.0/15:1.5"),
+            {8: 0.75, 12: 1.0, 15: 1.5},
+        )
+
+    def test_layer_alpha_parser_rejects_duplicates_and_negative_values(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            ciru_model.parse_layer_alphas("8:0.5/8:1.0")
+        with self.assertRaisesRegex(ValueError, "Invalid"):
+            ciru_model.parse_layer_alphas("8:-0.5")
+
     def test_ungated_hook_removes_only_projected_direction(self):
         model = DummyCIRU(gate_enabled=False)
         hook = model._make_ciru_hook(0, NAMES)
@@ -54,6 +66,14 @@ class CIRUModelTest(unittest.TestCase):
         result = hook(None, None, (hidden, cache))
         torch.testing.assert_close(result[0], torch.tensor([[[1.0, 3.0, 4.0, 5.0]]]))
         self.assertIs(result[1], cache)
+
+    def test_layer_specific_alpha_overrides_global_alpha(self):
+        model = DummyCIRU(gate_enabled=False)
+        model._ciru_layer_alphas = {8: 0.25}
+        hook = model._make_ciru_hook(8, NAMES)
+        hidden = torch.tensor([[[2.0, 3.0, 4.0, 5.0]]])
+        result = hook(None, None, hidden)
+        torch.testing.assert_close(result, torch.tensor([[[1.5, 3.0, 4.0, 5.0]]]))
 
 
 if __name__ == "__main__":

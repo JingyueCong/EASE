@@ -19,6 +19,7 @@ SEED="${SEED:-42}"
 LAYERS="${LAYERS:-8 12 15}"
 RANK="${RANK:-8}"
 ALPHA="${ALPHA:-1.0}"
+LAYER_ALPHAS="${LAYER_ALPHAS:-}"
 GATE_ENABLED="${GATE_ENABLED:-true}"
 EVAL_BS="${EVAL_BS:-4}"
 EVAL_OVERWRITE="${EVAL_OVERWRITE:-true}"
@@ -85,6 +86,7 @@ echo "  GPU               : $GPU"
 echo "  factorial data    : $DATA_PATH"
 echo "  layers/rank       : $LAYERS / $RANK"
 echo "  alpha/gate        : $ALPHA / $GATE_ENABLED"
+echo "  layer alphas      : ${LAYER_ALPHAS:-global alpha}"
 echo "  generator         : $CF_PROVIDER / $CF_MODEL"
 echo "  artifact          : $ARTIFACT_PATH"
 echo "  task              : $TASK_NAME"
@@ -136,6 +138,10 @@ if [ ! -s "$RETAIN_LOGS_PATH" ]; then
 fi
 
 echo "[3/3] Running complete Open-Unlearning TOFU evaluation"
+EXTRA_MODEL_ARGS=()
+if [ -n "$LAYER_ALPHAS" ]; then
+    EXTRA_MODEL_ARGS+=(model.model_args.ciru_layer_alphas="$LAYER_ALPHAS")
+fi
 (cd "$EASE_ROOT/open-unlearning" && \
     CUDA_VISIBLE_DEVICES="$GPU" PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     "$EVAL_PY" src/eval.py \
@@ -144,6 +150,7 @@ echo "[3/3] Running complete Open-Unlearning TOFU evaluation"
         model.model_args.pretrained_model_name_or_path="$BASE_MODEL" \
         model.model_args.ciru_artifact_path="$ARTIFACT_PATH" \
         model.model_args.ciru_alpha="$ALPHA" \
+        "${EXTRA_MODEL_ARGS[@]}" \
         model.model_args.ciru_gate_enabled="$GATE_ENABLED" \
         model.tokenizer_args.pretrained_model_name_or_path="$TOKENIZER" \
         forget_split="$SPLIT" holdout_split="holdout${SPLIT#forget}" \
@@ -162,6 +169,7 @@ EVAL_DIR="$EASE_ROOT/open-unlearning/saves/eval/$TASK_NAME"
     --method-artifact "$ARTIFACT_PATH" --causal-units "$UNITS" \
     --causal-layers "$LAYERS" --causal-rank "$RANK" \
     --intervention-alpha "$ALPHA" \
+    --intervention-layer-alphas "${LAYER_ALPHAS:-null}" \
     --selection-retain-access false
 
 echo "Done: $EVAL_DIR/F2R_REPORT.md"

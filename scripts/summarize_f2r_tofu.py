@@ -290,6 +290,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
             (
                 "- Intervention: "
                 f"`alpha={metadata.get('intervention_alpha')}, "
+                f"layer_alphas={metadata.get('intervention_layer_alphas')}, "
                 f"learned_gate={metadata.get('gate_enabled')}`"
             ),
         ]
@@ -401,6 +402,7 @@ def main() -> None:
     parser.add_argument("--causal-layers")
     parser.add_argument("--causal-rank", type=int)
     parser.add_argument("--intervention-alpha", type=float)
+    parser.add_argument("--intervention-layer-alphas")
     parser.add_argument(
         "--selection-retain-access",
         choices=("true", "false"),
@@ -448,6 +450,7 @@ def main() -> None:
         "causal_layers": args.causal_layers,
         "causal_rank": args.causal_rank,
         "intervention_alpha": args.intervention_alpha,
+        "intervention_layer_alphas": args.intervention_layer_alphas,
         "selection_retain_access": args.selection_retain_access == "true",
     }
     report = build_report(load_json(args.eval_json), load_json(args.summary_json), metadata)

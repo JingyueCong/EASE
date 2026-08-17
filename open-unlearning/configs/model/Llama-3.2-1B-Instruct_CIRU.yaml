@@ -5,6 +5,8 @@ model_args:
   torch_dtype: bfloat16
   ciru_artifact_path: ???
   ciru_alpha: 1.0
+  # Optional slash-separated overrides, e.g. 8:0.75/12:1.0/15:1.5.
+  ciru_layer_alphas: null
   ciru_gate_enabled: true
 model_handler: CIRUForCausalLM
 tokenizer_args:

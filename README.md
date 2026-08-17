@@ -336,6 +336,23 @@ data and receives a complete frozen evaluation. The manifest records exact
 layers, rank, alpha, artifact, and report paths; all Open-Unlearning metrics
 are exported alongside the LLM-Beliefs aggregation.
 
+The scalar-alpha diagnostic peaks at `alpha=1.45` on forget05
+(`Agg=0.476082`, `Mem=0.418066`, `Util=0.552793`). To test whether shallow
+interventions can be weakened while retaining a strong layer-15 deletion
+effect, run the frozen-artifact layer-specific sweep:
+
+```bash
+GPUS="0 1 2 3" GLOBAL_ALPHA=1.45 \
+  bash scripts/sweep_ciru_layer_alpha.sh
+```
+
+The model accepts overrides such as
+`LAYER_ALPHAS="8:0.75/12:1.0/15:1.5"`; unspecified artifact layers fall back
+to `ALPHA`. The default sweep evaluates four prespecified triples in parallel,
+reuses the strict-v2 rank-8 artifact, and writes `F2R_SWEEP.md` plus the full
+Open-Unlearning metric export. This is diagnostic selection using retain-side
+metrics and must not be presented as retain-free hyperparameter selection.
+
 The first F2D-40 run reaches only `checkpoint-50` at five epochs, whereas the
 400-pair F2R comparison reaches approximately `checkpoint-155`. Run the
 equal-step/A2-balance experiment before concluding that the smaller factorial

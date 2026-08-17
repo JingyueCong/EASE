@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 import torch
@@ -13,6 +14,32 @@ from transformers import LlamaForCausalLM
 
 
 logger = logging.getLogger("model.ciru")
+
+
+def parse_layer_alphas(value: Optional[str]) -> Dict[int, float]:
+    """Parse ``layer:alpha`` pairs separated by slash, comma, or semicolon."""
+    if value is None or not str(value).strip():
+        return {}
+    parsed: Dict[int, float] = {}
+    for item in re.split(r"[/,;]", str(value)):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            layer_text, alpha_text = item.split(":", 1)
+            layer = int(layer_text)
+            alpha = float(alpha_text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "ciru_layer_alphas must contain layer:alpha pairs, "
+                "for example 8:0.75/12:1.0/15:1.5"
+            ) from exc
+        if layer in parsed:
+            raise ValueError(f"Duplicate CIRU layer alpha for layer {layer}")
+        if not math.isfinite(alpha) or alpha < 0.0:
+            raise ValueError(f"Invalid CIRU alpha for layer {layer}: {alpha}")
+        parsed[layer] = alpha
+    return parsed
 
 
 class CIRUForCausalLM(LlamaForCausalLM):
@@ -24,6 +51,7 @@ class CIRUForCausalLM(LlamaForCausalLM):
         pretrained_model_name_or_path: str,
         ciru_artifact_path: str = None,
         ciru_alpha: float = 1.0,
+        ciru_layer_alphas: Optional[str] = None,
         ciru_gate_enabled: bool = True,
         **kwargs,
     ):
@@ -35,6 +63,7 @@ class CIRUForCausalLM(LlamaForCausalLM):
 
         model = super().from_pretrained(pretrained_model_name_or_path, **kwargs)
         model._ciru_alpha = float(ciru_alpha)
+        model._ciru_layer_alphas = parse_layer_alphas(ciru_layer_alphas)
         model._ciru_gate_enabled = bool(ciru_gate_enabled)
         model._ciru_layer_state = {}
 
@@ -72,6 +101,13 @@ class CIRUForCausalLM(LlamaForCausalLM):
                     )
                 model._ciru_layer_state[layer] = names
 
+        unknown_alpha_layers = set(model._ciru_layer_alphas) - set(model._ciru_layer_state)
+        if unknown_alpha_layers:
+            raise ValueError(
+                "CIRU layer-specific alpha refers to layer(s) absent from the artifact: "
+                + ", ".join(str(layer) for layer in sorted(unknown_alpha_layers))
+            )
+
         model._ciru_hook_handles = []
         for layer, names in model._ciru_layer_state.items():
             if layer < 0 or layer >= len(model.model.layers):
@@ -82,11 +118,12 @@ class CIRUForCausalLM(LlamaForCausalLM):
             model._ciru_hook_handles.append(handle)
 
         logger.info(
-            "CIRU ready: base=%s artifact=%s layers=%s alpha=%s gate=%s",
+            "CIRU ready: base=%s artifact=%s layers=%s alpha=%s layer_alphas=%s gate=%s",
             pretrained_model_name_or_path,
             artifact_path,
             sorted(model._ciru_layer_state),
             model._ciru_alpha,
+            model._ciru_layer_alphas,
             model._ciru_gate_enabled,
         )
         return model
@@ -108,7 +145,10 @@ class CIRUForCausalLM(LlamaForCausalLM):
                 intercept = getattr(self, names["gate_intercept"]).to(feature.device)
                 gate = torch.sigmoid(coef * ((feature - mean) / std) + intercept)
                 projected = projected * gate.to(projected.dtype).unsqueeze(-1)
-            modified = hidden - self._ciru_alpha * projected
+            layer_alpha = getattr(self, "_ciru_layer_alphas", {}).get(
+                layer, self._ciru_alpha
+            )
+            modified = hidden - layer_alpha * projected
             if isinstance(output, tuple):
                 return (modified,) + output[1:]
             return modified
