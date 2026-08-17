@@ -103,14 +103,16 @@ def stratified_sources(
 
 
 def generate_one(client, args, source: Dict[str, str]) -> Dict:
-    user = (
+    base_user = (
         f"C11 source_id: {source['source_id']}\n"
         f"C11 question: {source['question']}\n"
         f"C11 answer: {source['answer']}"
     )
     last_error = None
+    validation_feedback = ""
     for attempt in range(args.retries):
         try:
+            user = base_user + validation_feedback
             request = {
                 "model": args.model,
                 "messages": [
@@ -147,6 +149,15 @@ def generate_one(client, args, source: Dict[str, str]) -> Dict:
             }
             errors = validate_ciru_unit(record)
             if errors:
+                validation_feedback = (
+                    "\n\nYour previous JSON failed these exact hard checks:\n- "
+                    + "\n- ".join(errors)
+                    + "\nReturn a corrected full JSON object. In particular, declared "
+                    "target_entity must be an exact contiguous span in both C11.question "
+                    "and C10.question; declared replacement_entity must be an exact "
+                    "contiguous span in both C01.question and C00.question. Do not "
+                    "paraphrase C11."
+                )
                 raise ValueError("; ".join(errors))
             record["audit"] = audit_ciru_unit(record)
             return record
@@ -187,13 +198,43 @@ def main() -> None:
     )
     client = OpenAI(api_key=api_key, base_url=args.base_url)
 
+    # A failed fixed design must not create the final dataset, but validated
+    # units are checkpointed separately so an API/schema failure at unit 40
+    # does not waste the preceding 39 calls.  Only records matching the same
+    # immutable selected source QA are reusable.
+    partial_path = Path(str(args.output) + ".partial.jsonl")
+    source_by_id = {source["source_id"]: source for source in sources}
+    records = []
+    if partial_path.is_file():
+        for record in ciru_data.load_ciru_units(partial_path):
+            source = source_by_id.get(record["source_id"])
+            if source is None:
+                continue
+            if (
+                record["source_question"] == source["question"]
+                and record["source_answer"] == source["answer"]
+            ):
+                records.append(record)
+        print(f"resume_valid={len(records)}/{args.units} from {partial_path}")
+    completed_ids = {record["source_id"] for record in records}
+    pending_sources = [
+        source for source in sources if source["source_id"] not in completed_ids
+    ]
+    if not pending_sources:
+        records.sort(key=lambda row: row["source_id"])
+        ciru_data.write_ciru_jsonl(args.output, records)
+        partial_path.unlink(missing_ok=True)
+        print(f"units={len(records)} cells={4 * len(records)} generated_cells={3 * len(records)}")
+        print(f"output={args.output}")
+        return
+
     probe_modes = ["required", "prompt"] if args.json_mode == "auto" else [args.json_mode]
     first = None
     for mode in probe_modes:
         args.resolved_json_mode = mode
         print(f"API preflight: model={args.model} json_mode={mode}")
         try:
-            first = generate_one(client, args, sources[0])
+            first = generate_one(client, args, pending_sources[0])
             print(f"API preflight OK; resolved_json_mode={mode}")
             break
         except Exception as exc:
@@ -207,17 +248,21 @@ def main() -> None:
     if first is None:
         raise SystemExit(1)
 
-    records = [first]
+    records.append(first)
+    records.sort(key=lambda row: row["source_id"])
+    ciru_data.write_ciru_jsonl(partial_path, records)
     failures = []
     with ThreadPoolExecutor(max_workers=max(args.concurrency, 1)) as executor:
         future_map = {
             executor.submit(generate_one, client, args, source): source
-            for source in sources[1:]
+            for source in pending_sources[1:]
         }
         for future in as_completed(future_map):
             source = future_map[future]
             try:
                 records.append(future.result())
+                records.sort(key=lambda row: row["source_id"])
+                ciru_data.write_ciru_jsonl(partial_path, records)
                 print(f"valid={len(records)}/{args.units}", flush=True)
             except Exception as exc:
                 failures.append((source["source_id"], str(exc)))
@@ -229,6 +274,7 @@ def main() -> None:
         raise SystemExit(1)
     records.sort(key=lambda row: row["source_id"])
     ciru_data.write_ciru_jsonl(args.output, records)
+    partial_path.unlink(missing_ok=True)
     print(f"units={len(records)} cells={4 * len(records)} generated_cells={3 * len(records)}")
     print(f"output={args.output}")
 
