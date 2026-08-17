@@ -69,6 +69,7 @@ exec env \
     WEIGHT_PAIRS="$WEIGHT_PAIRS" TOP_FILTERS="$TOP_FILTERS" \
     SWEEP_NAME="$SWEEP_NAME" \
     F2R_VARIANT="F2D-C01+Placebo-Checkpoint${CHECKPOINT_STEP}" \
+    ALIGNMENT_ENABLED=false GATE_ENABLED=false CALIBRATION_PATH=null \
     EVAL_BS="${EVAL_BS:-4}" RESUME="${RESUME:-true}" \
     TARGET_AGG="${TARGET_AGG:-0.58}" TARGET_MARGIN="${TARGET_MARGIN:-0.005}" \
     bash "$EASE_ROOT/scripts/sweep_f2r_weights.sh"
