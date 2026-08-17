@@ -3,6 +3,14 @@
 set -euo pipefail
 
 EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ENV_FILE="${ENV_FILE:-${EASE_ROOT}/.env}"
+if [ -f "$ENV_FILE" ]; then
+    echo "Loading environment once: $ENV_FILE"
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+fi
 SPLIT="${SPLIT:-forget05}"
 SEED="${SEED:-42}"
 UNITS="${UNITS:-40}"
@@ -33,6 +41,12 @@ export RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${S
 export A1_DATA_MODE=f2d_did_a1
 export A2_DATA_MODE=f2d_did_a2
 export F2R_VARIANT=F2D-DiD-Balanced
+# This is the uncalibrated causal-assignment experiment.  Isolate it from
+# ALIGNMENT/GATE variables left in the login shell or .env by other ladders.
+export ALIGNMENT_ENABLED=false
+export GATE_ENABLED=false
+export CALIBRATION_PATH=null
+export LOAD_DOTENV=0
 export WEIGHT_A1="${WEIGHT_A1:--1.3}"
 export WEIGHT_A2="${WEIGHT_A2:-0.8}"
 export TOP_FILTER="${TOP_FILTER:-0.0002}"
@@ -40,4 +54,5 @@ export TOP_FILTER="${TOP_FILTER:-0.0002}"
 echo "F2D-DiD estimand: (C11-C01) - (C10-C00)"
 echo "Audited units: $CIRU_PATH"
 echo "Stage-1 inference point: $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
+echo "Calibration isolation: alignment=$ALIGNMENT_ENABLED gate=$GATE_ENABLED artifact=$CALIBRATION_PATH"
 exec bash "${EASE_ROOT}/scripts/sweep_f2r_training.sh"
