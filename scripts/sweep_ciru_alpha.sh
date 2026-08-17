@@ -85,8 +85,14 @@ for index in "${!alpha_list[@]}"; do
             SPLIT="$SPLIT" UNITS="$UNITS" SEED="$SEED" GPU="$gpu" \
             LAYERS="$LAYERS" RANK="$RANK" ALPHA="$alpha" \
             GATE_ENABLED=false EVAL_BS="$EVAL_BS" EVAL_OVERWRITE=true \
+            STOP_AFTER_GENERATION=false \
             TASK_NAME="$task" \
             bash "$EASE_ROOT/scripts/run_ciru40_tofu.sh"
+        if [ ! -s "$report" ] \
+            || ! grep -q '"forget_truth_ratio_knowledge"' "$report"; then
+            echo "alpha=$alpha finished without a complete F2R report: $report" >&2
+            exit 1
+        fi
         echo "[$(date '+%H:%M:%S')] done alpha=$alpha on GPU $gpu"
     ) > "$log" 2>&1 &
     pids+=("$!")
