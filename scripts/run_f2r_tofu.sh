@@ -84,6 +84,7 @@ TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
 TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
+TRAIN_STEPS="${TRAIN_STEPS:-0}"
 RETAIN_WEIGHT="${RETAIN_WEIGHT:-5.0}"
 SEED="${SEED:-42}"
 EVAL_BS="${EVAL_BS:-4}"
@@ -138,6 +139,8 @@ A1_TRAIN_LR="${A1_TRAIN_LR:-$TRAIN_LR}"
 A2_TRAIN_LR="${A2_TRAIN_LR:-$TRAIN_LR}"
 A1_TRAIN_EP="${A1_TRAIN_EP:-$TRAIN_EP}"
 A2_TRAIN_EP="${A2_TRAIN_EP:-$TRAIN_EP}"
+A1_TRAIN_STEPS="${A1_TRAIN_STEPS:-$TRAIN_STEPS}"
+A2_TRAIN_STEPS="${A2_TRAIN_STEPS:-$TRAIN_STEPS}"
 A1_RETAIN_WEIGHT="${A1_RETAIN_WEIGHT:-$RETAIN_WEIGHT}"
 A2_RETAIN_WEIGHT="${A2_RETAIN_WEIGHT:-$RETAIN_WEIGHT}"
 A1_TRAIN_BS="${A1_TRAIN_BS:-$TRAIN_BS}"
@@ -150,6 +153,14 @@ A1_CHECKPOINT_OVERRIDE="${A1_CHECKPOINT_OVERRIDE:-}"
 A2_CHECKPOINT_OVERRIDE="${A2_CHECKPOINT_OVERRIDE:-}"
 A1_DATA_MODE="${A1_DATA_MODE:-f2r_a1}"
 A2_DATA_MODE="${A2_DATA_MODE:-f2r_a2}"
+
+for steps_name in A1_TRAIN_STEPS A2_TRAIN_STEPS; do
+    steps_value="${!steps_name}"
+    if ! [[ "$steps_value" =~ ^[0-9]+$ ]]; then
+        echo "$steps_name must be a non-negative integer (got: $steps_value)" >&2
+        exit 1
+    fi
+done
 
 if { [ -n "$A1_CHECKPOINT_OVERRIDE" ] && [ -z "$A2_CHECKPOINT_OVERRIDE" ]; } \
     || { [ -z "$A1_CHECKPOINT_OVERRIDE" ] && [ -n "$A2_CHECKPOINT_OVERRIDE" ]; }; then
@@ -258,6 +269,7 @@ echo "  A1 assistant     : layers=$A1_NUM_LAYER, LoRA=$A1_LORA_R/$A1_LORA_ALPHA,
 echo "  A2 assistant     : layers=$A2_NUM_LAYER, LoRA=$A2_LORA_R/$A2_LORA_ALPHA, dropout=$A2_LORA_DROPOUT"
 echo "  A1 optimization  : lr=$A1_TRAIN_LR, epochs=$A1_TRAIN_EP, uniform-weight=$A1_RETAIN_WEIGHT, bs/ga=$A1_TRAIN_BS/$A1_TRAIN_GA, seed=$A1_SEED"
 echo "  A2 optimization  : lr=$A2_TRAIN_LR, epochs=$A2_TRAIN_EP, uniform-weight=$A2_RETAIN_WEIGHT, bs/ga=$A2_TRAIN_BS/$A2_TRAIN_GA, seed=$A2_SEED"
+echo "  explicit steps   : A1=$A1_TRAIN_STEPS / A2=$A2_TRAIN_STEPS (0=epoch-derived)"
 echo "  assistant data   : A1=$A1_DATA_MODE / A2=$A2_DATA_MODE"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
@@ -301,6 +313,7 @@ train_role() {
     local lora_dropout_var="${role_upper}_LORA_DROPOUT"
     local train_lr_var="${role_upper}_TRAIN_LR"
     local train_ep_var="${role_upper}_TRAIN_EP"
+    local train_steps_var="${role_upper}_TRAIN_STEPS"
     local retain_weight_var="${role_upper}_RETAIN_WEIGHT"
     local train_bs_var="${role_upper}_TRAIN_BS"
     local train_ga_var="${role_upper}_TRAIN_GA"
@@ -312,6 +325,7 @@ train_role() {
     local role_lora_dropout="${!lora_dropout_var}"
     local role_train_lr="${!train_lr_var}"
     local role_train_ep="${!train_ep_var}"
+    local role_train_steps="${!train_steps_var}"
     local role_retain_weight="${!retain_weight_var}"
     local role_train_bs="${!train_bs_var}"
     local role_train_ga="${!train_ga_var}"
@@ -321,6 +335,9 @@ train_role() {
     signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|seed=$role_seed"
     if [ "$role_data_mode" != "f2r_${role}" ]; then
         signature="${signature}|data_mode=$role_data_mode"
+    fi
+    if [ "$role_train_steps" -gt 0 ]; then
+        signature="${signature}|max_steps=$role_train_steps"
     fi
     local signature_file="${output_root}/F2R_TRAIN_SIGNATURE.txt"
     if find "$output_root" -name 'checkpoint-*' -type d 2>/dev/null | grep -q .; then
@@ -336,6 +353,10 @@ train_role() {
         fi
         echo "      Reusing existing $role checkpoint under $output_root"
         return
+    fi
+    local step_args=()
+    if [ "$role_train_steps" -gt 0 ]; then
+        step_args=(trainer.max_steps="$role_train_steps")
     fi
     CUDA_VISIBLE_DEVICES="$GPU" "$TRAIN_PY" "$EASE_ROOT/ULD/scripts/hf_forget_train.py" \
         project="f2r_${role}_${SPLIT}" \
@@ -358,6 +379,7 @@ train_role() {
         trainer.learning_rate="$role_train_lr" \
         trainer.optim="$TRAIN_OPTIM" \
         trainer.max_epochs="$role_train_ep" \
+        "${step_args[@]}" \
         trainer.seed="$role_seed" \
         seed="$role_seed" \
         trainer.strategy=gpu \
@@ -526,6 +548,8 @@ fi
     --a2-train-lr "$A2_TRAIN_LR" \
     --a1-train-ep "$A1_TRAIN_EP" \
     --a2-train-ep "$A2_TRAIN_EP" \
+    --a1-train-steps "$A1_TRAIN_STEPS" \
+    --a2-train-steps "$A2_TRAIN_STEPS" \
     --a1-retain-weight "$A1_RETAIN_WEIGHT" \
     --a2-retain-weight "$A2_RETAIN_WEIGHT" \
     --a1-seed "$A1_SEED" \

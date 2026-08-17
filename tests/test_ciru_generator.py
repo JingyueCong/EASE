@@ -35,6 +35,35 @@ class CIRUGeneratorTest(unittest.TestCase):
         second = generator.stratified_sources(sources, 40, 20, seed=9)
         self.assertEqual(first, second)
 
+    def test_eighty_source_design_nests_audited_forty(self):
+        sources = [
+            {"source_id": f"row-{index}", "question": "q", "answer": "a"}
+            for index in range(200)
+        ]
+        forty = generator.stratified_sources(sources, 40, 20, seed=42)
+        included_ids = [row["source_id"] for row in forty]
+        eighty = generator.stratified_sources(
+            sources, 80, 20, seed=42, include_source_ids=included_ids
+        )
+        eighty_ids = {row["source_id"] for row in eighty}
+        self.assertTrue(set(included_ids).issubset(eighty_ids))
+        counts = [0] * 10
+        for row in eighty:
+            counts[int(row["source_id"].split("-")[1]) // 20] += 1
+        self.assertEqual(counts, [8] * 10)
+        self.assertEqual(len(eighty_ids), 80)
+
+    def test_two_hundred_source_design_uses_every_source(self):
+        sources = [
+            {"source_id": f"row-{index}", "question": "q", "answer": "a"}
+            for index in range(200)
+        ]
+        selected = generator.stratified_sources(sources, 200, 20, seed=42)
+        self.assertEqual(
+            {row["source_id"] for row in selected},
+            {row["source_id"] for row in sources},
+        )
+
     def test_schema_failure_is_fed_back_to_the_next_attempt(self):
         valid = {
             "target_entity": "Basil Hart",
@@ -94,11 +123,15 @@ class CIRUGeneratorTest(unittest.TestCase):
         original_sleep = generator.time.sleep
         generator.time.sleep = lambda _seconds: None
         try:
-            record = generator.generate_one(client, args, source)
+            record = generator.generate_one(
+                client, args, source, replacement_entity="Elian Mercer"
+            )
         finally:
             generator.time.sleep = original_sleep
         self.assertEqual(record["cells"]["C11"]["question"], source["question"])
         second_prompt = completions.requests[1]["messages"][1]["content"]
+        first_prompt = completions.requests[0]["messages"][1]["content"]
+        self.assertIn("Required replacement_entity: Elian Mercer", first_prompt)
         self.assertIn("previous JSON failed", second_prompt)
         self.assertIn("replacement_entity", second_prompt)
 

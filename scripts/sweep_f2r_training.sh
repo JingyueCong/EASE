@@ -27,7 +27,7 @@ WEIGHT_A2="${WEIGHT_A2:-0.2}"
 TOP_FILTER="${TOP_FILTER:-0.0025}"
 
 # Format per whitespace-separated entry:
-# tag:a1_layers:a2_layers:a1_rank:a2_rank:a1_lr:a2_lr:a1_epochs:a2_epochs:a1_uniform_weight:a2_uniform_weight
+# tag:a1_layers:a2_layers:a1_rank:a2_rank:a1_lr:a2_lr:a1_epochs:a2_epochs:a1_uniform_weight:a2_uniform_weight[:a1_steps:a2_steps]
 TRAIN_CONFIGS="${TRAIN_CONFIGS:-\
 lr1e4_e5:2:2:16:16:1e-4:1e-4:5:5:5:5 \
 lr3e4_e5:2:2:16:16:3e-4:3e-4:5:5:5:5 \
@@ -66,7 +66,7 @@ fi
 
 mkdir -p "$RESULTS_DIR/logs" "$MODELS_SWEEP_ROOT"
 MANIFEST="$RESULTS_DIR/manifest.csv"
-echo "tag,weight_a1,weight_a2,top_filter,task_name,report,views,a1_num_layer,a2_num_layer,a1_lora_r,a2_lora_r,a1_lora_alpha,a2_lora_alpha,a1_train_lr,a2_train_lr,a1_train_ep,a2_train_ep,a1_retain_weight,a2_retain_weight,a1_seed,a2_seed,a1_data_mode,a2_data_mode,variant,models_root" > "$MANIFEST"
+echo "tag,weight_a1,weight_a2,top_filter,task_name,report,views,a1_num_layer,a2_num_layer,a1_lora_r,a2_lora_r,a1_lora_alpha,a2_lora_alpha,a1_train_lr,a2_train_lr,a1_train_ep,a2_train_ep,a1_train_steps,a2_train_steps,a1_retain_weight,a2_retain_weight,a1_seed,a2_seed,a1_data_mode,a2_data_mode,variant,models_root" > "$MANIFEST"
 
 echo "============================================================"
 echo "F2R assistant-training sweep"
@@ -85,16 +85,17 @@ run_one() {
     local gpu="$1" tag="$2" a1_layers="$3" a2_layers="$4"
     local a1_rank="$5" a2_rank="$6" a1_lr="$7" a2_lr="$8"
     local a1_epochs="$9" a2_epochs="${10}" a1_uniform="${11}" a2_uniform="${12}"
+    local a1_steps="${13:-0}" a2_steps="${14:-0}"
     local models_root="${MODELS_SWEEP_ROOT}/${tag}"
     local task_name="${TASK_PREFIX}_${tag}"
     local report="${EASE_ROOT}/open-unlearning/saves/eval/${task_name}/F2R_REPORT.json"
     local a1_alpha=$((2 * a1_rank))
     local a2_alpha=$((2 * a2_rank))
 
-    echo "$tag,$WEIGHT_A1,$WEIGHT_A2,$TOP_FILTER,$task_name,$report,$VIEWS,$a1_layers,$a2_layers,$a1_rank,$a2_rank,$a1_alpha,$a2_alpha,$a1_lr,$a2_lr,$a1_epochs,$a2_epochs,$a1_uniform,$a2_uniform,$SEED,$SEED,$A1_DATA_MODE,$A2_DATA_MODE,$F2R_VARIANT,$models_root" >> "$MANIFEST"
+    echo "$tag,$WEIGHT_A1,$WEIGHT_A2,$TOP_FILTER,$task_name,$report,$VIEWS,$a1_layers,$a2_layers,$a1_rank,$a2_rank,$a1_alpha,$a2_alpha,$a1_lr,$a2_lr,$a1_epochs,$a2_epochs,$a1_steps,$a2_steps,$a1_uniform,$a2_uniform,$SEED,$SEED,$A1_DATA_MODE,$A2_DATA_MODE,$F2R_VARIANT,$models_root" >> "$MANIFEST"
 
     if [ "$DRY_RUN" = "true" ]; then
-        echo "[dry-run] $tag GPU=$gpu A1(layers=$a1_layers,r=$a1_rank,lr=$a1_lr,ep=$a1_epochs,u=$a1_uniform) A2(layers=$a2_layers,r=$a2_rank,lr=$a2_lr,ep=$a2_epochs,u=$a2_uniform)"
+        echo "[dry-run] $tag GPU=$gpu A1(layers=$a1_layers,r=$a1_rank,lr=$a1_lr,ep=$a1_epochs,steps=$a1_steps,u=$a1_uniform) A2(layers=$a2_layers,r=$a2_rank,lr=$a2_lr,ep=$a2_epochs,steps=$a2_steps,u=$a2_uniform)"
         return
     fi
 
@@ -113,6 +114,7 @@ run_one() {
         A1_LORA_ALPHA="$a1_alpha" A2_LORA_ALPHA="$a2_alpha" \
         A1_TRAIN_LR="$a1_lr" A2_TRAIN_LR="$a2_lr" \
         A1_TRAIN_EP="$a1_epochs" A2_TRAIN_EP="$a2_epochs" \
+        A1_TRAIN_STEPS="$a1_steps" A2_TRAIN_STEPS="$a2_steps" \
         A1_RETAIN_WEIGHT="$a1_uniform" A2_RETAIN_WEIGHT="$a2_uniform" \
         A1_SEED="$SEED" A2_SEED="$SEED" \
         A1_DATA_MODE="$A1_DATA_MODE" A2_DATA_MODE="$A2_DATA_MODE" \
@@ -138,14 +140,15 @@ wait_batch() {
 INDEX=0
 for config in "${CONFIG_LIST[@]}"; do
     IFS=: read -r tag a1_layers a2_layers a1_rank a2_rank a1_lr a2_lr \
-        a1_epochs a2_epochs a1_uniform a2_uniform <<< "$config"
+        a1_epochs a2_epochs a1_uniform a2_uniform a1_steps a2_steps <<< "$config"
     if [ -z "${a2_uniform:-}" ]; then
         echo "Invalid TRAIN_CONFIGS entry: $config" >&2
         exit 1
     fi
     gpu="${GPU_LIST[$((INDEX % ${#GPU_LIST[@]}))]}"
     run_one "$gpu" "$tag" "$a1_layers" "$a2_layers" "$a1_rank" "$a2_rank" \
-        "$a1_lr" "$a2_lr" "$a1_epochs" "$a2_epochs" "$a1_uniform" "$a2_uniform" &
+        "$a1_lr" "$a2_lr" "$a1_epochs" "$a2_epochs" "$a1_uniform" "$a2_uniform" \
+        "${a1_steps:-0}" "${a2_steps:-0}" &
     pids+=("$!")
     INDEX=$((INDEX + 1))
     if [ "${#pids[@]}" -eq "${#GPU_LIST[@]}" ]; then

@@ -40,7 +40,7 @@ export MODELS_SWEEP_ROOT="${MODELS_SWEEP_ROOT:-${EASE_ROOT}/ULD/outputs_trained_
 export RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${SWEEP_NAME}}"
 export A1_DATA_MODE=f2d_did_a1
 export A2_DATA_MODE=f2d_did_a2
-export F2R_VARIANT=F2D-DiD-Balanced
+export F2R_VARIANT="${F2R_VARIANT:-F2D-DiD-Balanced}"
 # This is the uncalibrated causal-assignment experiment.  Isolate it from
 # ALIGNMENT/GATE variables left in the login shell or .env by other ladders.
 export ALIGNMENT_ENABLED=false

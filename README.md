@@ -332,6 +332,30 @@ The four configurations compare 12/18 epochs and uniform weights 1/2 at a
 fixed development inference point. A winning assistant pair still requires a
 separate inference sweep and validation on additional seeds and splits.
 
+For a controlled 40-to-80 causal-budget experiment, use the nested runner:
+
+```bash
+GPUS="0 1 2 3" bash scripts/run_f2d_did80_budget.sh
+```
+
+It preserves all 40 audited four-cell records exactly, adds four new
+sources per TOFU author block, validates the resulting 80-source superset, and compares exact
+optimizer-step budgets 36/48/60. The primary `b80_s36_u1` condition is
+compute-matched to the best 40-unit F2D-DiD run.
+
+For the full-coverage experiment, construct one four-cell DiD unit for every
+forget05 QA without source sampling:
+
+```bash
+GPUS="0 1 2 3" bash scripts/run_f2d_did200_full.sh
+```
+
+This produces 200 causal units (800 cells). Each ordered 20-QA author block
+shares one replacement identity, while every QA receives its own matched
+target/placebo relation cells. The runner validates complete 0--199 coverage
+and block-level identity consistency before launching the four-GPU 36/48/60
+optimizer-step sweep.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

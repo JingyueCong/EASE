@@ -68,8 +68,13 @@ def main(configs):
     train_data_size = len(data_module.train_dataloader()) * batch_size
     num_update_steps_per_epoch = train_data_size // (num_devices * batch_size * trainer_config.gradient_accumulation_steps)
     num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
-    num_training_steps = num_update_steps_per_epoch * trainer_config.max_epochs 
-    print("num_training_steps", num_training_steps)
+    configured_max_steps = trainer_config.get("max_steps")
+    if configured_max_steps is not None and int(configured_max_steps) > 0:
+        num_training_steps = int(configured_max_steps)
+        print("num_training_steps", num_training_steps, "(explicit)")
+    else:
+        num_training_steps = num_update_steps_per_epoch * trainer_config.max_epochs
+        print("num_training_steps", num_training_steps, "(epoch-derived)")
 
     #! change checkpoint foler at runtime
     tmpckptdir = ckptdir.split(BASELOGDIR)[-1]

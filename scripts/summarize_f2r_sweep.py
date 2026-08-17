@@ -30,6 +30,8 @@ TRAINING_METADATA_FIELDS = [
     "a2_train_lr",
     "a1_train_ep",
     "a2_train_ep",
+    "a1_train_steps",
+    "a2_train_steps",
     "a1_retain_weight",
     "a2_retain_weight",
     "a1_seed",

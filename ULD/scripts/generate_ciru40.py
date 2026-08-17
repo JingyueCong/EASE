@@ -89,9 +89,23 @@ def load_sources(split: str) -> List[Dict[str, str]]:
 
 
 def stratified_sources(
-    sources: List[Dict[str, str]], units: int, block_size: int, seed: int
+    sources: List[Dict[str, str]],
+    units: int,
+    block_size: int,
+    seed: int,
+    include_source_ids: List[str] | None = None,
 ) -> List[Dict[str, str]]:
     """Sample evenly across ordered TOFU author blocks when possible."""
+    include_source_ids = include_source_ids or []
+    if len(set(include_source_ids)) != len(include_source_ids):
+        raise ValueError("Included source ids must be unique")
+    source_by_id = {source["source_id"]: source for source in sources}
+    missing = [source_id for source_id in include_source_ids if source_id not in source_by_id]
+    if missing:
+        raise ValueError(f"Included source ids are absent from the split: {missing[:3]}")
+    if len(include_source_ids) > units:
+        raise ValueError("Included source count exceeds requested units")
+
     rng = random.Random(seed)
     if block_size > 0 and len(sources) % block_size == 0:
         blocks = [sources[i : i + block_size] for i in range(0, len(sources), block_size)]
@@ -99,19 +113,50 @@ def stratified_sources(
             per_block = units // len(blocks)
             selected = []
             for block in blocks:
-                selected.extend(rng.sample(block, per_block))
+                block_ids = {source["source_id"] for source in block}
+                included = [
+                    source_by_id[source_id]
+                    for source_id in include_source_ids
+                    if source_id in block_ids
+                ]
+                if len(included) > per_block:
+                    raise ValueError(
+                        "Included sources exceed the target allocation in one block"
+                    )
+                included_ids = {source["source_id"] for source in included}
+                candidates = [
+                    source for source in block
+                    if source["source_id"] not in included_ids
+                ]
+                selected.extend(included)
+                selected.extend(rng.sample(candidates, per_block - len(included)))
             return selected
     if units > len(sources):
         raise ValueError(f"Requested {units} units from only {len(sources)} sources")
-    return rng.sample(sources, units)
+    included = [source_by_id[source_id] for source_id in include_source_ids]
+    included_ids = set(include_source_ids)
+    candidates = [source for source in sources if source["source_id"] not in included_ids]
+    return included + rng.sample(candidates, units - len(included))
 
 
-def generate_one(client, args, source: Dict[str, str]) -> Dict:
+def generate_one(
+    client,
+    args,
+    source: Dict[str, str],
+    replacement_entity: str | None = None,
+) -> Dict:
     base_user = (
         f"C11 source_id: {source['source_id']}\n"
         f"C11 question: {source['question']}\n"
         f"C11 answer: {source['answer']}"
     )
+    if replacement_entity:
+        base_user += (
+            "\nRequired replacement_entity: "
+            f"{replacement_entity}\n"
+            "Use that exact replacement entity string in C01 and C00; do not "
+            "invent or rename it."
+        )
     last_error = None
     validation_feedback = ""
     for attempt in range(args.retries):
@@ -152,6 +197,14 @@ def generate_one(client, args, source: Dict[str, str]) -> Dict:
                 },
             }
             errors = validate_ciru_unit(record)
+            if replacement_entity and (
+                ciru_data.normalise(record.get("replacement_entity", ""))
+                != ciru_data.normalise(replacement_entity)
+            ):
+                errors.append(
+                    "replacement_entity must exactly match the required "
+                    f"author-block entity: {replacement_entity}"
+                )
             if errors:
                 validation_feedback = (
                     "\n\nYour previous JSON failed these exact hard checks:\n- "
@@ -183,6 +236,22 @@ def main() -> None:
     parser.add_argument("--units", type=int, default=40)
     parser.add_argument("--block-size", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--shared-replacement-per-block",
+        action="store_true",
+        help=(
+            "Generate one replacement identity per ordered source block and "
+            "reuse it for every unit in that block."
+        ),
+    )
+    parser.add_argument(
+        "--include-source-ids-from",
+        type=Path,
+        help=(
+            "Existing CIRU JSONL whose complete audited units must be nested "
+            "unchanged in this design."
+        ),
+    )
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
@@ -199,9 +268,24 @@ def main() -> None:
         raise SystemExit(f"Set {args.api_key_env} before generation")
     from openai import OpenAI
 
+    include_records = []
+    include_source_ids = []
+    if args.include_source_ids_from:
+        include_records = ciru_data.load_ciru_units(args.include_source_ids_from)
+        include_source_ids = [record["source_id"] for record in include_records]
+        print(
+            f"nested_units={len(include_source_ids)} "
+            f"from {args.include_source_ids_from}"
+        )
+    all_sources = load_sources(args.split)
     sources = stratified_sources(
-        load_sources(args.split), args.units, args.block_size, args.seed
+        all_sources, args.units, args.block_size, args.seed,
+        include_source_ids=include_source_ids,
     )
+    source_block = {
+        source["source_id"]: index // max(args.block_size, 1)
+        for index, source in enumerate(all_sources)
+    }
     client = OpenAI(api_key=api_key, base_url=args.base_url)
 
     # A failed fixed design must not create the final dataset, but validated
@@ -210,7 +294,10 @@ def main() -> None:
     # immutable selected source QA are reusable.
     partial_path = Path(str(args.output) + ".partial.jsonl")
     source_by_id = {source["source_id"]: source for source in sources}
-    records = []
+    # Preserve the complete audited parent units, not merely their source ids.
+    # This makes the larger budget a literal superset and spends API calls only
+    # on newly selected sources.
+    record_by_id = {record["source_id"]: record for record in include_records}
     if partial_path.is_file():
         for record in ciru_data.load_ciru_units(partial_path):
             source = source_by_id.get(record["source_id"])
@@ -220,12 +307,26 @@ def main() -> None:
                 record["source_question"] == source["question"]
                 and record["source_answer"] == source["answer"]
             ):
-                records.append(record)
+                record_by_id.setdefault(record["source_id"], record)
+        records = list(record_by_id.values())
         print(f"resume_valid={len(records)}/{args.units} from {partial_path}")
+    else:
+        records = list(record_by_id.values())
     completed_ids = {record["source_id"] for record in records}
     pending_sources = [
         source for source in sources if source["source_id"] not in completed_ids
     ]
+    replacement_by_block = {}
+    if args.shared_replacement_per_block:
+        for record in records:
+            block = source_block[record["source_id"]]
+            replacement = record["replacement_entity"]
+            previous = replacement_by_block.setdefault(block, replacement)
+            if ciru_data.normalise(previous) != ciru_data.normalise(replacement):
+                raise SystemExit(
+                    "Existing records violate shared replacement identity in "
+                    f"block {block}: {previous!r} vs {replacement!r}"
+                )
     if not pending_sources:
         records.sort(key=lambda row: row["source_id"])
         ciru_data.write_ciru_jsonl(args.output, records)
@@ -240,7 +341,14 @@ def main() -> None:
         args.resolved_json_mode = mode
         print(f"API preflight: model={args.model} json_mode={mode}")
         try:
-            first = generate_one(client, args, pending_sources[0])
+            first_source = pending_sources[0]
+            first_block = source_block[first_source["source_id"]]
+            first = generate_one(
+                client,
+                args,
+                first_source,
+                replacement_by_block.get(first_block),
+            )
             print(f"API preflight OK; resolved_json_mode={mode}")
             break
         except Exception as exc:
@@ -255,13 +363,59 @@ def main() -> None:
         raise SystemExit(1)
 
     records.append(first)
+    if args.shared_replacement_per_block:
+        replacement_by_block[
+            source_block[first["source_id"]]
+        ] = first["replacement_entity"]
     records.sort(key=lambda row: row["source_id"])
     ciru_data.write_ciru_jsonl(partial_path, records)
+
+    # Establish one replacement identity for every represented author block
+    # before parallel fact-level generation. Otherwise simultaneous requests
+    # could invent different identities for the same author block.
+    if args.shared_replacement_per_block:
+        completed_ids = {record["source_id"] for record in records}
+        remaining = [
+            source for source in pending_sources
+            if source["source_id"] not in completed_ids
+        ]
+        missing_blocks = sorted(
+            {source_block[source["source_id"]] for source in remaining}
+            - replacement_by_block.keys()
+        )
+        for block in missing_blocks:
+            anchor_source = next(
+                source for source in remaining
+                if source_block[source["source_id"]] == block
+            )
+            anchor = generate_one(client, args, anchor_source)
+            records.append(anchor)
+            replacement_by_block[block] = anchor["replacement_entity"]
+            records.sort(key=lambda row: row["source_id"])
+            ciru_data.write_ciru_jsonl(partial_path, records)
+            print(
+                f"block_anchor={block} replacement="
+                f"{anchor['replacement_entity']} valid={len(records)}/{args.units}",
+                flush=True,
+            )
+
+    completed_ids = {record["source_id"] for record in records}
+    remaining_sources = [
+        source for source in pending_sources
+        if source["source_id"] not in completed_ids
+    ]
     failures = []
     with ThreadPoolExecutor(max_workers=max(args.concurrency, 1)) as executor:
         future_map = {
-            executor.submit(generate_one, client, args, source): source
-            for source in pending_sources[1:]
+            executor.submit(
+                generate_one,
+                client,
+                args,
+                source,
+                replacement_by_block.get(source_block[source["source_id"]])
+                if args.shared_replacement_per_block else None,
+            ): source
+            for source in remaining_sources
         }
         for future in as_completed(future_map):
             source = future_map[future]

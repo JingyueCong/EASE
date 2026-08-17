@@ -308,6 +308,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
                 f"`layers={metadata.get('a1_num_layer')}, "
                 f"LoRA={metadata.get('a1_lora_r')}/{metadata.get('a1_lora_alpha')}, "
                 f"lr={metadata.get('a1_train_lr')}, epochs={metadata.get('a1_train_ep')}, "
+                f"steps={metadata.get('a1_train_steps')}, "
                 f"uniform_weight={metadata.get('a1_retain_weight')}, seed={metadata.get('a1_seed')}`"
             ),
             (
@@ -315,6 +316,7 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
                 f"`layers={metadata.get('a2_num_layer')}, "
                 f"LoRA={metadata.get('a2_lora_r')}/{metadata.get('a2_lora_alpha')}, "
                 f"lr={metadata.get('a2_train_lr')}, epochs={metadata.get('a2_train_ep')}, "
+                f"steps={metadata.get('a2_train_steps')}, "
                 f"uniform_weight={metadata.get('a2_retain_weight')}, seed={metadata.get('a2_seed')}`"
             ),
             f"- Counterfactual views: `{metadata.get('views')}`",
@@ -400,6 +402,8 @@ def main() -> None:
     parser.add_argument("--a2-train-lr", type=float)
     parser.add_argument("--a1-train-ep", type=int)
     parser.add_argument("--a2-train-ep", type=int)
+    parser.add_argument("--a1-train-steps", type=int, default=0)
+    parser.add_argument("--a2-train-steps", type=int, default=0)
     parser.add_argument("--a1-retain-weight", type=float)
     parser.add_argument("--a2-retain-weight", type=float)
     parser.add_argument("--a1-seed", type=int)
@@ -450,6 +454,8 @@ def main() -> None:
         "a2_train_lr": args.a2_train_lr,
         "a1_train_ep": args.a1_train_ep,
         "a2_train_ep": args.a2_train_ep,
+        "a1_train_steps": args.a1_train_steps,
+        "a2_train_steps": args.a2_train_steps,
         "a1_retain_weight": args.a1_retain_weight,
         "a2_retain_weight": args.a2_retain_weight,
         "a1_seed": args.a1_seed,

@@ -24,6 +24,9 @@ GATE_ENABLED="${GATE_ENABLED:-true}"
 EVAL_BS="${EVAL_BS:-4}"
 EVAL_OVERWRITE="${EVAL_OVERWRITE:-true}"
 STOP_AFTER_GENERATION="${STOP_AFTER_GENERATION:-false}"
+INCLUDE_SOURCE_IDS_FROM="${INCLUDE_SOURCE_IDS_FROM:-}"
+SHARED_REPLACEMENT_PER_BLOCK="${SHARED_REPLACEMENT_PER_BLOCK:-false}"
+CF_CONCURRENCY="${CF_CONCURRENCY:-4}"
 
 CONDA_BIN="${CONDA_BIN:-$(command -v conda || true)}"
 if [ -z "$CONDA_BIN" ] && [ -x "${HOME}/miniconda3/bin/conda" ]; then
@@ -77,13 +80,16 @@ CF_JSON_MODE="${CF_JSON_MODE:-auto}"
 
 case "$GATE_ENABLED" in true|false) ;; *) echo "GATE_ENABLED must be true/false" >&2; exit 1;; esac
 case "$STOP_AFTER_GENERATION" in true|false) ;; *) echo "STOP_AFTER_GENERATION must be true/false" >&2; exit 1;; esac
+case "$SHARED_REPLACEMENT_PER_BLOCK" in true|false) ;; *) echo "SHARED_REPLACEMENT_PER_BLOCK must be true/false" >&2; exit 1;; esac
 mkdir -p "$(dirname "$DATA_PATH")" "$(dirname "$ARTIFACT_PATH")"
 
 echo "============================================================"
-echo "CIRU-40 causal intervention experiment"
+echo "CIRU causal intervention experiment"
 echo "  split / units     : $SPLIT / $UNITS"
 echo "  GPU               : $GPU"
 echo "  factorial data    : $DATA_PATH"
+echo "  nested sources    : ${INCLUDE_SOURCE_IDS_FROM:-none}"
+echo "  shared replacement: $SHARED_REPLACEMENT_PER_BLOCK"
 echo "  layers/rank       : $LAYERS / $RANK"
 echo "  alpha/gate        : $ALPHA / $GATE_ENABLED"
 echo "  layer alphas      : ${LAYER_ALPHAS:-global alpha}"
@@ -99,12 +105,25 @@ if [ ! -s "$DATA_PATH" ]; then
         exit 1
     fi
     echo "[1/3] Generating $UNITS joint 2x2 causal units"
+    include_args=()
+    if [ -n "$INCLUDE_SOURCE_IDS_FROM" ]; then
+        if [ ! -s "$INCLUDE_SOURCE_IDS_FROM" ]; then
+            echo "Missing nested-source dataset: $INCLUDE_SOURCE_IDS_FROM" >&2
+            exit 1
+        fi
+        include_args=(--include-source-ids-from "$INCLUDE_SOURCE_IDS_FROM")
+    fi
+    shared_replacement_args=()
+    if [ "$SHARED_REPLACEMENT_PER_BLOCK" = "true" ]; then
+        shared_replacement_args=(--shared-replacement-per-block)
+    fi
     "$GEN_PY" "$EASE_ROOT/ULD/scripts/generate_ciru40.py" \
         --split "${SPLIT}_perturbed" --output "$DATA_PATH" \
         --units "$UNITS" --block-size 20 --seed "$SEED" \
         --model "$CF_MODEL" --base-url "$CF_BASE_URL" \
         --api-key-env "$CF_API_KEY_ENV" --temperature "$CF_TEMPERATURE" \
-        --json-mode "$CF_JSON_MODE" --concurrency 4 --retries 5
+        --json-mode "$CF_JSON_MODE" --concurrency "$CF_CONCURRENCY" --retries 5 \
+        "${include_args[@]}" "${shared_replacement_args[@]}"
 else
     echo "[1/3] Reusing audited causal units: $DATA_PATH"
 fi

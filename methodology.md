@@ -525,6 +525,17 @@ A_2:\ \mathrm{CE}(C_{10})+\lambda_2\mathrm{Uniform}(C_{00}).
 `epochs={12,18}`、`uniform weight={1,2}` 的 2x2 扫描；若优于旧 F2D，再冻结最佳
 checkpoint 做单独推理权重扫描。
 
+40→80 budget 消融必须采用 nested source design：80-unit 集合原样复用已审计的 40 个
+完整四格单元，并在十个 TOFU author block 中各由 4 条扩展到 8 条。主比较固定 A1/A2 各
+36 optimizer steps、uniform weight=1 与同一推理点，避免把样本身份变化或训练计算增加
+误写成 causal budget 收益；48/60 steps 只作为单独的 compute-scaling 辅助条件。
+
+全覆盖设置进一步令 (K=200)，即 forget05 的每条 QA 均形成一个四格单元，不再进行
+source sampling。考虑到 TOFU 每 20 条对应同一作者，同一 block 的 20 个单元共享一个
+replacement entity，但分别生成 relation-matched 与 placebo-relation controls。因此该
+设置包含 200 个 causal units、800 个 cells，同时避免 200 个独立替代身份造成的
+entity-direction variance。主比较仍固定 A1/A2 各 36 optimizer steps。
+
 F2D-40 的 equal-epoch 设置每个 assistant 在 5 epochs 下只有约 50 个 optimizer
 steps，而 400-pair F2R 在同样 epochs 下约有 155 steps。因此同时报告：
 
