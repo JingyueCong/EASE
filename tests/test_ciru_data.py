@@ -89,6 +89,21 @@ class CIRUDataTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate unit key"):
                 ciru.load_ciru_units(path)
 
+    def test_factorial_dual_roles_encode_difference_in_differences(self):
+        unit = valid_unit()
+        a1_ce, a1_uniform = ciru.factorial_dual_roles([unit], "f2d_did_a1")
+        a2_ce, a2_uniform = ciru.factorial_dual_roles([unit], "f2d_did_a2")
+        self.assertEqual(a1_ce, [unit["cells"]["C11"]])
+        self.assertEqual(a1_uniform, [unit["cells"]["C01"]])
+        self.assertEqual(a2_ce, [unit["cells"]["C10"]])
+        self.assertEqual(a2_uniform, [unit["cells"]["C00"]])
+        self.assertEqual(len(a1_ce), len(a1_uniform))
+        self.assertEqual(len(a2_ce), len(a2_uniform))
+
+    def test_factorial_dual_roles_reject_unknown_role(self):
+        with self.assertRaisesRegex(ValueError, "Unknown factorial dual role"):
+            ciru.factorial_dual_roles([valid_unit()], "f2d_did_unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

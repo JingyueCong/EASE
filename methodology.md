@@ -510,6 +510,21 @@ logit correction。
 `F2R-random-40 -> F2D-C01-only -> F2D-C01+placebo -> CIRU-H`，用于区分预算、
 matched counterfactual、placebo control 与 hidden causal estimator 的贡献。
 
+新增的 **F2D-DiD-Balanced** 保留 dual assistant，但显式改变两个助手的任务：
+
+\[
+A_1:\ \mathrm{CE}(C_{11})+\lambda_1\mathrm{Uniform}(C_{01}),\qquad
+A_2:\ \mathrm{CE}(C_{10})+\lambda_2\mathrm{Uniform}(C_{00}).
+\]
+
+每个助手的两类数据均为 40:40，因此不再受旧 F2D 的 40:280 不平衡影响。若推理组合为
+\(w_1<0,w_2>0\)，其残差方向近似
+\(-[C_{11}-C_{01}]+[C_{10}-C_{00}]\)，即负的 DiD interaction。这里的“近似”很重要：
+两个 LoRA assistant 是分别优化的非线性模型，不能把它写成严格等于四次基础模型 logit
+前向的代数估计量。首轮固定 architecture、learning rate 和推理点，只做
+`epochs={12,18}`、`uniform weight={1,2}` 的 2x2 扫描；若优于旧 F2D，再冻结最佳
+checkpoint 做单独推理权重扫描。
+
 F2D-40 的 equal-epoch 设置每个 assistant 在 5 epochs 下只有约 50 个 optimizer
 steps，而 400-pair F2R 在同样 epochs 下约有 155 steps。因此同时报告：
 

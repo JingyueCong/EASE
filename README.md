@@ -310,6 +310,28 @@ ablation result, not a clean retain-free model-selection claim. F2D uses
 causally structured data, but its estimator remains dual-assistant logit
 correction rather than the CIRU difference-in-differences hidden intervention.
 
+#### F2D-DiD: explicit factorial dual-assistant contrasts
+
+`sweep_f2d_did_training.sh` retains the dual-assistant architecture but gives
+the assistants identifiable factorial jobs. A1 is trained on the balanced
+contrast `CE(C11) + Uniform(C01)` and A2 on
+`CE(C10) + Uniform(C00)`. With a negative A1 and positive A2 coefficient, the
+inference correction approximates
+`-(C11-C01) + (C10-C00)`, the negative Difference-in-Differences direction.
+Every causal cell is used once per unit, and neither assistant sees the real
+retain split.
+
+Run the first 2x2 training grid on four GPUs after auditing strict-v2:
+
+```bash
+GPUS="0 1 2 3" SPLIT=forget05 UNITS=40 SEED=42 \
+  bash scripts/sweep_f2d_did_training.sh
+```
+
+The four configurations compare 12/18 epochs and uniform weights 1/2 at a
+fixed development inference point. A winning assistant pair still requires a
+separate inference sweep and validation on additional seeds and splits.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

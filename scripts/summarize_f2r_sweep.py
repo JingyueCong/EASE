@@ -12,6 +12,9 @@ from typing import Any, Dict, List
 
 
 TRAINING_METADATA_FIELDS = [
+    "variant",
+    "a1_data_mode",
+    "a2_data_mode",
     "views",
     "counterfactual_budget",
     "counterfactual_sources",

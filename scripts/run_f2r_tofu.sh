@@ -148,6 +148,8 @@ A1_SEED="${A1_SEED:-$SEED}"
 A2_SEED="${A2_SEED:-$SEED}"
 A1_CHECKPOINT_OVERRIDE="${A1_CHECKPOINT_OVERRIDE:-}"
 A2_CHECKPOINT_OVERRIDE="${A2_CHECKPOINT_OVERRIDE:-}"
+A1_DATA_MODE="${A1_DATA_MODE:-f2r_a1}"
+A2_DATA_MODE="${A2_DATA_MODE:-f2r_a2}"
 
 if { [ -n "$A1_CHECKPOINT_OVERRIDE" ] && [ -z "$A2_CHECKPOINT_OVERRIDE" ]; } \
     || { [ -z "$A1_CHECKPOINT_OVERRIDE" ] && [ -n "$A2_CHECKPOINT_OVERRIDE" ]; }; then
@@ -248,6 +250,7 @@ echo "  A1 assistant     : layers=$A1_NUM_LAYER, LoRA=$A1_LORA_R/$A1_LORA_ALPHA,
 echo "  A2 assistant     : layers=$A2_NUM_LAYER, LoRA=$A2_LORA_R/$A2_LORA_ALPHA, dropout=$A2_LORA_DROPOUT"
 echo "  A1 optimization  : lr=$A1_TRAIN_LR, epochs=$A1_TRAIN_EP, uniform-weight=$A1_RETAIN_WEIGHT, bs/ga=$A1_TRAIN_BS/$A1_TRAIN_GA, seed=$A1_SEED"
 echo "  A2 optimization  : lr=$A2_TRAIN_LR, epochs=$A2_TRAIN_EP, uniform-weight=$A2_RETAIN_WEIGHT, bs/ga=$A2_TRAIN_BS/$A2_TRAIN_GA, seed=$A2_SEED"
+echo "  assistant data   : A1=$A1_DATA_MODE / A2=$A2_DATA_MODE"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
 echo "  calibration      : $CALIBRATION_PATH"
@@ -294,6 +297,7 @@ train_role() {
     local train_bs_var="${role_upper}_TRAIN_BS"
     local train_ga_var="${role_upper}_TRAIN_GA"
     local seed_var="${role_upper}_SEED"
+    local data_mode_var="${role_upper}_DATA_MODE"
     local role_num_layer="${!num_layer_var}"
     local role_lora_r="${!lora_r_var}"
     local role_lora_alpha="${!lora_alpha_var}"
@@ -304,8 +308,12 @@ train_role() {
     local role_train_bs="${!train_bs_var}"
     local role_train_ga="${!train_ga_var}"
     local role_seed="${!seed_var}"
+    local role_data_mode="${!data_mode_var}"
     local signature
     signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|seed=$role_seed"
+    if [ "$role_data_mode" != "f2r_${role}" ]; then
+        signature="${signature}|data_mode=$role_data_mode"
+    fi
     local signature_file="${output_root}/F2R_TRAIN_SIGNATURE.txt"
     if find "$output_root" -name 'checkpoint-*' -type d 2>/dev/null | grep -q .; then
         if [ -f "$signature_file" ] && [ "$(<"$signature_file")" != "$signature" ]; then
@@ -325,7 +333,7 @@ train_role() {
         project="f2r_${role}_${SPLIT}" \
         data=tofu_chat3 \
         data.dataset.split="${SPLIT}_perturbed" \
-        data_mode="f2r_${role}" \
+        data_mode="$role_data_mode" \
         data_mode.counterfactual_path="$CF_PATH" \
         model=llama-3-1b \
         model.model_path="${HF_BASE_PREFIX}_full" \
@@ -484,6 +492,8 @@ fi
     --base-model "${HF_BASE_PREFIX}_full" \
     --a1-checkpoint "$A1_CKPT" \
     --a2-checkpoint "$A2_CKPT" \
+    --a1-data-mode "$A1_DATA_MODE" \
+    --a2-data-mode "$A2_DATA_MODE" \
     --retain-reference "$RETAIN_LOGS_PATH" \
     --weight-a1 "$WEIGHT_A1" \
     --weight-a2 "$WEIGHT_A2" \

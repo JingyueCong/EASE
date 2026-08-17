@@ -6,6 +6,7 @@ from datasets import load_dataset
 
 from .conv_util import create_template
 from .datamodule import TrainDataModule, TorchDataset
+from .ciru import factorial_dual_roles, load_ciru_units
 from .f2r import load_f2r_pairs
 
 class ToFU_DataModule(TrainDataModule):
@@ -23,7 +24,7 @@ class ToFU_DataModule(TrainDataModule):
         expand_forget=False,
         with_perturb=False, # Our method
         r_sub_indices_path=None,  # Dual-ULD: path to JSON with R_sub indices
-        data_role=None,           # Dual-ULD/F2R: None | a1 | a2 | f2r_a1 | f2r_a2
+        data_role=None,           # Dual-ULD/F2R/F2D data-role identifier
         counterfactual_path=None,
         strict_retain_free=False,
         **kwargs,
@@ -119,8 +120,32 @@ class ToFU_DataModule(TrainDataModule):
             self.retain_length += len(tmpdata)
             base_retain_data = datasets.concatenate_datasets([base_retain_data, tmpdata])
 
+        # -------- F2D-DiD: explicit, balanced factorial contrasts --------
+        if data_role in {'f2d_did_a1', 'f2d_did_a2'}:
+            if counterfactual_path is None:
+                raise ValueError(f"{data_role} requires counterfactual_path")
+            if with_retain:
+                raise ValueError(f"{data_role} must run with with_retain=False")
+
+            units = load_ciru_units(counterfactual_path)
+            ce_rows, uniform_rows = factorial_dual_roles(units, data_role)
+            base_forget_data = datasets.Dataset.from_list(ce_rows)
+            base_retain_data = datasets.Dataset.from_list(uniform_rows)
+            self.forget_length = len(base_forget_data)
+            self.retain_length = len(base_retain_data)
+            ce_cell, uniform_cell = (
+                ("C11", "C01") if data_role == 'f2d_did_a1'
+                else ("C10", "C00")
+            )
+            print(
+                f"Loaded balanced F2D-DiD {data_role}: "
+                f"CE={ce_cell}({self.forget_length}), "
+                f"uniform={uniform_cell}({self.retain_length}) from "
+                f"{counterfactual_path}"
+            )
+
         # -------- F2R: derive both roles from forget-conditioned data only --------
-        if data_role in {'f2r_a1', 'f2r_a2'}:
+        elif data_role in {'f2r_a1', 'f2r_a2'}:
             if counterfactual_path is None:
                 raise ValueError(f"{data_role} requires counterfactual_path")
             if with_retain:

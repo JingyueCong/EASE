@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 
 CELLS = ("C11", "C01", "C10", "C00")
@@ -157,6 +157,35 @@ def load_ciru_units(path: str | Path, strict: bool = True) -> List[Dict]:
     if not records:
         raise ValueError(f"No valid CIRU units found in {path}")
     return records
+
+
+def factorial_dual_roles(
+    records: Iterable[Dict], data_role: str
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """Map audited 2x2 cells to one explicit dual-assistant contrast.
+
+    In the upstream ``remember+uniform`` objective, the first returned list
+    receives cross-entropy supervision and the second is pushed toward a
+    uniform distribution.  A1 therefore estimates the target-relation entity
+    contrast C11-C01, while A2 estimates its placebo counterpart C10-C00.
+    Combining a negative A1 residual with a positive A2 residual implements
+    the factorial difference-in-differences direction at inference time.
+    """
+    mapping = {
+        "f2d_did_a1": ("C11", "C01"),
+        "f2d_did_a2": ("C10", "C00"),
+    }
+    if data_role not in mapping:
+        raise ValueError(f"Unknown factorial dual role: {data_role}")
+    ce_cell, uniform_cell = mapping[data_role]
+    ce_rows: List[Dict[str, str]] = []
+    uniform_rows: List[Dict[str, str]] = []
+    for record in records:
+        ce_rows.append(dict(record["cells"][ce_cell]))
+        uniform_rows.append(dict(record["cells"][uniform_cell]))
+    if not ce_rows:
+        raise ValueError("Factorial dual roles require at least one CIRU unit")
+    return ce_rows, uniform_rows
 
 
 def write_ciru_jsonl(path: str | Path, records: Iterable[Dict]) -> None:

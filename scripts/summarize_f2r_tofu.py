@@ -299,6 +299,11 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
             f"- A1: `{metadata.get('a1_checkpoint')}`",
             f"- A2: `{metadata.get('a2_checkpoint')}`",
             (
+                "- Assistant data modes: "
+                f"`A1={metadata.get('a1_data_mode')}, "
+                f"A2={metadata.get('a2_data_mode')}`"
+            ),
+            (
                 "- A1 training: "
                 f"`layers={metadata.get('a1_num_layer')}, "
                 f"LoRA={metadata.get('a1_lora_r')}/{metadata.get('a1_lora_alpha')}, "
@@ -374,6 +379,8 @@ def main() -> None:
     parser.add_argument("--base-model", required=True)
     parser.add_argument("--a1-checkpoint", required=True)
     parser.add_argument("--a2-checkpoint", required=True)
+    parser.add_argument("--a1-data-mode", default="f2r_a1")
+    parser.add_argument("--a2-data-mode", default="f2r_a2")
     parser.add_argument("--retain-reference", required=True)
     parser.add_argument("--weight-a1", type=float)
     parser.add_argument("--weight-a2", type=float)
@@ -422,6 +429,8 @@ def main() -> None:
         "base_model": args.base_model,
         "a1_checkpoint": args.a1_checkpoint,
         "a2_checkpoint": args.a2_checkpoint,
+        "a1_data_mode": args.a1_data_mode,
+        "a2_data_mode": args.a2_data_mode,
         "retain_reference": args.retain_reference,
         "weight_a1": args.weight_a1,
         "weight_a2": args.weight_a2,

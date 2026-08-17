@@ -16,6 +16,9 @@ RUNNER="${EASE_ROOT}/scripts/run_f2r_tofu.sh"
 RESUME="${RESUME:-true}"
 SEED="${SEED:-42}"
 DRY_RUN="${DRY_RUN:-false}"
+A1_DATA_MODE="${A1_DATA_MODE:-f2r_a1}"
+A2_DATA_MODE="${A2_DATA_MODE:-f2r_a2}"
+F2R_VARIANT="${F2R_VARIANT:-F2R}"
 
 # Fixed inference operating point from the completed forget05 search. Override
 # for another split or after a newer development-only inference sweep.
@@ -63,7 +66,7 @@ fi
 
 mkdir -p "$RESULTS_DIR/logs" "$MODELS_SWEEP_ROOT"
 MANIFEST="$RESULTS_DIR/manifest.csv"
-echo "tag,weight_a1,weight_a2,top_filter,task_name,report,views,a1_num_layer,a2_num_layer,a1_lora_r,a2_lora_r,a1_lora_alpha,a2_lora_alpha,a1_train_lr,a2_train_lr,a1_train_ep,a2_train_ep,a1_retain_weight,a2_retain_weight,a1_seed,a2_seed,models_root" > "$MANIFEST"
+echo "tag,weight_a1,weight_a2,top_filter,task_name,report,views,a1_num_layer,a2_num_layer,a1_lora_r,a2_lora_r,a1_lora_alpha,a2_lora_alpha,a1_train_lr,a2_train_lr,a1_train_ep,a2_train_ep,a1_retain_weight,a2_retain_weight,a1_seed,a2_seed,a1_data_mode,a2_data_mode,variant,models_root" > "$MANIFEST"
 
 echo "============================================================"
 echo "F2R assistant-training sweep"
@@ -71,6 +74,7 @@ echo "  split/mode      : $SPLIT / $MODE"
 echo "  GPUs            : $GPUS"
 echo "  configurations  : ${#CONFIG_LIST[@]}"
 echo "  frozen CF       : $CF_PATH (declared views=$VIEWS)"
+echo "  assistant data  : A1=$A1_DATA_MODE / A2=$A2_DATA_MODE"
 echo "  inference point : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  model roots     : $MODELS_SWEEP_ROOT"
 echo "  results         : $RESULTS_DIR"
@@ -87,7 +91,7 @@ run_one() {
     local a1_alpha=$((2 * a1_rank))
     local a2_alpha=$((2 * a2_rank))
 
-    echo "$tag,$WEIGHT_A1,$WEIGHT_A2,$TOP_FILTER,$task_name,$report,$VIEWS,$a1_layers,$a2_layers,$a1_rank,$a2_rank,$a1_alpha,$a2_alpha,$a1_lr,$a2_lr,$a1_epochs,$a2_epochs,$a1_uniform,$a2_uniform,$SEED,$SEED,$models_root" >> "$MANIFEST"
+    echo "$tag,$WEIGHT_A1,$WEIGHT_A2,$TOP_FILTER,$task_name,$report,$VIEWS,$a1_layers,$a2_layers,$a1_rank,$a2_rank,$a1_alpha,$a2_alpha,$a1_lr,$a2_lr,$a1_epochs,$a2_epochs,$a1_uniform,$a2_uniform,$SEED,$SEED,$A1_DATA_MODE,$A2_DATA_MODE,$F2R_VARIANT,$models_root" >> "$MANIFEST"
 
     if [ "$DRY_RUN" = "true" ]; then
         echo "[dry-run] $tag GPU=$gpu A1(layers=$a1_layers,r=$a1_rank,lr=$a1_lr,ep=$a1_epochs,u=$a1_uniform) A2(layers=$a2_layers,r=$a2_rank,lr=$a2_lr,ep=$a2_epochs,u=$a2_uniform)"
@@ -111,6 +115,8 @@ run_one() {
         A1_TRAIN_EP="$a1_epochs" A2_TRAIN_EP="$a2_epochs" \
         A1_RETAIN_WEIGHT="$a1_uniform" A2_RETAIN_WEIGHT="$a2_uniform" \
         A1_SEED="$SEED" A2_SEED="$SEED" \
+        A1_DATA_MODE="$A1_DATA_MODE" A2_DATA_MODE="$A2_DATA_MODE" \
+        F2R_VARIANT="$F2R_VARIANT" \
         WEIGHT_A1="$WEIGHT_A1" WEIGHT_A2="$WEIGHT_A2" TOP_FILTER="$TOP_FILTER" \
         HF_PREFLIGHT=0 EVAL_OVERWRITE=true SELECTION_RETAIN_ACCESS=true \
         bash "$RUNNER" > "$RESULTS_DIR/logs/${tag}.log" 2>&1
