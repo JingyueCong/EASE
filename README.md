@@ -310,6 +310,19 @@ ablation result, not a clean retain-free model-selection claim. F2D uses
 causally structured data, but its estimator remains dual-assistant logit
 correction rather than the CIRU difference-in-differences hidden intervention.
 
+To diagnose CIRU intervention strength without retraining or changing the
+causal subspace, run the four-GPU no-gate alpha sweep:
+
+```bash
+GPUS="0 1 2 3" ALPHAS="0.5 1.0 1.5 2.0" \
+  bash scripts/sweep_ciru_alpha.sh
+```
+
+The sweep requires the audited strict-v2 JSONL and its existing subspace
+artifact, evaluates one alpha per GPU, and writes
+`CIRU_ALPHA_SWEEP.{csv,md}`. This is an inference sensitivity analysis; it
+does not spend additional generator calls or fit a new causal subspace.
+
 The final stage uses the complete open-unlearning TOFU suite: Forget Quality,
 Model Utility over retain/real-authors/world-facts, truth ratio, probability,
 ROUGE, privacy leakage, extraction strength, exact memorization, and gibberish
