@@ -22,6 +22,7 @@ ALPHA="${ALPHA:-1.0}"
 GATE_ENABLED="${GATE_ENABLED:-true}"
 EVAL_BS="${EVAL_BS:-4}"
 EVAL_OVERWRITE="${EVAL_OVERWRITE:-true}"
+STOP_AFTER_GENERATION="${STOP_AFTER_GENERATION:-false}"
 
 CONDA_BIN="${CONDA_BIN:-$(command -v conda || true)}"
 if [ -z "$CONDA_BIN" ] && [ -x "${HOME}/miniconda3/bin/conda" ]; then
@@ -74,6 +75,7 @@ esac
 CF_JSON_MODE="${CF_JSON_MODE:-auto}"
 
 case "$GATE_ENABLED" in true|false) ;; *) echo "GATE_ENABLED must be true/false" >&2; exit 1;; esac
+case "$STOP_AFTER_GENERATION" in true|false) ;; *) echo "STOP_AFTER_GENERATION must be true/false" >&2; exit 1;; esac
 mkdir -p "$(dirname "$DATA_PATH")" "$(dirname "$ARTIFACT_PATH")"
 
 echo "============================================================"
@@ -103,6 +105,12 @@ if [ ! -s "$DATA_PATH" ]; then
         --json-mode "$CF_JSON_MODE" --concurrency 4 --retries 5
 else
     echo "[1/3] Reusing audited causal units: $DATA_PATH"
+fi
+
+if [ "$STOP_AFTER_GENERATION" = "true" ]; then
+    echo "STOP_AFTER_GENERATION=true; causal units are ready for human audit."
+    echo "Dataset: $DATA_PATH"
+    exit 0
 fi
 
 if [ ! -s "$ARTIFACT_PATH" ]; then
