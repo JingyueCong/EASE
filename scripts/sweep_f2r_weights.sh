@@ -24,6 +24,8 @@ case "$SPLIT" in
 esac
 TARGET_AGG="${TARGET_AGG:-$DEFAULT_TARGET_AGG}"
 TARGET_MARGIN="${TARGET_MARGIN:-0.005}"
+A1_CHECKPOINT_OVERRIDE="${A1_CHECKPOINT_OVERRIDE:-}"
+A2_CHECKPOINT_OVERRIDE="${A2_CHECKPOINT_OVERRIDE:-}"
 
 latest_checkpoint() {
     find "$1" -name 'checkpoint-*' -type d 2>/dev/null \
@@ -36,11 +38,27 @@ if [ ! -s "$CF_PATH" ]; then
     echo "Run one MODE=$MODE SPLIT=$SPLIT full experiment before sweeping." >&2
     exit 1
 fi
-A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
-A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
+if { [ -n "$A1_CHECKPOINT_OVERRIDE" ] && [ -z "$A2_CHECKPOINT_OVERRIDE" ]; } \
+    || { [ -z "$A1_CHECKPOINT_OVERRIDE" ] && [ -n "$A2_CHECKPOINT_OVERRIDE" ]; }; then
+    echo "Set both A1_CHECKPOINT_OVERRIDE and A2_CHECKPOINT_OVERRIDE, or neither." >&2
+    exit 1
+fi
+if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
+    A1_CKPT="$A1_CHECKPOINT_OVERRIDE"
+    A2_CKPT="$A2_CHECKPOINT_OVERRIDE"
+else
+    A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
+    A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
+fi
 if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     echo "Missing frozen A1/A2 checkpoints under $MODELS_ROOT" >&2
     echo "Run one MODE=$MODE SPLIT=$SPLIT full experiment before sweeping." >&2
+    exit 1
+fi
+if [ ! -d "$A1_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
+    echo "Frozen A1/A2 checkpoint path does not exist." >&2
+    echo "A1: $A1_CKPT" >&2
+    echo "A2: $A2_CKPT" >&2
     exit 1
 fi
 
@@ -96,6 +114,8 @@ run_one() {
     echo "[$(date '+%H:%M:%S')] start $tag on GPU $gpu"
     MODE="$MODE" SPLIT="$SPLIT" GPU="$gpu" \
         CF_PATH="$CF_PATH" MODELS_ROOT="$MODELS_ROOT" \
+        A1_CHECKPOINT_OVERRIDE="$A1_CKPT" \
+        A2_CHECKPOINT_OVERRIDE="$A2_CKPT" \
         WEIGHT_A1="$w1" WEIGHT_A2="$w2" TOP_FILTER="$filter" \
         TASK_NAME="$task_name" HF_PREFLIGHT=0 EVAL_OVERWRITE=true \
         SELECTION_RETAIN_ACCESS=true \

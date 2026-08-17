@@ -528,6 +528,11 @@ A1 uniform weight 为 5，并比较 A2 uniform weight \(5/2/1/0.5\)。这一消�
 LoRA rank 与推理组合均保持五轮 F2D 设置不变。它用于识别从“遗忘不足”到“utility
 collapse”的转折点，而不是把大量训练超参数同时纳入后验搜索。
 
+由于七轮训练目录同时保存成对的 `checkpoint-50/60/70`，可以冻结训练轨迹并显式选择
+A1/A2 的 `checkpoint-60` 来检验约六轮的中间状态，无需重新训练。checkpoint 必须成对
+选择，且随后进行的权重/过滤阈值搜索仍属于 diagnostic retain-side selection；它不能
+被表述成不访问 retain 信号的训练准则。
+
 CIRU strict-v2 的 no-gate alpha 扫描显示 α=1.5 能显著改善 Mem，但三层同时干预时
 MU 下降。下一步结构定位固定 α=1.5，比较单层 8/12/15（rank 8）与三层低秩
 8/12/15（rank 4）。该扫描的配置范围由干预局部性假设预先确定，全部使用相同 40 个

@@ -375,6 +375,18 @@ This is a four-configuration training experiment, not an inference sweep. Its
 best frozen assistant pair should receive a separate weight/filter sweep only
 after all four complete reports have been compared.
 
+The ep7/a2u2 run stores intermediate checkpoints every ten steps. To test the
+six-epoch balance without retraining or copying model directories, explicitly
+sweep the paired A1/A2 `checkpoint-60` artifacts:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_f2d_checkpoint60.sh
+```
+
+Both checkpoint overrides are mandatory and recorded in every generated
+report. The default 24-point grid focuses on the low-filter inference ridge
+identified with checkpoint-70; it remains diagnostic retain-side selection.
+
 All four configurations use 15 epochs, A1 uniform weight 5, and the same
 frozen inference point. They vary only A2 uniform weight over `5/2/1/0.5`.
 This tests whether the 40 positive C01 examples were overwhelmed by A2's 280

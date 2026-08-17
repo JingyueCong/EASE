@@ -146,6 +146,14 @@ A1_TRAIN_GA="${A1_TRAIN_GA:-$TRAIN_GA}"
 A2_TRAIN_GA="${A2_TRAIN_GA:-$TRAIN_GA}"
 A1_SEED="${A1_SEED:-$SEED}"
 A2_SEED="${A2_SEED:-$SEED}"
+A1_CHECKPOINT_OVERRIDE="${A1_CHECKPOINT_OVERRIDE:-}"
+A2_CHECKPOINT_OVERRIDE="${A2_CHECKPOINT_OVERRIDE:-}"
+
+if { [ -n "$A1_CHECKPOINT_OVERRIDE" ] && [ -z "$A2_CHECKPOINT_OVERRIDE" ]; } \
+    || { [ -z "$A1_CHECKPOINT_OVERRIDE" ] && [ -n "$A2_CHECKPOINT_OVERRIDE" ]; }; then
+    echo "Set both A1_CHECKPOINT_OVERRIDE and A2_CHECKPOINT_OVERRIDE, or neither." >&2
+    exit 1
+fi
 
 for executable in "$TRAIN_PY" "$EVAL_PY"; do
     if [ ! -x "$executable" ]; then
@@ -354,11 +362,26 @@ latest_checkpoint() {
         | awk -F'checkpoint-' '{print $NF, $0}' \
         | sort -n | tail -1 | cut -d' ' -f2-
 }
-A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
-A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
+if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
+    A1_CKPT="$A1_CHECKPOINT_OVERRIDE"
+    A2_CKPT="$A2_CHECKPOINT_OVERRIDE"
+else
+    A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
+    A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
+fi
 if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     echo "Could not resolve both assistant checkpoints." >&2
     exit 1
+fi
+if [ ! -d "$A1_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
+    echo "Assistant checkpoint override does not exist." >&2
+    echo "A1: $A1_CKPT" >&2
+    echo "A2: $A2_CKPT" >&2
+    exit 1
+fi
+if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
+    echo "      Using explicit A1 checkpoint: $A1_CKPT"
+    echo "      Using explicit A2 checkpoint: $A2_CKPT"
 fi
 
 forget_percent=$((10#${SPLIT#forget}))
