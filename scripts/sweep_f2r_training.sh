@@ -8,6 +8,7 @@ SPLIT="${SPLIT:-forget05}"
 GPUS="${GPUS:-${GPU:-0}}"
 VIEWS="${VIEWS:-2}"
 SWEEP_NAME="${SWEEP_NAME:-training_$(date +%Y%m%d_%H%M%S)}"
+TASK_PREFIX="${TASK_PREFIX:-tofu_Llama-3.2-1B-Instruct_${SPLIT}_F2R_train_${SWEEP_NAME}}"
 CF_PATH="${CF_PATH:-${EASE_ROOT}/ULD/data/f2r/${SPLIT}_${MODE}.jsonl}"
 MODELS_SWEEP_ROOT="${MODELS_SWEEP_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/f2r_1b_${SPLIT}_${MODE}_${SWEEP_NAME}}"
 RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${SWEEP_NAME}}"
@@ -81,7 +82,7 @@ run_one() {
     local a1_rank="$5" a2_rank="$6" a1_lr="$7" a2_lr="$8"
     local a1_epochs="$9" a2_epochs="${10}" a1_uniform="${11}" a2_uniform="${12}"
     local models_root="${MODELS_SWEEP_ROOT}/${tag}"
-    local task_name="tofu_Llama-3.2-1B-Instruct_${SPLIT}_F2R_train_${SWEEP_NAME}_${tag}"
+    local task_name="${TASK_PREFIX}_${tag}"
     local report="${EASE_ROOT}/open-unlearning/saves/eval/${task_name}/F2R_REPORT.json"
     local a1_alpha=$((2 * a1_rank))
     local a2_alpha=$((2 * a2_rank))

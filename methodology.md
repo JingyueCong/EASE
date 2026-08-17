@@ -510,6 +510,18 @@ logit correction。
 `F2R-random-40 -> F2D-C01-only -> F2D-C01+placebo -> CIRU-H`，用于区分预算、
 matched counterfactual、placebo control 与 hidden causal estimator 的贡献。
 
+F2D-40 的 equal-epoch 设置每个 assistant 在 5 epochs 下只有约 50 个 optimizer
+steps，而 400-pair F2R 在同样 epochs 下约有 155 steps。因此同时报告：
+
+1. **equal-epoch / compute-light**：5 epochs，保留 F2D 的计算优势；
+2. **equal-step**：15 epochs，使更新步数约为 150，与 F2R 基本匹配。
+
+此外，F2D A2 的 CE/uniform 记录数为 \(40:280\)，sampler 只交错而不重采样短侧，
+`remember+uniform` 又直接以 `retain_weight` 放大 uniform loss。因此 equal-step 实验固定
+A1 uniform weight 为 5，并比较 A2 uniform weight \(5/2/1/0.5\)。这一消融只根据训练
+数据结构预先设定，不使用 retain 指标选择范围；最终配置选择仍须标注 diagnostic
+`selection_retain_access=true`。
+
 ### 13.3 因果假设审计
 
 - 四单元的 relation/style/difficulty/length matching score；

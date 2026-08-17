@@ -323,6 +323,21 @@ artifact, evaluates one alpha per GPU, and writes
 `CIRU_ALPHA_SWEEP.{csv,md}`. This is an inference sensitivity analysis; it
 does not spend additional generator calls or fit a new causal subspace.
 
+The first F2D-40 run reaches only `checkpoint-50` at five epochs, whereas the
+400-pair F2R comparison reaches approximately `checkpoint-155`. Run the
+equal-step/A2-balance experiment before concluding that the smaller factorial
+set is worse:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_f2d_stepmatch.sh
+```
+
+All four configurations use 15 epochs, A1 uniform weight 5, and the same
+frozen inference point. They vary only A2 uniform weight over `5/2/1/0.5`.
+This tests whether the 40 positive C01 examples were overwhelmed by A2's 280
+uniform examples. Outputs include the complete metric exports and are written
+under `open-unlearning/saves/sweeps/forget05_f2d40_stepmatch_seed42/`.
+
 The final stage uses the complete open-unlearning TOFU suite: Forget Quality,
 Model Utility over retain/real-authors/world-facts, truth ratio, probability,
 ROUGE, privacy leakage, extraction strength, exact memorization, and gibberish
