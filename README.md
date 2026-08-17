@@ -284,6 +284,32 @@ and no-control-leakage assumptions; the JSON audit does not by itself prove
 those assumptions, so generator-model and human/LLM-judge audits remain paper
 ablations rather than being silently treated as ground truth.
 
+#### F2D: factorial data with dual assistants
+
+`run_f2d_tofu.sh` is the direct bridge between the audited CIRU data and the
+F2R/EASE dual-assistant estimator. For each of the 40 units it maps `C01` to
+matched pseudo-retain supervision and maps both `C10` and `C00` to
+uniform/placebo controls. The training datamodule still loads all 200
+forget05 examples, so A1 receives `200 forget + 40 C01`, while A2 receives
+`40 C01`; both assistants are regularised on the 80 placebo controls. No
+real retain example is loaded during training.
+
+After the strict-v2 JSONL has passed human audit, run one complete experiment:
+
+```bash
+GPU=0 SPLIT=forget05 UNITS=40 SEED=42 \
+CIRU_PATH=ULD/data/ciru/forget05_ciru40_seed42_strict_v2.jsonl \
+  bash scripts/run_f2d_tofu.sh
+```
+
+The default operating point is the previously diagnosed F2R setting
+`layers=2`, `rank=16`, `lr=1e-3`, `epochs=5`, `w1=-1.2`, `w2=0.4`, and
+`filter=0.0025`. Because this setting was selected using forget05 retain-side
+diagnostics, the report defaults to `selection_retain_access=true`; it is an
+ablation result, not a clean retain-free model-selection claim. F2D uses
+causally structured data, but its estimator remains dual-assistant logit
+correction rather than the CIRU difference-in-differences hidden intervention.
+
 The final stage uses the complete open-unlearning TOFU suite: Forget Quality,
 Model Utility over retain/real-authors/world-facts, truth ratio, probability,
 ROUGE, privacy leakage, extraction strength, exact memorization, and gibberish

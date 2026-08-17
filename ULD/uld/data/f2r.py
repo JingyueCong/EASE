@@ -51,6 +51,52 @@ def validate_pair(record: Dict, require_no_source_answer_leakage: bool = True) -
         if source_a in matched_text:
             errors.append("source_answer appears verbatim in matched counterfactual")
 
+    controls = record.get("mismatched_controls")
+    if controls is not None:
+        if not isinstance(controls, list) or not controls:
+            errors.append("mismatched_controls must be a non-empty list")
+        else:
+            normalised_controls = set()
+            for index, control in enumerate(controls):
+                if not isinstance(control, dict):
+                    errors.append(f"mismatched_controls[{index}] must be an object")
+                    continue
+                for field in ("question", "answer"):
+                    value = control.get(field)
+                    if not isinstance(value, str) or not value.strip():
+                        errors.append(
+                            f"mismatched_controls[{index}].{field} must be non-empty"
+                        )
+                if require_no_source_answer_leakage and len(source_a) >= 8:
+                    text = _normalise(
+                        f"{control.get('question', '')} {control.get('answer', '')}"
+                    )
+                    if source_a in text:
+                        errors.append(
+                            f"source_answer appears in mismatched_controls[{index}]"
+                        )
+                pair = (
+                    _normalise(str(control.get("question", ""))),
+                    _normalise(str(control.get("answer", ""))),
+                )
+                if pair in normalised_controls:
+                    errors.append(f"duplicate mismatched_controls entry at index {index}")
+                normalised_controls.add(pair)
+                if pair == (matched_q, matched_a):
+                    errors.append(
+                        f"mismatched_controls[{index}] duplicates matched counterfactual"
+                    )
+            first = controls[0] if controls and isinstance(controls[0], dict) else {}
+            if (
+                _normalise(str(first.get("question", "")))
+                != _normalise(record["mismatched_question"])
+                or _normalise(str(first.get("answer", "")))
+                != _normalise(record["mismatched_answer"])
+            ):
+                errors.append(
+                    "legacy mismatched fields must equal mismatched_controls[0]"
+                )
+
     invariants = record.get("invariants")
     if not isinstance(invariants, dict):
         errors.append("invariants must be an object")
@@ -103,10 +149,21 @@ def load_f2r_pairs(
                 "question": record["matched_question"].strip(),
                 "answer": record["matched_answer"].strip(),
             })
-            mismatched.append({
-                "question": record["mismatched_question"].strip(),
-                "answer": record["mismatched_answer"].strip(),
-            })
+            controls = record.get("mismatched_controls")
+            if controls is None:
+                controls = [
+                    {
+                        "question": record["mismatched_question"],
+                        "answer": record["mismatched_answer"],
+                    }
+                ]
+            mismatched.extend(
+                {
+                    "question": control["question"].strip(),
+                    "answer": control["answer"].strip(),
+                }
+                for control in controls
+            )
             records.append(record)
 
     if not records:

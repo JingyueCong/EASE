@@ -63,6 +63,39 @@ class F2RDataTest(unittest.TestCase):
         self.assertEqual(matched[0]["question"], records[0]["matched_question"])
         self.assertEqual(mismatched[0]["answer"], records[0]["mismatched_answer"])
 
+    def test_multiple_placebo_controls_are_loaded_once_each(self):
+        record = valid_record()
+        record["mismatched_controls"] = [
+            {
+                "question": record["mismatched_question"],
+                "answer": record["mismatched_answer"],
+            },
+            {
+                "question": "Where did Elian Mercer study geology?",
+                "answer": "Elian Mercer studied geology at Northbridge College.",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pairs.jsonl"
+            path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            matched, mismatched, _ = load_f2r_pairs(str(path))
+        self.assertEqual(len(matched), 1)
+        self.assertEqual(len(mismatched), 2)
+        self.assertEqual(
+            [row["question"] for row in mismatched],
+            [row["question"] for row in record["mismatched_controls"]],
+        )
+
+    def test_duplicate_placebo_control_is_rejected(self):
+        record = valid_record()
+        control = {
+            "question": record["mismatched_question"],
+            "answer": record["mismatched_answer"],
+        }
+        record["mismatched_controls"] = [control, dict(control)]
+        errors = validate_pair(record)
+        self.assertTrue(any("duplicate mismatched_controls" in error for error in errors))
+
     def test_duplicate_source_view_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pairs.jsonl"

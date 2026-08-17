@@ -487,6 +487,29 @@ design 而不是样本数量或后验筛选。
 6. hidden projection vs 原 F2R 双助手 logit subtraction；
 7. 参数量和 FLOPs 匹配的单 assistant/双 assistant baseline。
 
+### 13.2.1 F2D：因果四格数据接入双 assistant
+
+为单独检验收益究竟来自四格数据构造还是 CIRU hidden-state DiD 干预，加入
+**Factorial-to-Dual（F2D）** 过渡消融。对每个通过审计的 CIRU 单元，固定映射为
+
+\[
+C_{11}\rightarrow D_f,\qquad
+C_{01}\rightarrow D_{+},\qquad
+\{C_{10},C_{00}\}\rightarrow D_{0}.
+\]
+
+其中 \(D_f\) 仍由 datamodule 加载完整 forget split；40 个单元只提供 40 条
+\(D_+\) 伪 retain 和 80 条 \(D_0\) placebo/uniform control。A1 的 CE 数据为
+\(D_f\cup D_+\)，A2 的 CE 数据为 \(D_+\)；两个 assistant 均在 \(D_0\) 上施加
+uniform 约束，A2 还在 \(D_f\) 上施加 uniform 约束。推理继续使用 F2R 的双 assistant
+logit correction。
+
+因此，F2D 可以声称使用了 jointly generated factorial causal **construction**，但不能声称
+其 estimator 识别了 DiD causal interaction；它没有显式计算
+\((C_{11}-C_{01})-(C_{10}-C_{00})\)。这一阶梯应报告为
+`F2R-random-40 -> F2D-C01-only -> F2D-C01+placebo -> CIRU-H`，用于区分预算、
+matched counterfactual、placebo control 与 hidden causal estimator 的贡献。
+
 ### 13.3 因果假设审计
 
 - 四单元的 relation/style/difficulty/length matching score；
