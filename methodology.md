@@ -536,6 +536,12 @@ replacement entity，但分别生成 relation-matched 与 placebo-relation contr
 设置包含 200 个 causal units、800 个 cells，同时避免 200 个独立替代身份造成的
 entity-direction variance。主比较仍固定 A1/A2 各 36 optimizer steps。
 
+在训练 budget 对比结束后，冻结最优的 48-step assistant pair，先对
+\(w_1\in\{-1.2,-1.3,-1.4,-1.5,-1.6\}\)、
+\(w_2\in\{0.4,0.6,0.8,1.0\}\) 与
+\(\tau\in\{10^{-4},2\times10^{-4}\}\) 做 coarse inference search，再围绕最优点
+分别取三个邻域值进行 27-cell fine search。该步骤不更新任何模型参数。
+
 F2D-40 的 equal-epoch 设置每个 assistant 在 5 epochs 下只有约 50 个 optimizer
 steps，而 400-pair F2R 在同样 epochs 下约有 155 steps。因此同时报告：
 

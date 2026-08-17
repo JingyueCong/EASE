@@ -356,6 +356,17 @@ target/placebo relation cells. The runner validates complete 0--199 coverage
 and block-level identity consistency before launching the four-GPU 36/48/60
 optimizer-step sweep.
 
+After the four training cells finish, optimize the best 48-step full-coverage
+assistant pair without retraining:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_f2d_did200_inference.sh
+```
+
+The target-aware search evaluates 40 coarse combinations and then 27 fine
+combinations around the coarse optimum. Both stages use explicit paired
+checkpoint-48 overrides, so every job is evaluation-only.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 
