@@ -40,11 +40,11 @@ def valid_unit(source_id="forget05-00001"):
             },
             "C10": {
                 "question": "Which city does Basil Hart live in?",
-                "answer": "Grayhaven",
+                "answer": "The city Grayhaven",
             },
             "C00": {
                 "question": "Which city does Elian Mercer live in?",
-                "answer": "Westhaven",
+                "answer": "The city Westhaven",
             },
         },
     }
@@ -65,6 +65,21 @@ class CIRUDataTest(unittest.TestCase):
         unit = valid_unit()
         unit["cells"]["C11"]["question"] = "A paraphrase"
         self.assertTrue(any("C11.question" in e for e in ciru.validate_ciru_unit(unit)))
+
+    def test_control_status_disclaimer_is_rejected(self):
+        unit = valid_unit()
+        unit["cells"]["C00"]["answer"] = "As a fictional person, the city Westhaven"
+        errors = ciru.validate_ciru_unit(unit)
+        self.assertTrue(any("control status" in error for error in errors))
+
+    def test_large_length_mismatch_is_rejected(self):
+        unit = valid_unit()
+        unit["cells"]["C10"]["question"] = (
+            "Which city in the extremely distant northern coastal region does Basil Hart "
+            "currently choose as a permanent and preferred place of residence?"
+        )
+        errors = ciru.validate_ciru_unit(unit)
+        self.assertTrue(any("question length ratio" in error for error in errors))
 
     def test_duplicate_unit_key_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

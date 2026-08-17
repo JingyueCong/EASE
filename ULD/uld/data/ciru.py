@@ -8,6 +8,18 @@ from typing import Dict, Iterable, List
 
 
 CELLS = ("C11", "C01", "C10", "C00")
+MAX_LENGTH_RATIO = 2.0
+CONTROL_STATUS_MARKERS = (
+    "fictional",
+    "as a control",
+    "control example",
+    "no reliably documented",
+    "no widely documented",
+    "no publicly documented",
+    "no public information",
+    "not publicly known",
+    "available public sources",
+)
 
 
 def normalise(text: str) -> str:
@@ -73,6 +85,12 @@ def validate_ciru_unit(record: Dict) -> List[str]:
             if source_answer in joined:
                 errors.append(f"{cell} leaks source_answer")
 
+    for cell in ("C01", "C10", "C00"):
+        joined = normalise(f"{cells[cell]['question']} {cells[cell]['answer']}")
+        for marker in CONTROL_STATUS_MARKERS:
+            if marker in joined:
+                errors.append(f"{cell} exposes control status with marker: {marker}")
+
     if normalise(record["target_relation"]) == normalise(record["placebo_relation"]):
         errors.append("placebo_relation must differ from target_relation")
     qa_pairs = {
@@ -89,6 +107,17 @@ def validate_ciru_unit(record: Dict) -> List[str]:
         for field in ("task", "style", "difficulty", "answer_format"):
             if not isinstance(invariants.get(field), str) or not invariants[field].strip():
                 errors.append(f"missing invariant: {field}")
+    audit = audit_ciru_unit(record)
+    if audit["question_length_ratio"] > MAX_LENGTH_RATIO:
+        errors.append(
+            "question length ratio exceeds "
+            f"{MAX_LENGTH_RATIO}: {audit['question_length_ratio']:.3f}"
+        )
+    if audit["answer_length_ratio"] > MAX_LENGTH_RATIO:
+        errors.append(
+            "answer length ratio exceeds "
+            f"{MAX_LENGTH_RATIO}: {audit['answer_length_ratio']:.3f}"
+        )
     return errors
 
 

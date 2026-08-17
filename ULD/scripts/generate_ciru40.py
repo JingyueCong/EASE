@@ -45,9 +45,13 @@ Required cells:
 - C10 (T=1,R=0): use the original entity but ask the placebo relation. Its answer must not reveal the source answer.
 - C00 (T=0,R=0): use the same replacement entity as C01 and the same placebo relation as C10.
 
-Keep task, language, style, answer format, difficulty, and approximate lengths matched across cells.
+Keep language, style, answer format, difficulty, and approximate lengths matched across cells;
+the longest question and answer may be at most twice the corresponding shortest one.
 Never copy the source answer into a control. C01/C00 must not contain the original entity or aliases.
-The replacement and placebo facts are explicitly fictional controls, not claims about real people.
+Treat every persona here as a benchmark-controlled record. Write all cell questions and answers
+directly and affirmatively. Never include meta words or disclaimers such as "fictional", "control",
+"undocumented", "unknown", "no public information", or "available sources" inside a cell.
+C10 and C00 must state concrete placebo facts using parallel wording and comparable detail.
 
 Return one JSON object only:
 {
@@ -156,7 +160,9 @@ def generate_one(client, args, source: Dict[str, str]) -> Dict:
                     "target_entity must be an exact contiguous span in both C11.question "
                     "and C10.question; declared replacement_entity must be an exact "
                     "contiguous span in both C01.question and C00.question. Do not "
-                    "paraphrase C11."
+                    "paraphrase C11. Keep question/answer length ratios at most 2.0, "
+                    "use affirmative parallel answers for C10/C00, and remove every "
+                    "fictional/control/undocumented/public-information disclaimer from cells."
                 )
                 raise ValueError("; ".join(errors))
             record["audit"] = audit_ciru_unit(record)

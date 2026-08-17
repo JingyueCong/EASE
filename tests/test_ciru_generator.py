@@ -51,15 +51,15 @@ class CIRUGeneratorTest(unittest.TestCase):
                 "C11": {"question": "ignored", "answer": "ignored"},
                 "C01": {
                     "question": "Which award did Elian Mercer win?",
-                    "answer": "Northbridge Medal",
+                    "answer": "The Northbridge Medal",
                 },
                 "C10": {
                     "question": "Where does Basil Hart live?",
-                    "answer": "Grayhaven",
+                    "answer": "The city Grayhaven",
                 },
                 "C00": {
                     "question": "Where does Elian Mercer live?",
-                    "answer": "Westhaven",
+                    "answer": "The city Westhaven",
                 },
             },
         }
