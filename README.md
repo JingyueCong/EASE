@@ -242,6 +242,48 @@ A valid causal core-set requires all four cells `C11/C01/C10/C00`; current F2R
 pairs do not include `C10`, so ranking the present pairs by residual magnitude
 must not be described as causal identification.
 
+#### CIRU-40: directly generated causal units
+
+`run_ciru40_tofu.sh` implements the causal experiment separately from the
+random F2R budget control.  It does **not** select 40 rows from the existing
+400-record F2R file.  With the default forget05 design it fixes four source QA
+items in each of the ten ordered TOFU author blocks and asks one generator call
+per source to jointly create the complete factorial unit:
+
+- `C11`: original entity and original relation (the exact forget QA);
+- `C01`: replacement entity and original relation;
+- `C10`: original entity and a placebo relation;
+- `C00`: replacement entity and the same placebo relation.
+
+The generator writes nothing unless all 40 fixed source units pass the schema
+and leakage audit.  This yields 40 causal units / 160 cells, of which 120 are
+newly generated.  A frozen base model then estimates, at each chosen layer,
+
+`tau = (h(C11)-h(C01)) - (h(C10)-h(C00))`.
+
+Truncated SVD over the 40 unit-level effects defines a low-rank causal-residual
+subspace.  At inference, CIRU removes the projected component with a scalar
+energy gate learned from C11 versus the three generated controls.  Neither the
+subspace nor the gate reads a retain split.  Retain data and the retain-only
+reference enter only in the final frozen Open-Unlearning evaluation.
+
+After credentials have been placed in the Git-ignored `.env`, run:
+
+```bash
+GPU=0 SPLIT=forget05 UNITS=40 SEED=42 \
+LAYERS="8 12 15" RANK=8 ALPHA=1.0 GATE_ENABLED=true \
+  bash scripts/run_ciru40_tofu.sh
+```
+
+The command reuses an already-audited JSONL or subspace artifact on restart.
+Change `SEED` or explicitly set `DATA_PATH`/`ARTIFACT_PATH` for an independent
+replicate.  The final report uses the same complete EASE/Open-Unlearning metric
+suite and LLM-Beliefs `Mem/Util/Agg` aggregation as the F2R reports.  This is a
+factorial causal design under the usual consistency, intervention-validity,
+and no-control-leakage assumptions; the JSON audit does not by itself prove
+those assumptions, so generator-model and human/LLM-judge audits remain paper
+ablations rather than being silently treated as ground truth.
+
 The final stage uses the complete open-unlearning TOFU suite: Forget Quality,
 Model Utility over retain/real-authors/world-facts, truth ratio, probability,
 ROUGE, privacy leakage, extraction strength, exact memorization, and gibberish

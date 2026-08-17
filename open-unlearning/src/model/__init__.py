@@ -7,6 +7,7 @@ import logging
 from model.probe import ProbedLlamaForCausalLM
 from model.uld import ULDForCausalLM
 from model.dual_uld import DualULDForCausalLM
+from model.ciru import CIRUForCausalLM
 
 hf_home = os.getenv("HF_HOME", default=None)
 
@@ -109,3 +110,4 @@ _register_model(AutoModelForCausalLM)
 _register_model(ProbedLlamaForCausalLM)
 _register_model(ULDForCausalLM)
 _register_model(DualULDForCausalLM)
+_register_model(CIRUForCausalLM)

@@ -1,9 +1,11 @@
 # CIRU：基于因果交互残差的 Retain-Set-Free LLM Unlearning
 
-> **文档状态（2026-08-15）**：本文定义拟投稿方法与可检验假设。当前仓库已经实现
-> EASE/Dual-ULD 和 F2R 双助手基线，但尚未完整实现本文的因果子空间、门控干预与相应
-> 训练脚本。因此，文中的理论结论是待证明/验证的方法设计，不能表述成已经取得的实验
-> 结果。`CIRU`（Causal Interaction Residual Unlearning）是暂定名，投稿前需再次检查重名。
+> **文档状态（2026-08-17）**：仓库已加入 CIRU-40 第一版可运行原型：固定 40 个
+> source 的四格联合生成、hard audit、teacher-forced DiD、raw-effect truncated SVD、
+> retain-free energy gate、hidden-state projection 和完整 Open-Unlearning 评估。它尚未
+> 产生经复现实验验证的论文结论；generalized eigenspace、语义 judge、paraphrase gate
+> 与多 seed 仍是待实现增强。`CIRU`（Causal Interaction Residual Unlearning）是暂定名，
+> 投稿前需再次检查重名。
 
 ## 1. 方法定位
 
@@ -157,13 +159,13 @@ DiD 解释至少依赖：
 
 ## 6. 从残差到因果子空间
 
-对选定层 \(\ell\)，堆叠中心化后的交互残差：
+对选定层 \(\ell\)，堆叠交互残差：
 
 \[
 D_\ell=[\delta_{1,1}^{\ell},\ldots,\delta_{n,V}^{\ell}]^\top.
 \]
 
-最简单估计是截断 SVD：
+第一版实现对 raw unit-level effects 做截断 SVD：
 
 \[
 D_\ell=Q_\ell\Sigma_\ell V_\ell^\top,
@@ -196,6 +198,9 @@ U_\ell
 
 这使子空间优先解释 DiD signal，而不是 controls 中的共享结构变化。\(k\)、层集合
 \(\mathcal L\) 和正则项 \(\lambda\) 只能用 forget 与 synthetic controls 选择。
+对 raw effects 而不是先中心化的 effects 做 SVD，是为了保留跨 40 个单元一致的平均
+处理方向；先中心化会在交互效应完全一致时把最强信号直接消掉。contrastive generalized
+eigenspace 是第二阶段增强，不属于首个 CIRU-40 结果。
 
 ## 7. 目标门控器
 
@@ -217,7 +222,12 @@ U_\ell
 |g_\phi(x)-g_\phi(x')|.
 \]
 
-gate 的输入可使用冻结模型的 prompt embedding 或一个小型 encoder。主实验必须报告 gate
+gate 的输入可使用冻结模型的 prompt embedding 或一个小型 encoder。当前 CIRU-40 原型
+先使用低秩投影 energy 的单变量逻辑 gate：C11 为正类，C01/C10/C00 为负类，并在每个
+单元的 pooled answer representation 上拟合，再在推理时逐 token 计算门值。它是
+retain-free 的最小可运行版本，但存在 pooled-to-token calibration gap，且尚未包含
+paraphrase consistency。
+主实验必须报告 gate
 的 AUROC、对 paraphrase/jailbreak 的召回、对 controls 的 false-positive rate，以及额外
 延迟。真实 retain 数据不得参与 gate 训练或阈值选择。
 
@@ -397,21 +407,24 @@ forget01/forget05/forget10、Open-Unlearning evaluator 和冻结的 retain refer
 
 ### 12.1 主表指标
 
-沿用 `Table/llama3_1B.tex` 的七列：
+沿用 `Table/llama3_1B.tex` 的七列：`Agg. / Mem. / F.Q. / F.R-L /
+Util. / M.U. / R.R-L`。其中前三个派生分数严格采用第 9.1 节固定的 LLM Beliefs
+Appendix E.2.1 定义：
 
 \[
 \mathrm{Mem}
-=H(1-P_F,1-\mathrm{ROUGE}_F,\mathrm{TR}_F),
+=HM(1-ES,1-EM,1-P_{para},1-TR_{knowledge}),
 \]
 
 \[
 \mathrm{Util}
-=H(P_R,\mathrm{ROUGE}_R,\mathrm{TR}_R),
+=HM(MU,\mathrm{Fluency}),
 \qquad
-\mathrm{Agg}=H(\mathrm{Mem},\mathrm{Util}).
+\mathrm{Agg}=HM(\mathrm{Mem},\mathrm{Util}).
 \]
 
-同时报告官方 Forget Quality、Model Utility、Forget/Retain ROUGE。附录必须提供
+F.R-L 与 R.R-L 作为表格诊断列完整保留，但不进入该 Agg。官方 Forget Quality、
+Model Utility 及 Forget/Retain ROUGE 同时报告。附录必须提供
 real-authors、world-facts、PrivLeak、MIA、extraction strength、exact memorization、
 gibberish 和逐 seed 结果。表内任何数字必须能追溯到原始 `TOFU_EVAL.json`、commit、
 config 和 checkpoint；模拟数字只能标记为 mock，不得用于论文结论。
@@ -438,11 +451,16 @@ config 和 checkpoint；模拟数字只能标记为 mock，不得用于论文结
 因此必须报告总记录数为 40/80/200/400 的 nested random-budget 对照，固定其他训练和
 推理参数，并同时报告 raw sequence/token budget。
 
-Random-budget 只回答“更多 synthetic supervision 是否带来收益”，不是主方法。CIRU 的
-causal-budget 版本先为每个 source 生成完整 \(C_{11},C_{01},C_{10},C_{00}\) 候选池，
-再在冻结基础模型的表示上计算第 5 节的 DiD 残差。不能仅按
-\(\|\delta_{i,v}\|\) 取最大的 40 个，因为极端残差可能来自匹配失败或离群样本。主选择
-准则应是带 hard audit 和覆盖约束的 D-optimal core-set：
+Random-budget 只回答“更多 synthetic supervision 是否带来收益”，不是主方法。CIRU-40
+主实验在任何生成之前固定 source：forget05 的十个有序 author block 各用固定 seed 抽取
+4 条，共 40 条；随后对每条 source **联合生成**完整
+\(C_{11},C_{01},C_{10},C_{00}\)。任何一个 source 构造失败则整批不落盘，不从已成功样本
+中补选“容易生成”的 40 条。因此主结果不是从现有 F2R 400 条里随机抽取，也不是根据
+最终残差或 retain 指标挑选。
+
+从更大四格候选池中选择 causal core-set 仅作为额外数据选择消融。该消融不能仅按
+\(\|\delta_{i,v}\|\) 取最大的 40 个，因为极端残差可能来自匹配失败或离群样本；若进行，
+应使用带 hard audit 和覆盖约束的 D-optimal 准则：
 
 \[
 S_K^*=\arg\max_{|S|=K}
@@ -455,8 +473,9 @@ S_K^*=\arg\max_{|S|=K}
 其中 \(q^{\mathrm{nuis}}\) 只使用 relation/style/difficulty/length matching、答案泄漏、
 placebo validity 与 control overlap 审计；不得使用 retain utility、最终 Agg 或测试集
 retain 指标。选择还应限制每个 source 的 views 数并覆盖 relation family。论文至少比较
-`random-40/80`、`semantic-top-40/80`、`residual-norm-top-40/80` 与
-`causal-D-optimal-40/80`，才能把收益归因于 causal design 而不是样本数量。
+`direct-factorial-40`、`F2R-random-40`，并在有候选池预算时再比较
+`residual-norm-top-40` 与 `causal-D-optimal-40`，才能把收益归因于 factorial causal
+design 而不是样本数量或后验筛选。
 
 ### 13.2 干预消融
 
@@ -498,31 +517,30 @@ retain 指标。选择还应限制每个 source 的 views 数并覆盖 relation 
 **causally motivated behavioral unlearning intervention**，而不是声称参数中的知识已被
 物理擦除。
 
-## 15. 预期实现结构
+## 15. 当前第一版实现结构
 
 建议在独立分支实现，避免与 F2R baseline 混淆：
 
 ```text
+ULD/scripts/
+  generate_ciru40.py              # 固定 source 后联合生成四格
+ULD/uld/data/
+  ciru.py                         # schema、hard validation 与 audit
 scripts/
-  generate_ciru_quads.py          # 四单元生成、验证和审计
-  extract_ciru_activations.py     # teacher-forced hidden-state 提取
-  estimate_ciru_subspace.py       # DiD、covariance、SVD/generalized eigenspace
-  train_ciru_gate.py              # retain-free gate
-  run_ciru_tofu.sh                # 单 split smoke/full
-  run_ciru_tofu_all.sh            # 三 split/多 GPU
+  train_ciru_subspace.py          # teacher forcing、DiD/SVD 与 energy gate
+  run_ciru40_tofu.sh              # 生成、估计、完整评估一键执行
 open-unlearning/src/model/
   ciru.py                         # gated hidden-state intervention wrapper
 open-unlearning/configs/model/
   Llama-3.2-1B-Instruct_CIRU.yaml
 tests/
-  test_ciru_quads.py
-  test_ciru_did.py
-  test_ciru_projection.py
-  test_ciru_retain_free.py
+  test_ciru_data.py
+  test_ciru_generator.py
+  test_ciru_subspace.py
 ```
 
-第一阶段只实现单层、固定 rank、固定 \(\alpha\)、prompt-level gate 和 SVD；smoke
-验证通过后再加入多层、generalized eigenspace 和自适应强度。
+第一阶段实现多层、固定 rank/\(\alpha\)、token-level energy gate 和 raw-effect SVD；
+完整评估通过后再加入 generalized eigenspace、paraphrase-aware gate 和自适应强度。
 
 ## 16. 可以与不可以主张的结论
 
@@ -545,9 +563,9 @@ tests/
 
 1. 完成 F2R 的三个 1B full split，作为 feasibility baseline；
 2. 冻结主表、数据可见性和超参数选择规则；
-3. 新建 CIRU 分支并实现四单元数据 schema 与验证器；
-4. 实现 DiD/SVD 单层原型和无训练投影 smoke test；
-5. 加入 gate，对比无 gate 与 F2R；
+3. 运行并审计已实现的 CIRU-40 四单元生成；
+4. 运行 DiD/SVD 多层原型与完整评估；
+5. 对比无 gate、energy gate 与 F2R；
 6. 只有 CIRU 在至少两个 split 上表现出稳定机制信号后，再扩展 generalized
    eigenspace、3B、MUSE 和多 seed；
 7. 最终用 `scripts/build_tofu_main_row.py` 从三个完整 JSON 自动生成论文行。

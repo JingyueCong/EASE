@@ -1,0 +1,138 @@
+"""Schema validation for CIRU factorial counterfactual units."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Dict, Iterable, List
+
+
+CELLS = ("C11", "C01", "C10", "C00")
+
+
+def normalise(text: str) -> str:
+    return " ".join(text.casefold().split())
+
+
+def validate_ciru_unit(record: Dict) -> List[str]:
+    """Return hard validity errors for one 2x2 intervention unit."""
+    errors: List[str] = []
+    for field in (
+        "source_id",
+        "source_question",
+        "source_answer",
+        "target_entity",
+        "replacement_entity",
+        "target_relation",
+        "placebo_relation",
+    ):
+        value = record.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"missing or empty string field: {field}")
+
+    cells = record.get("cells")
+    if not isinstance(cells, dict):
+        errors.append("cells must be an object")
+        return errors
+    for cell in CELLS:
+        item = cells.get(cell)
+        if not isinstance(item, dict):
+            errors.append(f"missing cell: {cell}")
+            continue
+        for field in ("question", "answer"):
+            value = item.get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"{cell}.{field} must be a non-empty string")
+    if errors:
+        return errors
+
+    if normalise(cells["C11"]["question"]) != normalise(record["source_question"]):
+        errors.append("C11.question must equal source_question")
+    if normalise(cells["C11"]["answer"]) != normalise(record["source_answer"]):
+        errors.append("C11.answer must equal source_answer")
+
+    target_entity = normalise(record["target_entity"])
+    replacement = normalise(record["replacement_entity"])
+    if target_entity == replacement:
+        errors.append("replacement_entity must differ from target_entity")
+    if target_entity not in normalise(cells["C11"]["question"]):
+        errors.append("C11.question must contain target_entity")
+    if target_entity not in normalise(cells["C10"]["question"]):
+        errors.append("C10.question must contain target_entity")
+    for cell in ("C01", "C00"):
+        if replacement not in normalise(cells[cell]["question"]):
+            errors.append(f"{cell}.question must contain replacement_entity")
+        joined = normalise(f"{cells[cell]['question']} {cells[cell]['answer']}")
+        if target_entity in joined:
+            errors.append(f"{cell} leaks target_entity")
+
+    source_answer = normalise(record["source_answer"])
+    if len(source_answer) >= 8:
+        for cell in ("C01", "C10", "C00"):
+            joined = normalise(f"{cells[cell]['question']} {cells[cell]['answer']}")
+            if source_answer in joined:
+                errors.append(f"{cell} leaks source_answer")
+
+    if normalise(record["target_relation"]) == normalise(record["placebo_relation"]):
+        errors.append("placebo_relation must differ from target_relation")
+    qa_pairs = {
+        (normalise(cells[cell]["question"]), normalise(cells[cell]["answer"]))
+        for cell in CELLS
+    }
+    if len(qa_pairs) != len(CELLS):
+        errors.append("the four cells must be distinct")
+
+    invariants = record.get("invariants")
+    if not isinstance(invariants, dict):
+        errors.append("invariants must be an object")
+    else:
+        for field in ("task", "style", "difficulty", "answer_format"):
+            if not isinstance(invariants.get(field), str) or not invariants[field].strip():
+                errors.append(f"missing invariant: {field}")
+    return errors
+
+
+def audit_ciru_unit(record: Dict) -> Dict[str, float]:
+    """Return transparent, deterministic matching diagnostics."""
+    cells = record["cells"]
+    q_lengths = [len(cells[cell]["question"].split()) for cell in CELLS]
+    a_lengths = [len(cells[cell]["answer"].split()) for cell in CELLS]
+    return {
+        "question_words_min": min(q_lengths),
+        "question_words_max": max(q_lengths),
+        "question_length_ratio": max(q_lengths) / max(min(q_lengths), 1),
+        "answer_words_min": min(a_lengths),
+        "answer_words_max": max(a_lengths),
+        "answer_length_ratio": max(a_lengths) / max(min(a_lengths), 1),
+    }
+
+
+def load_ciru_units(path: str | Path, strict: bool = True) -> List[Dict]:
+    records: List[Dict] = []
+    seen = set()
+    with Path(path).open(encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            errors = validate_ciru_unit(record)
+            if errors and strict:
+                raise ValueError(f"{path}:{line_no}: " + "; ".join(errors))
+            if errors:
+                continue
+            key = (record["source_id"], int(record.get("view", 0)))
+            if key in seen:
+                raise ValueError(f"{path}:{line_no}: duplicate unit key {key}")
+            seen.add(key)
+            records.append(record)
+    if not records:
+        raise ValueError(f"No valid CIRU units found in {path}")
+    return records
+
+
+def write_ciru_jsonl(path: str | Path, records: Iterable[Dict]) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")

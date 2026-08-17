@@ -265,45 +265,67 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
 
     metadata = report["metadata"]
     protocol = report["protocol"]
+    is_ciru = str(metadata.get("variant", "")).upper().startswith("CIRU")
     lines = [
-        "# F2R TOFU evaluation",
+        f"# {metadata.get('variant', 'F2R')} TOFU evaluation",
         "",
         f"- Mode: `{metadata.get('mode')}`",
         f"- Split: `{metadata.get('split')}`",
         f"- Variant: `{metadata.get('variant', 'F2R')}`",
         f"- Base model: `{metadata.get('base_model')}`",
         f"- Retain reference: `{metadata.get('retain_reference')}` (post-freeze evaluation only)",
-        f"- A1: `{metadata.get('a1_checkpoint')}`",
-        f"- A2: `{metadata.get('a2_checkpoint')}`",
-        (
-            "- A1 training: "
-            f"`layers={metadata.get('a1_num_layer')}, "
-            f"LoRA={metadata.get('a1_lora_r')}/{metadata.get('a1_lora_alpha')}, "
-            f"lr={metadata.get('a1_train_lr')}, epochs={metadata.get('a1_train_ep')}, "
-            f"uniform_weight={metadata.get('a1_retain_weight')}, seed={metadata.get('a1_seed')}`"
-        ),
-        (
-            "- A2 training: "
-            f"`layers={metadata.get('a2_num_layer')}, "
-            f"LoRA={metadata.get('a2_lora_r')}/{metadata.get('a2_lora_alpha')}, "
-            f"lr={metadata.get('a2_train_lr')}, epochs={metadata.get('a2_train_ep')}, "
-            f"uniform_weight={metadata.get('a2_retain_weight')}, seed={metadata.get('a2_seed')}`"
-        ),
-        f"- Counterfactual views: `{metadata.get('views')}`",
         "- Aggregation: `Mem=HM(1-ES,1-EM,1-ParaProb,1-knowledge-TR); Util=HM(MU,Fluency); Agg=HM(Mem,Util)`",
         "- Truth Ratio in Mem: `OpenUnlearning knowledge TR = p(correct)/(p(correct)+p(perturbed))`",
-        (
-            "- Inference: "
-            f"`weight_a1={metadata.get('weight_a1')}, "
-            f"weight_a2={metadata.get('weight_a2')}, "
-            f"top_filter={metadata.get('top_filter')}`"
-        ),
-        (
-            "- Calibration: "
-            f"`alignment={metadata.get('alignment_enabled')}, "
-            f"gate={metadata.get('gate_enabled')}, "
-            f"artifact={metadata.get('calibration_path')}`"
-        ),
+    ]
+    if is_ciru:
+        lines += [
+            f"- Causal units: `{metadata.get('causal_units')}` jointly generated 2x2 units",
+            f"- Causal cells: `C11/C01/C10/C00` (three generated controls per source)",
+            (
+                "- DiD subspace: "
+                f"`layers={metadata.get('causal_layers')}, "
+                f"rank={metadata.get('causal_rank')}, "
+                f"artifact={metadata.get('method_artifact')}`"
+            ),
+            (
+                "- Intervention: "
+                f"`alpha={metadata.get('intervention_alpha')}, "
+                f"learned_gate={metadata.get('gate_enabled')}`"
+            ),
+        ]
+    else:
+        lines += [
+            f"- A1: `{metadata.get('a1_checkpoint')}`",
+            f"- A2: `{metadata.get('a2_checkpoint')}`",
+            (
+                "- A1 training: "
+                f"`layers={metadata.get('a1_num_layer')}, "
+                f"LoRA={metadata.get('a1_lora_r')}/{metadata.get('a1_lora_alpha')}, "
+                f"lr={metadata.get('a1_train_lr')}, epochs={metadata.get('a1_train_ep')}, "
+                f"uniform_weight={metadata.get('a1_retain_weight')}, seed={metadata.get('a1_seed')}`"
+            ),
+            (
+                "- A2 training: "
+                f"`layers={metadata.get('a2_num_layer')}, "
+                f"LoRA={metadata.get('a2_lora_r')}/{metadata.get('a2_lora_alpha')}, "
+                f"lr={metadata.get('a2_train_lr')}, epochs={metadata.get('a2_train_ep')}, "
+                f"uniform_weight={metadata.get('a2_retain_weight')}, seed={metadata.get('a2_seed')}`"
+            ),
+            f"- Counterfactual views: `{metadata.get('views')}`",
+            (
+                "- Inference: "
+                f"`weight_a1={metadata.get('weight_a1')}, "
+                f"weight_a2={metadata.get('weight_a2')}, "
+                f"top_filter={metadata.get('top_filter')}`"
+            ),
+            (
+                "- Calibration: "
+                f"`alignment={metadata.get('alignment_enabled')}, "
+                f"gate={metadata.get('gate_enabled')}, "
+                f"artifact={metadata.get('calibration_path')}`"
+            ),
+        ]
+    lines += [
         (
             "- Training/selection retain access: "
             f"`{str(protocol['training_retain_access']).lower()} / "
@@ -374,6 +396,11 @@ def main() -> None:
     parser.add_argument("--a2-retain-weight", type=float)
     parser.add_argument("--a1-seed", type=int)
     parser.add_argument("--a2-seed", type=int)
+    parser.add_argument("--method-artifact")
+    parser.add_argument("--causal-units", type=int)
+    parser.add_argument("--causal-layers")
+    parser.add_argument("--causal-rank", type=int)
+    parser.add_argument("--intervention-alpha", type=float)
     parser.add_argument(
         "--selection-retain-access",
         choices=("true", "false"),
@@ -416,6 +443,11 @@ def main() -> None:
         "a2_retain_weight": args.a2_retain_weight,
         "a1_seed": args.a1_seed,
         "a2_seed": args.a2_seed,
+        "method_artifact": args.method_artifact,
+        "causal_units": args.causal_units,
+        "causal_layers": args.causal_layers,
+        "causal_rank": args.causal_rank,
+        "intervention_alpha": args.intervention_alpha,
         "selection_retain_access": args.selection_retain_access == "true",
     }
     report = build_report(load_json(args.eval_json), load_json(args.summary_json), metadata)
