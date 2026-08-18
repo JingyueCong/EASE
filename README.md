@@ -367,6 +367,13 @@ The target-aware search evaluates 40 coarse combinations and then 27 fine
 combinations around the coarse optimum. Both stages use explicit paired
 checkpoint-48 overrides, so every job is evaluation-only.
 
+If the 60-step search reaches the edge near `(-1.7, 1.5)`, extend only the
+joint A1/A2 frontier with 27 evaluation-only configurations:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_f2d_did200_s60_boundary.sh
+```
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

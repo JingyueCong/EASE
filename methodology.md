@@ -542,6 +542,11 @@ entity-direction variance。主比较仍固定 A1/A2 各 36 optimizer steps。
 \(\tau\in\{10^{-4},2\times10^{-4}\}\) 做 coarse inference search，再围绕最优点
 分别取三个邻域值进行 27-cell fine search。该步骤不更新任何模型参数。
 
+若 60-step assistant 的最优点落在 \((-1.7,1.5)\) 的搜索边界，则沿
+\((-1.7,1.5)\rightarrow(-2.1,1.9)\) 的对角线继续扩展，而不再做完整 Cartesian
+搜索。该 9 个权重对与 3 个 filter 共形成 27 个 evaluation-only 配置，用于检验增强
+删除残差的同时增强补偿残差能否继续外推 Pareto frontier。
+
 F2D-40 的 equal-epoch 设置每个 assistant 在 5 epochs 下只有约 50 个 optimizer
 steps，而 400-pair F2R 在同样 epochs 下约有 155 steps。因此同时报告：
 
