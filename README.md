@@ -414,6 +414,18 @@ generation. It writes `SEARCH_PROTOCOL.txt` and marks the entire search as
 `selection_retain_access=true`; a selected point requires confirmation on new
 seeds and splits before it can be reported as a final result.
 
+Before interpreting a hierarchy result, generate the pre-registered 20-unit
+human-audit sheet (two examples from every TOFU author block):
+
+```bash
+python scripts/audit_uf2d_hierarchy.py \
+  --input ULD/data/ciru/forget05_ciru200_seed42_full_authorblock_hier_v1.jsonl \
+  --output audits/uf2d_tofu20_seed42.md
+```
+
+The sheet exposes every four-cell answer, extracted claim/evidence text,
+coverage ratios, automatic risk flags, and unit-level human-review boxes.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

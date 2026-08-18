@@ -769,3 +769,10 @@ w_2\in\{1.0,1.4,1.8,2.2,2.6,3.0\},
 生成，但由于依据完整 forget05 retain-side 指标选择，必须标记
 `selection_retain_access=true`。任何胜出点都只能作为后续新 seed/split 确认实验的冻结
 配置，不能直接作为无偏最终测试结果。
+
+在依据该搜索解释方法前，必须用 `scripts/audit_uf2d_hierarchy.py` 从十个 TOFU author
+block 各抽两条，对 20 个完整四格单元做人工审计。审计逐 cell 核对：claim 是否包含完整
+原子命题且排除无关描述、evidence 是否为最小事实变化、两组 matched pair 是否只改变
+规定因素，以及抽取是否误选标点或风格 scaffold。需同时报告 `claim/evidence coverage`、
+自动风险标记以及人工 `PASS/FAIL` 比例；若失败集中在单句多事实答案，必须先修正分句器并
+重跑分层训练，不能用后续权重扫参掩盖数据表示错误。
