@@ -1,0 +1,4 @@
+loss_type: factorial_hierarchical
+retain_weight: 1.0
+preserve_kl_weight: 0.0
+evidence_weight: 0.0

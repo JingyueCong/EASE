@@ -100,6 +100,15 @@ class CIRUDataTest(unittest.TestCase):
         self.assertEqual(len(a1_ce), len(a1_uniform))
         self.assertEqual(len(a2_ce), len(a2_uniform))
 
+    def test_hierarchical_roles_preserve_supervision(self):
+        unit = valid_unit()
+        unit["cells"]["C11"]["supervision"] = {
+            "claim_spans": [[0, 4]],
+            "evidence_spans": [[0, 4]],
+        }
+        a1_ce, _ = ciru.factorial_dual_roles([unit], "uf2d_hier_a1")
+        self.assertEqual(a1_ce[0]["supervision"]["claim_spans"], [[0, 4]])
+
     def test_factorial_dual_roles_reject_unknown_role(self):
         with self.assertRaisesRegex(ValueError, "Unknown factorial dual role"):
             ciru.factorial_dual_roles([valid_unit()], "f2d_did_unknown")

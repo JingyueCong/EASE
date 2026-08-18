@@ -174,6 +174,8 @@ def factorial_dual_roles(
     mapping = {
         "f2d_did_a1": ("C11", "C01"),
         "f2d_did_a2": ("C10", "C00"),
+        "uf2d_hier_a1": ("C11", "C01"),
+        "uf2d_hier_a2": ("C10", "C00"),
     }
     if data_role not in mapping:
         raise ValueError(f"Unknown factorial dual role: {data_role}")

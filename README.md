@@ -386,6 +386,20 @@ The four cells are 72/60, 72/72, 84/60, and 84/72 optimizer steps. They share
 the audited 200-unit design and the frozen development operating point
 `(-2.0, 1.8, 0.0002)`.
 
+Before extending the method to long-document benchmarks, run the strict TOFU
+hierarchy ladder on the same 200 factorial units:
+
+```bash
+GPUS="0 1 2 3" bash scripts/run_uf2d_tofu_ladder.sh
+```
+
+The runner deterministically annotates paired evidence and claim spans, then
+runs `FullAnswer`, `ClaimMask`, `ClaimMask+KL`, and `Claim+Span+KL` in parallel.
+All four stages use seed 42, 72/72 optimizer steps, the same dual-assistant
+architecture, and the same inference point `(-2.0, 1.8, 0.0002)`. No generator
+calls or real retain samples are used by the annotation/training pipeline;
+the frozen retain reference is used only for the complete diagnostic report.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

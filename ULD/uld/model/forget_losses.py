@@ -93,6 +93,132 @@ class ForgetRetainLoss:
             'retain_loss': retain_loss 
         }
 
+
+class FactorialHierarchicalLoss:
+    """Claim/span-local F2D objective with base-model preservation.
+
+    CE is applied to the claim tokens of the first factorial role and the
+    uniform objective to claim tokens of the second.  Evidence tokens can be
+    upweighted without changing the selected claims.  Non-claim answer tokens
+    optionally stay close to the frozen base model through forward KL.
+    """
+
+    def __init__(
+        self,
+        retain_weight=1.0,
+        preserve_kl_weight=0.0,
+        evidence_weight=0.0,
+    ) -> None:
+        self.retain_weight = float(retain_weight)
+        self.preserve_kl_weight = float(preserve_kl_weight)
+        self.evidence_weight = float(evidence_weight)
+        # The trainer uses this flag to install the balanced sampler.
+        self.retain_loss_func = UniformLossFunc
+        self.forget_loss_func = GradDescentLossFunc
+
+    @staticmethod
+    def _weighted_mean(values, weights):
+        weights = weights.to(values.dtype)
+        return (values * weights).sum() / weights.sum().clamp(min=1.0)
+
+    def _target_weights(self, batch, select):
+        claim = batch['claim_mask'][select][..., 1:]
+        evidence = batch['evidence_mask'][select][..., 1:]
+        valid = (batch['labels'][select][..., 1:] != -100).to(claim.dtype)
+        return (claim + self.evidence_weight * evidence) * valid
+
+    def _preserve_weights(self, batch):
+        answer = batch['answer_mask'][..., 1:]
+        claim = batch['claim_mask'][..., 1:]
+        return (answer * (1.0 - claim)).clamp(min=0.0)
+
+    def __call__(self, model, batch: Dict[str, Any], oracle_model=None):
+        retainlabels = batch.get('retainlabels')
+        if retainlabels is None:
+            retainlabels = torch.zeros(
+                batch['input_ids'].shape[0],
+                dtype=torch.long,
+                device=batch['input_ids'].device,
+            )
+        outputs = model(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+        )
+        logits = outputs.logits[..., :-1, :].contiguous()
+        labels = batch['labels'][..., 1:].contiguous()
+
+        ce_select = retainlabels == 0
+        uniform_select = retainlabels == 1
+        zero = logits.sum() * 0.0
+
+        if ce_select.any():
+            ce_logits = logits[ce_select]
+            ce_labels = labels[ce_select]
+            ce_values = F.cross_entropy(
+                ce_logits.transpose(-1, -2),
+                ce_labels,
+                ignore_index=-100,
+                reduction='none',
+            )
+            ce_loss = self._weighted_mean(
+                ce_values, self._target_weights(batch, ce_select)
+            )
+        else:
+            ce_loss = zero
+
+        if uniform_select.any():
+            uniform_logits = logits[uniform_select]
+            # KL(U || p) differs from -mean_v log p(v) only by log(V), a
+            # constant that has no gradient.  Keeping the constant makes the
+            # logged loss directly comparable to the legacy implementation.
+            log_probs = F.log_softmax(uniform_logits, dim=-1)
+            uniform_values = -log_probs.mean(dim=-1) - torch.log(
+                torch.tensor(
+                    uniform_logits.shape[-1],
+                    dtype=log_probs.dtype,
+                    device=log_probs.device,
+                )
+            )
+            uniform_loss = self._weighted_mean(
+                uniform_values, self._target_weights(batch, uniform_select)
+            )
+        else:
+            uniform_loss = zero
+
+        preserve_loss = zero
+        preserve_weights = self._preserve_weights(batch)
+        if self.preserve_kl_weight > 0 and preserve_weights.sum() > 0:
+            if oracle_model is None:
+                raise ValueError(
+                    "FactorialHierarchicalLoss with preserve_kl_weight > 0 "
+                    "requires a frozen oracle/base model"
+                )
+            with torch.no_grad():
+                oracle_logits = oracle_model(
+                    input_ids=batch['input_ids'],
+                    attention_mask=batch['attention_mask'],
+                ).logits[..., :-1, :]
+                oracle_log_probs = F.log_softmax(oracle_logits, dim=-1)
+            model_log_probs = F.log_softmax(logits, dim=-1)
+            token_kl = F.kl_div(
+                model_log_probs,
+                oracle_log_probs,
+                reduction='none',
+                log_target=True,
+            ).sum(dim=-1)
+            preserve_loss = self._weighted_mean(token_kl, preserve_weights)
+
+        regularization = (
+            self.retain_weight * uniform_loss
+            + self.preserve_kl_weight * preserve_loss
+        )
+        loss = ce_loss + regularization
+        return {
+            'loss': loss,
+            'forget_loss': ce_loss,
+            'retain_loss': regularization,
+        }
+
 # For RMU
 class RMULoss(ForgetRetainLoss):
     def __init__(self, forget_loss_func, retain_loss_func, model_config, layerid, retain_weight=1200, steering_coeff=6.5) -> None:
@@ -347,6 +473,12 @@ def UniformLossFunc(model, input_ids, attention_mask, labels=None, **kwargs):
     return kl_div
 
 def create_unlearn_loss(loss_config):
+    if loss_config.get('loss_type') == 'factorial_hierarchical':
+        return FactorialHierarchicalLoss(
+            retain_weight=loss_config.get('retain_weight', 1.0),
+            preserve_kl_weight=loss_config.get('preserve_kl_weight', 0.0),
+            evidence_weight=loss_config.get('evidence_weight', 0.0),
+        )
     if (forget_loss := loss_config.get('forget_loss', None)) is None:
         forget_loss_func = None
     else:
@@ -373,6 +505,8 @@ def create_unlearn_loss(loss_config):
         )
 
 def loss_requries_oracle(loss_config):
+    if loss_config.get('loss_type') == 'factorial_hierarchical':
+        return float(loss_config.get('preserve_kl_weight', 0.0)) > 0
     forget_loss = loss_config.get('forget_loss', None)
     retain_loss = loss_config.get('retain_loss', None)
     if retain_loss in [

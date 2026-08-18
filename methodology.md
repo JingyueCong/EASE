@@ -721,3 +721,37 @@ A1/A2 checkpoint、(w_1,w_2) 与 top-filter，顺序评估
 `F2R -> +Alignment -> +Gate -> +Alignment+Gate`。最终 LLM-Beliefs/OpenUnlearning
 指标比较仍会查看冻结 retain reference，因此该开发实验明确标为
 `selection_retain_access=true`。
+
+## 19. U-F2D：面向短 QA 与长文档的统一分层表示
+
+为避免 TOFU 与 MUSE 分别定义两套方法，U-F2D 将所有输入统一表示为
+
+\[
+\text{document}\rightarrow\text{segment/event}\rightarrow
+\text{claim}\rightarrow\text{evidence span}.
+\]
+
+TOFU 短问答是该表示的退化情形。现有四格数据不重新生成：分别在匹配对
+`C11/C01` 与 `C10/C00` 内做确定性的词元对齐，非共享片段定义 evidence span，包含
+这些片段的句子或分句定义 claim。该后标注不访问真实 retain 数据，也不调用生成模型。
+
+对 claim token，A1 继续学习 `CE(C11)+Uniform(C01)`，A2 学习
+`CE(C10)+Uniform(C00)`；evidence token 可获得额外权重。对 answer 中不属于目标
+claim 的 token，加入冻结 base model 的前向 KL：
+
+\[
+\mathcal L=\mathcal L_{\mathrm{claim}}
++\gamma\mathcal L_{\mathrm{evidence}}
++\beta D_{\mathrm{KL}}(p_{\theta_0}\|p_{\theta}).
+\]
+
+严格 TOFU 方法阶梯固定同一 200-unit/800-cell 数据、seed、72/72 optimizer steps、
+LoRA 结构和推理点，只比较：
+
+1. `FullAnswer`；
+2. `ClaimMask`；
+3. `ClaimMask+KL`；
+4. `Claim+Span+KL`。
+
+因此阶梯差异可归因于监督粒度与局部保持约束，而不是生成预算、训练步数或推理扫参。
+完整运行入口为 `scripts/run_uf2d_tofu_ladder.sh`。

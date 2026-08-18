@@ -84,6 +84,9 @@ TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
 TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
+TRAIN_LOSS_CONFIG="${TRAIN_LOSS_CONFIG:-remember+uniform}"
+PRESERVE_KL_WEIGHT="${PRESERVE_KL_WEIGHT:-0.0}"
+EVIDENCE_WEIGHT="${EVIDENCE_WEIGHT:-0.0}"
 TRAIN_STEPS="${TRAIN_STEPS:-0}"
 RETAIN_WEIGHT="${RETAIN_WEIGHT:-5.0}"
 SEED="${SEED:-42}"
@@ -275,6 +278,7 @@ echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
 echo "  calibration      : $CALIBRATION_PATH"
 echo "  optimizer        : $TRAIN_OPTIM"
+echo "  training loss    : $TRAIN_LOSS_CONFIG (preserve-KL=$PRESERVE_KL_WEIGHT, evidence-weight=$EVIDENCE_WEIGHT)"
 echo "  eval overwrite   : $EVAL_OVERWRITE"
 echo "  selection access : $SELECTION_RETAIN_ACCESS"
 echo "  Hugging Face     : $HF_ENDPOINT"
@@ -332,7 +336,7 @@ train_role() {
     local role_seed="${!seed_var}"
     local role_data_mode="${!data_mode_var}"
     local signature
-    signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|seed=$role_seed"
+    signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|loss=$TRAIN_LOSS_CONFIG|preserve_kl=$PRESERVE_KL_WEIGHT|evidence_weight=$EVIDENCE_WEIGHT|seed=$role_seed"
     if [ "$role_data_mode" != "f2r_${role}" ]; then
         signature="${signature}|data_mode=$role_data_mode"
     fi
@@ -358,6 +362,16 @@ train_role() {
     if [ "$role_train_steps" -gt 0 ]; then
         step_args=(trainer.max_steps="$role_train_steps")
     fi
+    local loss_args=(
+        "unlearn_loss=$TRAIN_LOSS_CONFIG"
+        "unlearn_loss.retain_weight=$role_retain_weight"
+    )
+    if [ "$TRAIN_LOSS_CONFIG" = "factorial_hierarchical" ]; then
+        loss_args+=(
+            "unlearn_loss.preserve_kl_weight=$PRESERVE_KL_WEIGHT"
+            "unlearn_loss.evidence_weight=$EVIDENCE_WEIGHT"
+        )
+    fi
     CUDA_VISIBLE_DEVICES="$GPU" "$TRAIN_PY" "$EASE_ROOT/ULD/scripts/hf_forget_train.py" \
         project="f2r_${role}_${SPLIT}" \
         data=tofu_chat3 \
@@ -372,8 +386,7 @@ train_role() {
         model_mode.Lora.r="$role_lora_r" \
         model_mode.Lora.alpha="$role_lora_alpha" \
         model_mode.Lora.dropout="$role_lora_dropout" \
-        unlearn_loss=remember+uniform \
-        unlearn_loss.retain_weight="$role_retain_weight" \
+        "${loss_args[@]}" \
         trainer.batch_size="$role_train_bs" \
         trainer.gradient_accumulation_steps="$role_train_ga" \
         trainer.learning_rate="$role_train_lr" \
@@ -554,6 +567,9 @@ fi
     --a2-retain-weight "$A2_RETAIN_WEIGHT" \
     --a1-seed "$A1_SEED" \
     --a2-seed "$A2_SEED" \
+    --training-loss "$TRAIN_LOSS_CONFIG" \
+    --preserve-kl-weight "$PRESERVE_KL_WEIGHT" \
+    --evidence-weight "$EVIDENCE_WEIGHT" \
     --selection-retain-access "$SELECTION_RETAIN_ACCESS" \
     "${summary_args[@]}"
 echo "Done. Full report: $EVAL_DIR/F2R_REPORT.md"

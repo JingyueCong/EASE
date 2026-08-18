@@ -62,15 +62,37 @@ class TorchDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data)
 
+    @staticmethod
+    def _span_token_mask(offsets, answer_start, spans):
+        mask = torch.zeros(len(offsets), dtype=torch.float32)
+        for token_index, (start, end) in enumerate(offsets):
+            if end <= start:
+                continue
+            relative_start = start - answer_start
+            relative_end = end - answer_start
+            if any(
+                max(relative_start, int(span_start))
+                < min(relative_end, int(span_end))
+                for span_start, span_end in spans
+            ):
+                mask[token_index] = 1.0
+        return mask
+
     def tokenize_text(self, item : Dict):
         prefix_text = self.conv_template.prepare_gen_prompt(**item)
         full_text = self.conv_template.prepare_prompt(**item)
+        tokenizer_kwargs = dict(
+            return_tensors='pt',
+            padding='max_length',
+            max_length=self.max_length,
+            truncation=True,
+        )
+        supervision = item.get('supervision')
+        if supervision and getattr(self.tokenizer, 'is_fast', False):
+            tokenizer_kwargs['return_offsets_mapping'] = True
         inputs = self.tokenizer(
             full_text, 
-            return_tensors='pt', 
-            padding='max_length', 
-            max_length=self.max_length, 
-            truncation=True
+            **tokenizer_kwargs,
         )
         input_ids = inputs['input_ids'][0]
         attention_mask = inputs['attention_mask'][0]
@@ -85,7 +107,41 @@ class TorchDataset(torch.utils.data.Dataset):
             labels = collated['labels'][0]
             labels[:-suffix_num] = -100
             
-        return input_ids, attention_mask, labels
+        answer_mask = (labels != -100).to(torch.float32)
+        claim_mask = answer_mask.clone()
+        evidence_mask = torch.zeros_like(answer_mask)
+        if supervision:
+            if 'offset_mapping' not in inputs:
+                raise ValueError(
+                    "Hierarchical F2D supervision requires a fast tokenizer "
+                    "with offset mappings"
+                )
+            offsets = inputs['offset_mapping'][0].tolist()
+            # ``prepare_gen_prompt`` strips trailing template whitespace while
+            # ``prepare_prompt`` keeps it before the answer.  Locate the
+            # answer from the complete rendered string to keep char offsets
+            # exact for both short QA and document continuations.
+            answer_text = str(item.get('answer', '')).strip()
+            answer_start = len(full_text) - len(answer_text)
+            claim_mask = self._span_token_mask(
+                offsets, answer_start, supervision.get('claim_spans', [])
+            ) * answer_mask
+            evidence_mask = self._span_token_mask(
+                offsets, answer_start, supervision.get('evidence_spans', [])
+            ) * answer_mask
+            if claim_mask.sum() == 0:
+                raise ValueError("Hierarchical F2D claim mask contains no answer tokens")
+            if evidence_mask.sum() == 0:
+                raise ValueError("Hierarchical F2D evidence mask contains no answer tokens")
+
+        return (
+            input_ids,
+            attention_mask,
+            labels,
+            answer_mask,
+            claim_mask,
+            evidence_mask,
+        )
     
     def __getitem__(self, idx):
         item = self.data[idx] # {question: , answer: }
@@ -102,10 +158,20 @@ class TorchDataset(torch.utils.data.Dataset):
         
         result = {}
         for name, text in zip(["", "prefer_"], real_items):
-            input_ids, attention_mask, labels = self.tokenize_text(text)
+            (
+                input_ids,
+                attention_mask,
+                labels,
+                answer_mask,
+                claim_mask,
+                evidence_mask,
+            ) = self.tokenize_text(text)
             result[f"{name}input_ids"] = input_ids
             result[f"{name}attention_mask"] = attention_mask
             result[f"{name}labels"] = labels
+            result[f"{name}answer_mask"] = answer_mask
+            result[f"{name}claim_mask"] = claim_mask
+            result[f"{name}evidence_mask"] = evidence_mask
         
         result['retainlabels'] = retainlabel
         return result

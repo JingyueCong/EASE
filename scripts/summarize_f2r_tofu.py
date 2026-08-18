@@ -319,6 +319,12 @@ def write_reports(report: Dict[str, Any], output_dir: Path) -> None:
                 f"steps={metadata.get('a2_train_steps')}, "
                 f"uniform_weight={metadata.get('a2_retain_weight')}, seed={metadata.get('a2_seed')}`"
             ),
+            (
+                "- Hierarchical objective: "
+                f"`loss={metadata.get('training_loss')}, "
+                f"preserve_kl_weight={metadata.get('preserve_kl_weight')}, "
+                f"evidence_weight={metadata.get('evidence_weight')}`"
+            ),
             f"- Counterfactual views: `{metadata.get('views')}`",
             (
                 "- Inference: "
@@ -408,6 +414,9 @@ def main() -> None:
     parser.add_argument("--a2-retain-weight", type=float)
     parser.add_argument("--a1-seed", type=int)
     parser.add_argument("--a2-seed", type=int)
+    parser.add_argument("--training-loss", default="remember+uniform")
+    parser.add_argument("--preserve-kl-weight", type=float, default=0.0)
+    parser.add_argument("--evidence-weight", type=float, default=0.0)
     parser.add_argument("--method-artifact")
     parser.add_argument("--causal-units", type=int)
     parser.add_argument("--causal-layers")
@@ -460,6 +469,9 @@ def main() -> None:
         "a2_retain_weight": args.a2_retain_weight,
         "a1_seed": args.a1_seed,
         "a2_seed": args.a2_seed,
+        "training_loss": args.training_loss,
+        "preserve_kl_weight": args.preserve_kl_weight,
+        "evidence_weight": args.evidence_weight,
         "method_artifact": args.method_artifact,
         "causal_units": args.causal_units,
         "causal_layers": args.causal_layers,

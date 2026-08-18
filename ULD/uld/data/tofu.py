@@ -121,7 +121,10 @@ class ToFU_DataModule(TrainDataModule):
             base_retain_data = datasets.concatenate_datasets([base_retain_data, tmpdata])
 
         # -------- F2D-DiD: explicit, balanced factorial contrasts --------
-        if data_role in {'f2d_did_a1', 'f2d_did_a2'}:
+        if data_role in {
+            'f2d_did_a1', 'f2d_did_a2',
+            'uf2d_hier_a1', 'uf2d_hier_a2',
+        }:
             if counterfactual_path is None:
                 raise ValueError(f"{data_role} requires counterfactual_path")
             if with_retain:
@@ -134,7 +137,7 @@ class ToFU_DataModule(TrainDataModule):
             self.forget_length = len(base_forget_data)
             self.retain_length = len(base_retain_data)
             ce_cell, uniform_cell = (
-                ("C11", "C01") if data_role == 'f2d_did_a1'
+                ("C11", "C01") if data_role.endswith('_a1')
                 else ("C10", "C00")
             )
             print(
