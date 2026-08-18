@@ -363,6 +363,22 @@ def describe_error(exc: BaseException | None) -> str:
     return " | ".join(details)
 
 
+def temperature_is_unsupported(exc: BaseException) -> bool:
+    """Recognise reasoning-model APIs that only accept default temperature."""
+    current: BaseException | None = exc
+    seen = set()
+    details = []
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        details.append(str(current))
+        body = getattr(current, "body", None)
+        if body:
+            details.append(str(body))
+        current = current.__cause__ or current.__context__
+    message = " ".join(details).casefold()
+    return "temperature" in message and "unsupported" in message
+
+
 def request_payload(record: Dict) -> str:
     compact = {
         "source_id": record.get("source_id"),
@@ -385,6 +401,7 @@ def annotate_openai(client, args, record: Dict) -> Dict:
     base_prompt = "Annotate this unit:\n" + request_payload(record)
     feedback = ""
     last_error: BaseException | None = None
+    use_temperature = args.temperature is not None
     for attempt in range(args.retries):
         try:
             request = {
@@ -393,8 +410,9 @@ def annotate_openai(client, args, record: Dict) -> Dict:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": base_prompt + feedback},
                 ],
-                "temperature": args.temperature,
             }
+            if use_temperature:
+                request["temperature"] = args.temperature
             if args.resolved_json_mode == "required":
                 request["response_format"] = {"type": "json_object"}
             response = client.chat.completions.create(**request)
@@ -402,6 +420,12 @@ def annotate_openai(client, args, record: Dict) -> Dict:
             return apply_semantic_annotation(record, payload)
         except Exception as exc:
             last_error = exc
+            if use_temperature and temperature_is_unsupported(exc):
+                # GPT-5-class Azure deployments can reject every explicit
+                # temperature, even 1.0. Retry with the API default omitted.
+                use_temperature = False
+                feedback = ""
+                continue
             feedback = (
                 "\n\nThe prior annotation failed deterministic validation:\n"
                 f"{describe_error(exc)}\nReturn a corrected complete JSON object. "
@@ -480,7 +504,12 @@ def main() -> None:
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Optional sampling temperature; omitted by default for GPT-5 deployments",
+    )
     parser.add_argument(
         "--json-mode", choices=("required", "prompt"), default="prompt"
     )

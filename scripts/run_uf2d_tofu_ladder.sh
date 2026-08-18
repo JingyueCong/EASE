@@ -35,7 +35,7 @@ HIER_BASE_URL="${HIER_BASE_URL:-${OPENAI_BASE_URL:-${OPENAI_API_BASE:-}}}"
 HIER_API_KEY_ENV="${HIER_API_KEY_ENV:-OPENAI_API_KEY}"
 HIER_CONCURRENCY="${HIER_CONCURRENCY:-4}"
 HIER_MIN_VALID_FRACTION="${HIER_MIN_VALID_FRACTION:-0.90}"
-HIER_TEMPERATURE="${HIER_TEMPERATURE:-0.0}"
+HIER_TEMPERATURE="${HIER_TEMPERATURE:-}"
 STOP_AFTER_HIERARCHY="${STOP_AFTER_HIERARCHY:-false}"
 WEIGHT_A1="${WEIGHT_A1:--1.8}"
 WEIGHT_A2="${WEIGHT_A2:-1.8}"
@@ -47,14 +47,19 @@ if [ ! -s "$SOURCE_DATA" ]; then
 fi
 if [ ! -s "$HIER_DATA" ]; then
     echo "[1/2] Creating validated semantic claim/evidence hierarchy v2"
+    ANNOTATE_ARGS=(
+        --input "$SOURCE_DATA" --output "$HIER_DATA"
+        --expected-input-units "$UNITS"
+        --minimum-valid-fraction "$HIER_MIN_VALID_FRACTION"
+        --model "$HIER_MODEL" --base-url "$HIER_BASE_URL"
+        --api-key-env "$HIER_API_KEY_ENV"
+        --concurrency "$HIER_CONCURRENCY"
+    )
+    if [ -n "$HIER_TEMPERATURE" ]; then
+        ANNOTATE_ARGS+=(--temperature "$HIER_TEMPERATURE")
+    fi
     "$TRAIN_PY" "$EASE_ROOT/scripts/annotate_f2d_hierarchy_v2.py" \
-        --input "$SOURCE_DATA" --output "$HIER_DATA" \
-        --expected-input-units "$UNITS" \
-        --minimum-valid-fraction "$HIER_MIN_VALID_FRACTION" \
-        --model "$HIER_MODEL" --base-url "$HIER_BASE_URL" \
-        --api-key-env "$HIER_API_KEY_ENV" \
-        --concurrency "$HIER_CONCURRENCY" \
-        --temperature "$HIER_TEMPERATURE"
+        "${ANNOTATE_ARGS[@]}"
 else
     echo "[1/2] Reusing semantic hierarchy v2: $HIER_DATA"
 fi

@@ -404,6 +404,9 @@ architecture, and inference point `(-1.8, 1.8, 0.0004)`. Annotation and
 training never read a retain split; the frozen retain reference is used only
 for the complete diagnostic report. Rejected source ids and the retained
 fraction are recorded next to the v2 JSONL.
+For GPT-5-class Azure deployments, leave `HIER_TEMPERATURE` unset; the runner
+omits the parameter and the annotator also retries automatically without it
+when an endpoint reports that explicit temperatures are unsupported.
 
 If the fixed-point ladder shows that `Claim+Span+KL` preserves utility but is
 under-strength, calibrate its frozen residual scale with the pre-registered

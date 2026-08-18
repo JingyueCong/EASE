@@ -1,6 +1,8 @@
 import importlib.util
+import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,6 +160,44 @@ class F2DHierarchyV2Test(unittest.TestCase):
         )
         with self.assertRaisesRegex(hierarchy.AnnotationError, "long answer"):
             hierarchy.apply_semantic_annotation(record, payload)
+
+    def test_unsupported_temperature_is_retried_with_api_default(self):
+        class UnsupportedTemperature(Exception):
+            body = {
+                "message": "Unsupported value: temperature only supports default",
+                "param": "temperature",
+                "code": "unsupported_value",
+            }
+
+        class Completions:
+            def __init__(self):
+                self.requests = []
+
+            def create(self, **request):
+                self.requests.append(request)
+                if len(self.requests) == 1:
+                    raise UnsupportedTemperature("temperature is unsupported")
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(
+                        message=SimpleNamespace(content=json.dumps(valid_payload()))
+                    )]
+                )
+
+        completions = Completions()
+        client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+        args = SimpleNamespace(
+            retries=3,
+            model="gpt-5-mini",
+            temperature=0.0,
+            resolved_json_mode="prompt",
+        )
+        annotated = hierarchy.annotate_openai(client, args, base_record())
+        self.assertEqual(
+            annotated["cells"]["C11"]["supervision"]["version"],
+            "paired-hierarchy-v2",
+        )
+        self.assertIn("temperature", completions.requests[0])
+        self.assertNotIn("temperature", completions.requests[1])
 
 
 if __name__ == "__main__":
