@@ -393,13 +393,17 @@ hierarchy ladder on the same 200 factorial units:
 GPUS="0 1 2 3" bash scripts/run_uf2d_tofu_ladder.sh
 ```
 
-The runner deterministically annotates paired evidence and claim spans, then
-runs `FullAnswer`, `ClaimMask`, `ClaimMask+KL`, and `Claim+Span+KL` in parallel.
-All four stages use seed 42, 72/72 optimizer steps, the same dual-assistant
-architecture, and the same inference point `(-1.8, 1.8, 0.0004)`, selected by
-the completed 59-configuration frozen `a72_a72` inference sweep. No generator
-calls or real retain samples are used by the annotation/training pipeline;
-the frozen retain reference is used only for the complete diagnostic report.
+The runner first creates `paired-hierarchy-v2` supervision with the configured
+OpenAI-compatible semantic annotator. The annotator must copy exact claim and
+evidence substrings from each frozen answer; local checks reject subject-name
+evidence, full multi-sentence claims, broad evidence, polarity/answerability
+mismatches, and unequal fact schemas. It then runs `FullAnswer`, `ClaimMask`,
+`ClaimMask+KL`, and `Claim+Span+KL` in parallel. All four stages use the same
+semantically valid subset, seed 42, 72/72 optimizer steps, dual-assistant
+architecture, and inference point `(-1.8, 1.8, 0.0004)`. Annotation and
+training never read a retain split; the frozen retain reference is used only
+for the complete diagnostic report. Rejected source ids and the retained
+fraction are recorded next to the v2 JSONL.
 
 If the fixed-point ladder shows that `Claim+Span+KL` preserves utility but is
 under-strength, calibrate its frozen residual scale with the pre-registered
@@ -418,9 +422,11 @@ Before interpreting a hierarchy result, generate the pre-registered 20-unit
 human-audit sheet (two examples from every TOFU author block):
 
 ```bash
+STOP_AFTER_HIERARCHY=true bash scripts/run_uf2d_tofu_ladder.sh
+
 python scripts/audit_uf2d_hierarchy.py \
-  --input ULD/data/ciru/forget05_ciru200_seed42_full_authorblock_hier_v1.jsonl \
-  --output audits/uf2d_tofu20_seed42.md
+  --input ULD/data/ciru/forget05_ciru200_seed42_full_authorblock_hier_v2.jsonl \
+  --output audits/uf2d_tofu20_seed42_v2.md
 ```
 
 The sheet exposes every four-cell answer, extracted claim/evidence text,

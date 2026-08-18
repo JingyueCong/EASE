@@ -100,14 +100,29 @@ def risk_flags(cell: Dict) -> Tuple[List[str], float, float]:
     claim_coverage = coverage(text, claims)
     evidence_coverage = coverage(text, evidence)
     flags = []
-    if claim_coverage >= 0.90:
+    # A one-sentence short answer is often already one atomic proposition.
+    # Near-full coverage is only suspicious when unrelated sentences exist.
+    sentence_count = len(re.findall(r"[.!?]+(?:[\"'’”)]*)\s+", text.strip())) + 1
+    if sentence_count > 1 and claim_coverage >= 0.90:
         flags.append("CLAIM_NEAR_FULL_ANSWER")
-    if evidence_coverage >= 0.60:
+    if len(re.findall(r"\w+(?:[’'-]\w+)*", text)) >= 12 and evidence_coverage >= 0.60:
         flags.append("EVIDENCE_TOO_BROAD")
     if evidence_coverage <= 0.03:
         flags.append("EVIDENCE_TOO_NARROW")
     if outside_claim(evidence, claims):
         flags.append("EVIDENCE_OUTSIDE_CLAIM")
+    for fact in supervision.get("facts", []):
+        subject = " ".join(str(fact.get("subject", "")).casefold().split())
+        relation = " ".join(str(fact.get("relation", "")).casefold().split())
+        evidence_text = " ".join(
+            str(value) for value in fact.get("evidence_texts", [])
+        ).casefold()
+        identity_relation = any(
+            marker in relation for marker in ("full name", "identity", "name of")
+        )
+        if subject and subject in evidence_text and not identity_relation:
+            flags.append("SUBJECT_IN_EVIDENCE")
+            break
     return flags, claim_coverage, evidence_coverage
 
 
@@ -159,8 +174,18 @@ def build_markdown(records: Sequence[Dict], input_path: Path) -> str:
                 f"- Extracted evidence: `{md_escape(' || '.join(evidence_text))}`",
                 f"- Coverage: claim={claim_cov:.1%}, evidence={evidence_cov:.1%}",
                 f"- Automatic flags: `{','.join(flags) if flags else 'none'}`",
-                "",
             ])
+            facts = supervision.get("facts", [])
+            if facts:
+                lines.append("- Atomic facts:")
+                for fact_index, fact in enumerate(facts, 1):
+                    lines.append(
+                        "  - "
+                        f"{fact_index}: subject=`{md_escape(str(fact.get('subject', '')))}`, "
+                        f"relation=`{md_escape(str(fact.get('relation', '')))}`, "
+                        f"object=`{md_escape(str(fact.get('object', '')))}`"
+                    )
+            lines.append("")
         lines.extend([
             "### Unit-level checks",
             "",

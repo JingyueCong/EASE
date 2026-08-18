@@ -26,10 +26,17 @@ SPLIT="${SPLIT:-forget05}"
 SEED="${SEED:-42}"
 UNITS="${UNITS:-200}"
 SOURCE_DATA="${SOURCE_DATA:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_ciru${UNITS}_seed${SEED}_full_authorblock_v1.jsonl}"
-HIER_DATA="${HIER_DATA:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_ciru${UNITS}_seed${SEED}_full_authorblock_hier_v1.jsonl}"
-SWEEP_NAME="${SWEEP_NAME:-uf2d_hierarchy_ladder_seed${SEED}}"
+HIER_DATA="${HIER_DATA:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_ciru${UNITS}_seed${SEED}_full_authorblock_hier_v2.jsonl}"
+SWEEP_NAME="${SWEEP_NAME:-uf2d_hierarchy_v2_ladder_seed${SEED}}"
 RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${SWEEP_NAME}}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/uf2d_1b_${SPLIT}_${SWEEP_NAME}}"
+HIER_MODEL="${HIER_MODEL:-${GENERATION_MODEL:-gpt-5-mini}}"
+HIER_BASE_URL="${HIER_BASE_URL:-${OPENAI_BASE_URL:-${OPENAI_API_BASE:-}}}"
+HIER_API_KEY_ENV="${HIER_API_KEY_ENV:-OPENAI_API_KEY}"
+HIER_CONCURRENCY="${HIER_CONCURRENCY:-4}"
+HIER_MIN_VALID_FRACTION="${HIER_MIN_VALID_FRACTION:-0.90}"
+HIER_TEMPERATURE="${HIER_TEMPERATURE:-0.0}"
+STOP_AFTER_HIERARCHY="${STOP_AFTER_HIERARCHY:-false}"
 WEIGHT_A1="${WEIGHT_A1:--1.8}"
 WEIGHT_A2="${WEIGHT_A2:-1.8}"
 TOP_FILTER="${TOP_FILTER:-0.0004}"
@@ -39,12 +46,24 @@ if [ ! -s "$SOURCE_DATA" ]; then
     exit 1
 fi
 if [ ! -s "$HIER_DATA" ]; then
-    echo "[1/2] Annotating paired claim/evidence hierarchy"
-    "$TRAIN_PY" "$EASE_ROOT/scripts/annotate_f2d_hierarchy.py" \
+    echo "[1/2] Creating validated semantic claim/evidence hierarchy v2"
+    "$TRAIN_PY" "$EASE_ROOT/scripts/annotate_f2d_hierarchy_v2.py" \
         --input "$SOURCE_DATA" --output "$HIER_DATA" \
-        --expected-units "$UNITS"
+        --expected-input-units "$UNITS" \
+        --minimum-valid-fraction "$HIER_MIN_VALID_FRACTION" \
+        --model "$HIER_MODEL" --base-url "$HIER_BASE_URL" \
+        --api-key-env "$HIER_API_KEY_ENV" \
+        --concurrency "$HIER_CONCURRENCY" \
+        --temperature "$HIER_TEMPERATURE"
 else
-    echo "[1/2] Reusing hierarchical annotation: $HIER_DATA"
+    echo "[1/2] Reusing semantic hierarchy v2: $HIER_DATA"
+fi
+HIER_VALID_UNITS="$(wc -l < "$HIER_DATA" | tr -d ' ')"
+if [ "$STOP_AFTER_HIERARCHY" = "true" ]; then
+    echo "STOP_AFTER_HIERARCHY=true; semantic v2 data are ready for audit."
+    echo "Dataset: $HIER_DATA"
+    echo "Metadata: ${HIER_DATA%.jsonl}.json"
+    exit 0
 fi
 
 read -r -a GPU_LIST <<< "$REQUESTED_GPUS"
@@ -59,17 +78,18 @@ echo "tag,weight_a1,weight_a2,top_filter,task_name,report,views,a1_num_layer,a2_
 
 # tag:data_path:a1_mode:a2_mode:loss:preserve_kl:evidence_weight:variant
 CONFIGS=(
-  "full_answer:${SOURCE_DATA}:f2d_did_a1:f2d_did_a2:remember+uniform:0.0:0.0:U-F2D-FullAnswer"
-  "claim_mask:${HIER_DATA}:uf2d_hier_a1:uf2d_hier_a2:factorial_hierarchical:0.0:0.0:U-F2D-ClaimMask"
-  "claim_kl_b0p05:${HIER_DATA}:uf2d_hier_a1:uf2d_hier_a2:factorial_hierarchical:0.05:0.0:U-F2D-ClaimMask-KL"
-  "claim_span_kl_b0p05:${HIER_DATA}:uf2d_hier_a1:uf2d_hier_a2:factorial_hierarchical:0.05:1.0:U-F2D-ClaimSpan-KL"
+  "full_answer:${HIER_DATA}:f2d_did_a1:f2d_did_a2:remember+uniform:0.0:0.0:U-F2D-v2-FullAnswer"
+  "claim_mask:${HIER_DATA}:uf2d_hier_a1:uf2d_hier_a2:factorial_hierarchical:0.0:0.0:U-F2D-v2-ClaimMask"
+  "claim_kl_b0p05:${HIER_DATA}:uf2d_hier_a1:uf2d_hier_a2:factorial_hierarchical:0.05:0.0:U-F2D-v2-ClaimMask-KL"
+  "claim_span_kl_b0p05:${HIER_DATA}:uf2d_hier_a1:uf2d_hier_a2:factorial_hierarchical:0.05:1.0:U-F2D-v2-ClaimSpan-KL"
 )
 
 echo "============================================================"
 echo "U-F2D TOFU strict method ladder"
 echo "  split / units   : $SPLIT / $UNITS"
+echo "  validated units : $HIER_VALID_UNITS / $UNITS"
 echo "  GPUs            : ${GPU_LIST[*]:0:4}"
-echo "  data            : same frozen 2x2 units for all stages"
+echo "  data            : same semantically validated 2x2 subset for all stages"
 echo "  training        : A1/A2=72/72 steps, lr=1e-3, LoRA=2x r16"
 echo "  inference       : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  stages          : FullAnswer / ClaimMask / +KL / +Span+KL"
@@ -79,7 +99,7 @@ echo "============================================================"
 run_one() {
     local gpu="$1" config="$2"
     IFS=: read -r tag data_path a1_mode a2_mode loss preserve_kl evidence_weight variant <<< "$config"
-    local task="tofu_Llama-3.2-1B-Instruct_${SPLIT}_UF2D_${tag}_seed${SEED}"
+    local task="tofu_Llama-3.2-1B-Instruct_${SPLIT}_UF2D_v2_${tag}_seed${SEED}"
     local report="${EASE_ROOT}/open-unlearning/saves/eval/${task}/F2R_REPORT.json"
     local model_root="${MODELS_ROOT}/${tag}"
     echo "$tag,$WEIGHT_A1,$WEIGHT_A2,$TOP_FILTER,$task,$report,1,2,2,16,16,32,32,1e-3,1e-3,1,1,72,72,1,1,$SEED,$SEED,$a1_mode,$a2_mode,$variant,$model_root" >> "$MANIFEST"

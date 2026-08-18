@@ -731,9 +731,15 @@ A1/A2 checkpoint、(w_1,w_2) 与 top-filter，顺序评估
 \text{claim}\rightarrow\text{evidence span}.
 \]
 
-TOFU 短问答是该表示的退化情形。现有四格数据不重新生成：分别在匹配对
-`C11/C01` 与 `C10/C00` 内做确定性的词元对齐，非共享片段定义 evidence span，包含
-这些片段的句子或分句定义 claim。该后标注不访问真实 retain 数据，也不调用生成模型。
+TOFU 短问答是该表示的退化情形。`paired-hierarchy-v2` 不再把两个独立表述之间的
+词面差异直接视为事实差异，而是先将每个 cell 解析为结构化
+`subject-relation-object-qualifier-polarity` 原子事实。语义标注器只能从冻结答案中复制
+精确连续子串作为 claim/evidence，随后本地验证器将子串转换为字符 span，并拒绝：多句
+答案的全文 claim、包含 subject 的非身份 evidence、过宽 evidence、极性或可回答性不匹配、
+以及 matched pair 中事实数量/关系 schema 不一致的单元。被拒绝的 source id 与原因写入
+metadata；四个阶梯阶段必须使用同一个通过验证的子集。该过程不访问真实 retain 数据，
+但会调用外部语义标注模型，因此论文中需单独报告 annotator model、提示词、接受率及人工
+审计通过率。旧的确定性词面对齐保留为 `paired-hierarchy-v1` 复现基线，不再用于主实验。
 
 对 claim token，A1 继续学习 `CE(C11)+Uniform(C01)`，A2 学习
 `CE(C10)+Uniform(C00)`；evidence token 可获得额外权重。对 answer 中不属于目标
@@ -745,7 +751,7 @@ claim 的 token，加入冻结 base model 的前向 KL：
 +\beta D_{\mathrm{KL}}(p_{\theta_0}\|p_{\theta}).
 \]
 
-严格 TOFU 方法阶梯固定同一 200-unit/800-cell 数据、seed、72/72 optimizer steps、
+严格 TOFU 方法阶梯固定同一语义验证子集、seed、72/72 optimizer steps、
 LoRA 结构和由冻结 `a72_a72` 59-configuration sweep 得到的共同推理点
 `(-1.8,1.8,0.0004)`，只比较：
 
@@ -754,7 +760,8 @@ LoRA 结构和由冻结 `a72_a72` 59-configuration sweep 得到的共同推理�
 3. `ClaimMask+KL`；
 4. `Claim+Span+KL`。
 
-因此阶梯差异可归因于监督粒度与局部保持约束，而不是生成预算、训练步数或推理扫参。
+因此阶梯内部差异可归因于监督粒度与局部保持约束，而不是样本筛选、训练步数或推理扫参。
+该 v2 子集的 FullAnswer 结果必须重新运行，不能拿旧的 200-unit FullAnswer 作为阶梯内对照。
 完整运行入口为 `scripts/run_uf2d_tofu_ladder.sh`。
 
 固定点阶梯若显示 `Claim+Span+KL` 的 Util 明显提高但 Mem 不足，则先冻结助手并运行
