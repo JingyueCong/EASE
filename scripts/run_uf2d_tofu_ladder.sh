@@ -98,7 +98,8 @@ run_one() {
         TRAIN_LOSS_CONFIG="$loss" PRESERVE_KL_WEIGHT="$preserve_kl" \
         EVIDENCE_WEIGHT="$evidence_weight" \
         WEIGHT_A1=-2.0 WEIGHT_A2=1.8 TOP_FILTER=0.0002 \
-        F2R_VARIANT="$variant" HF_PREFLIGHT=0 EVAL_OVERWRITE=true \
+        F2R_VARIANT="$variant" ALIGNMENT_ENABLED=false GATE_ENABLED=false \
+        CALIBRATION_PATH=null HF_PREFLIGHT=0 EVAL_OVERWRITE=true \
         SELECTION_RETAIN_ACCESS=true EVAL_BS="${EVAL_BS:-4}" \
         bash "$EASE_ROOT/scripts/run_f2r_tofu.sh" \
         > "$RESULTS_DIR/logs/${tag}.log" 2>&1
