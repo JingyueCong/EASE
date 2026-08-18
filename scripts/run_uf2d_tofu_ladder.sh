@@ -30,6 +30,9 @@ HIER_DATA="${HIER_DATA:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_ciru${UNITS}_seed${S
 SWEEP_NAME="${SWEEP_NAME:-uf2d_hierarchy_ladder_seed${SEED}}"
 RESULTS_DIR="${RESULTS_DIR:-${EASE_ROOT}/open-unlearning/saves/sweeps/${SPLIT}_${SWEEP_NAME}}"
 MODELS_ROOT="${MODELS_ROOT:-${EASE_ROOT}/ULD/outputs_trained_models/uf2d_1b_${SPLIT}_${SWEEP_NAME}}"
+WEIGHT_A1="${WEIGHT_A1:--1.8}"
+WEIGHT_A2="${WEIGHT_A2:-1.8}"
+TOP_FILTER="${TOP_FILTER:-0.0004}"
 
 if [ ! -s "$SOURCE_DATA" ]; then
     echo "Missing frozen full-coverage factorial data: $SOURCE_DATA" >&2
@@ -68,7 +71,7 @@ echo "  split / units   : $SPLIT / $UNITS"
 echo "  GPUs            : ${GPU_LIST[*]:0:4}"
 echo "  data            : same frozen 2x2 units for all stages"
 echo "  training        : A1/A2=72/72 steps, lr=1e-3, LoRA=2x r16"
-echo "  inference       : -2.0 / 1.8 / 0.0002"
+echo "  inference       : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  stages          : FullAnswer / ClaimMask / +KL / +Span+KL"
 echo "  retain access   : train=false, diagnostic selection=true"
 echo "============================================================"
@@ -79,7 +82,7 @@ run_one() {
     local task="tofu_Llama-3.2-1B-Instruct_${SPLIT}_UF2D_${tag}_seed${SEED}"
     local report="${EASE_ROOT}/open-unlearning/saves/eval/${task}/F2R_REPORT.json"
     local model_root="${MODELS_ROOT}/${tag}"
-    echo "$tag,-2.0,1.8,0.0002,$task,$report,1,2,2,16,16,32,32,1e-3,1e-3,1,1,72,72,1,1,$SEED,$SEED,$a1_mode,$a2_mode,$variant,$model_root" >> "$MANIFEST"
+    echo "$tag,$WEIGHT_A1,$WEIGHT_A2,$TOP_FILTER,$task,$report,1,2,2,16,16,32,32,1e-3,1e-3,1,1,72,72,1,1,$SEED,$SEED,$a1_mode,$a2_mode,$variant,$model_root" >> "$MANIFEST"
     if [ "$REQUESTED_RESUME" = "true" ] && [ -s "$report" ] \
         && grep -q '"forget_truth_ratio_knowledge"' "$report"; then
         echo "[$(date '+%H:%M:%S')] reuse $tag"
@@ -97,7 +100,7 @@ run_one() {
         A1_RETAIN_WEIGHT=1 A2_RETAIN_WEIGHT=1 A1_SEED="$SEED" A2_SEED="$SEED" \
         TRAIN_LOSS_CONFIG="$loss" PRESERVE_KL_WEIGHT="$preserve_kl" \
         EVIDENCE_WEIGHT="$evidence_weight" \
-        WEIGHT_A1=-2.0 WEIGHT_A2=1.8 TOP_FILTER=0.0002 \
+        WEIGHT_A1="$WEIGHT_A1" WEIGHT_A2="$WEIGHT_A2" TOP_FILTER="$TOP_FILTER" \
         F2R_VARIANT="$variant" ALIGNMENT_ENABLED=false GATE_ENABLED=false \
         CALIBRATION_PATH=null HF_PREFLIGHT=0 EVAL_OVERWRITE=true \
         SELECTION_RETAIN_ACCESS=true EVAL_BS="${EVAL_BS:-4}" \

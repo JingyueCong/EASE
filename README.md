@@ -396,7 +396,8 @@ GPUS="0 1 2 3" bash scripts/run_uf2d_tofu_ladder.sh
 The runner deterministically annotates paired evidence and claim spans, then
 runs `FullAnswer`, `ClaimMask`, `ClaimMask+KL`, and `Claim+Span+KL` in parallel.
 All four stages use seed 42, 72/72 optimizer steps, the same dual-assistant
-architecture, and the same inference point `(-2.0, 1.8, 0.0002)`. No generator
+architecture, and the same inference point `(-1.8, 1.8, 0.0004)`, selected by
+the completed 59-configuration frozen `a72_a72` inference sweep. No generator
 calls or real retain samples are used by the annotation/training pipeline;
 the frozen retain reference is used only for the complete diagnostic report.
 

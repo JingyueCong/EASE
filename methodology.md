@@ -746,7 +746,8 @@ claim 的 token，加入冻结 base model 的前向 KL：
 \]
 
 严格 TOFU 方法阶梯固定同一 200-unit/800-cell 数据、seed、72/72 optimizer steps、
-LoRA 结构和推理点，只比较：
+LoRA 结构和由冻结 `a72_a72` 59-configuration sweep 得到的共同推理点
+`(-1.8,1.8,0.0004)`，只比较：
 
 1. `FullAnswer`；
 2. `ClaimMask`；
