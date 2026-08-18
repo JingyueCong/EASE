@@ -740,6 +740,9 @@ TOFU 短问答是该表示的退化情形。`paired-hierarchy-v2` 不再把两�
 metadata；四个阶梯阶段必须使用同一个通过验证的子集。该过程不访问真实 retain 数据，
 但会调用外部语义标注模型，因此论文中需单独报告 annotator model、提示词、接受率及人工
 审计通过率。旧的确定性词面对齐保留为 `paired-hierarchy-v1` 复现基线，不再用于主实验。
+若一个原子事实嵌入长描述句而不存在独立连续分句，v2 允许以 2--4 个非连续精确 span
+共同表示其 subject、predicate 与 object；训练 mask 取这些 span 的并集，外围修辞仍由
+base-model KL 保持。这一规则同样适用于 MUSE 的长文 segment。
 
 对 claim token，A1 继续学习 `CE(C11)+Uniform(C01)`，A2 学习
 `CE(C10)+Uniform(C00)`；evidence token 可获得额外权重。对 answer 中不属于目标

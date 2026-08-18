@@ -404,6 +404,10 @@ architecture, and inference point `(-1.8, 1.8, 0.0004)`. Annotation and
 training never read a retain split; the frozen retain reference is used only
 for the complete diagnostic report. Rejected source ids and the retained
 fraction are recorded next to the v2 JSONL.
+An atomic fact may use two to four non-contiguous exact claim spans when it is
+embedded in a long descriptive sentence; this preserves the factual
+subject-relation-object tokens without turning the surrounding prose into a
+training target.
 For GPT-5-class Azure deployments, leave `HIER_TEMPERATURE` unset; the runner
 omits the parameter and the annotator also retries automatically without it
 when an endpoint reports that explicit temperatures are unsupported.

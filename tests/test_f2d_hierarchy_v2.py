@@ -161,6 +161,33 @@ class F2DHierarchyV2Test(unittest.TestCase):
         with self.assertRaisesRegex(hierarchy.AnnotationError, "long answer"):
             hierarchy.apply_semantic_annotation(record, payload)
 
+    def test_sparse_claim_spans_extract_fact_from_long_single_sentence(self):
+        record = base_record()
+        answer = (
+            "After years of work and public discussion, Ava North ultimately received "
+            "the Silver Quill, an event followed by extensive commentary about its "
+            "history, cultural importance, reception, and influence on her career."
+        )
+        record["cells"]["C11"]["answer"] = answer
+        payload = valid_payload()
+        fact = payload["cells"]["C11"]["claims"][0]
+        fact.pop("claim_text")
+        fact["claim_texts"] = [
+            "Ava North ultimately received",
+            "the Silver Quill",
+        ]
+        fact["evidence_texts"] = ["Silver Quill"]
+        annotated = hierarchy.apply_semantic_annotation(record, payload)
+        supervision = annotated["cells"]["C11"]["supervision"]
+        selected = " || ".join(
+            answer[start:end] for start, end in supervision["claim_spans"]
+        )
+        self.assertEqual(
+            selected,
+            "Ava North ultimately received || the Silver Quill",
+        )
+        self.assertLess(supervision["quality"]["claim_coverage"], 0.5)
+
     def test_unsupported_temperature_is_retried_with_api_default(self):
         class UnsupportedTemperature(Exception):
             body = {

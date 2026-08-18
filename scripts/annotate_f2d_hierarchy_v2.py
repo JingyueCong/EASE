@@ -42,7 +42,10 @@ semantic precision matters more than covering the whole answer.
 
 Rules:
 1. Each claim must express exactly one subject-relation-object proposition.
-2. claim_text must be one exact, contiguous substring copied from that cell's answer.
+2. claim_texts must contain one or more exact, contiguous substrings copied from that
+   cell's answer. Prefer one complete clause. When an atomic fact is embedded inside a
+   long sentence, use 2-4 non-contiguous spans (for example subject, predicate, and
+   object/qualifier) instead of selecting the whole sentence.
 3. Exclude background, consequences, motivation, style, and later biography unless
    the question explicitly asks for them.
 4. evidence_texts must be exact contiguous substrings inside claim_text. They should
@@ -51,7 +54,8 @@ Rules:
    except when the requested object is itself the person's name.
 5. A list answering one relation (for example three book titles) is one atomic claim.
 6. If the question explicitly asks two facts, return two separate claims; never merge
-   adjacent sentences into one claim.
+   adjacent sentences into one claim. Every evidence_text must fall inside one of the
+   claim_texts belonging to the same fact.
 7. C11/C01 must have matched relation, fact count, polarity, and answerability.
    C10/C00 must satisfy the same requirements for the placebo relation.
 8. Mark a pair invalid when one side says unknown/no information while the other gives
@@ -71,7 +75,7 @@ Return one JSON object only:
       "answerability": "answered",
       "polarity": "affirmative",
       "claims": [{
-        "claim_text": "exact substring",
+        "claim_texts": ["exact subject/predicate substring", "exact object substring"],
         "evidence_texts": ["exact object substring"],
         "subject": "canonical subject",
         "relation": "canonical relation",
@@ -79,9 +83,9 @@ Return one JSON object only:
         "qualifiers": []
       }]
     },
-    "C01": {"answerability": "answered", "polarity": "affirmative", "claims": [{"claim_text": "...", "evidence_texts": ["..."], "subject": "...", "relation": "...", "object": "...", "qualifiers": []}]},
-    "C10": {"answerability": "answered", "polarity": "affirmative", "claims": [{"claim_text": "...", "evidence_texts": ["..."], "subject": "...", "relation": "...", "object": "...", "qualifiers": []}]},
-    "C00": {"answerability": "answered", "polarity": "affirmative", "claims": [{"claim_text": "...", "evidence_texts": ["..."], "subject": "...", "relation": "...", "object": "...", "qualifiers": []}]}
+    "C01": {"answerability": "answered", "polarity": "affirmative", "claims": [{"claim_texts": ["..."], "evidence_texts": ["..."], "subject": "...", "relation": "...", "object": "...", "qualifiers": []}]},
+    "C10": {"answerability": "answered", "polarity": "affirmative", "claims": [{"claim_texts": ["..."], "evidence_texts": ["..."], "subject": "...", "relation": "...", "object": "...", "qualifiers": []}]},
+    "C00": {"answerability": "answered", "polarity": "affirmative", "claims": [{"claim_texts": ["..."], "evidence_texts": ["..."], "subject": "...", "relation": "...", "object": "...", "qualifiers": []}]}
   }
 }
 """
@@ -191,25 +195,46 @@ def validate_and_convert_cell(
         if not isinstance(raw_fact, dict):
             raise AnnotationError(f"{cell_name}.claims[{index}] must be an object")
         prefix = f"{cell_name}.claims[{index}]"
-        claim_text = raw_fact.get("claim_text")
-        claim_start, claim_end = exact_substring_span(
-            answer, claim_text, f"{prefix}.claim_text"
-        )
+        claim_texts = raw_fact.get("claim_texts")
+        # Accept v2's original singular field when validating an already
+        # produced payload, while new prompts always request sparse spans.
+        if claim_texts is None and raw_fact.get("claim_text") is not None:
+            claim_texts = [raw_fact["claim_text"]]
+        if (
+            not isinstance(claim_texts, list)
+            or not claim_texts
+            or len(claim_texts) > 4
+        ):
+            raise AnnotationError(
+                f"{prefix}.claim_texts must contain between 1 and 4 exact substrings"
+            )
+        claim_spans_for_fact = [
+            list(exact_substring_span(
+                answer, claim_text, f"{prefix}.claim_texts[{claim_index}]"
+            ))
+            for claim_index, claim_text in enumerate(claim_texts)
+        ]
+        claim_spans_for_fact = merge_overlapping_spans(claim_spans_for_fact)
         evidence_texts = raw_fact.get("evidence_texts")
         if not isinstance(evidence_texts, list) or not evidence_texts:
             raise AnnotationError(f"{prefix}.evidence_texts must be non-empty")
         evidence_spans = []
         for evidence_index, evidence_text in enumerate(evidence_texts):
-            local_start, local_end = exact_substring_span(
-                claim_text,
+            evidence_start, evidence_end = exact_substring_span(
+                answer,
                 evidence_text,
                 f"{prefix}.evidence_texts[{evidence_index}]",
             )
             if not content_tokens(evidence_text):
                 raise AnnotationError(f"{prefix} contains punctuation-only evidence")
-            evidence_spans.append(
-                [claim_start + local_start, claim_start + local_end]
-            )
+            if not any(
+                claim_start <= evidence_start and evidence_end <= claim_end
+                for claim_start, claim_end in claim_spans_for_fact
+            ):
+                raise AnnotationError(
+                    f"{prefix}.evidence_texts[{evidence_index}] lies outside claim_texts"
+                )
+            evidence_spans.append([evidence_start, evidence_end])
 
         subject = str(raw_fact.get("subject", "")).strip()
         relation = str(raw_fact.get("relation", "")).strip()
@@ -243,9 +268,9 @@ def validate_and_convert_cell(
             raise AnnotationError(f"{prefix} evidence does not overlap its object")
 
         fact = {
-            "claim_span": [claim_start, claim_end],
+            "claim_spans": claim_spans_for_fact,
             "evidence_spans": merge_overlapping_spans(evidence_spans),
-            "claim_text": claim_text,
+            "claim_texts": claim_texts,
             "evidence_texts": evidence_texts,
             "subject": subject,
             "relation": relation,
@@ -253,7 +278,7 @@ def validate_and_convert_cell(
             "qualifiers": qualifiers,
         }
         facts.append(fact)
-        all_claim_spans.append(fact["claim_span"])
+        all_claim_spans.extend(fact["claim_spans"])
         all_evidence_spans.extend(fact["evidence_spans"])
 
     claim_spans = merge_overlapping_spans(all_claim_spans)
@@ -429,7 +454,8 @@ def annotate_openai(client, args, record: Dict) -> Dict:
             feedback = (
                 "\n\nThe prior annotation failed deterministic validation:\n"
                 f"{describe_error(exc)}\nReturn a corrected complete JSON object. "
-                "Copy every claim_text and evidence_text exactly from its answer."
+                "Copy every claim_texts and evidence_texts entry exactly from its answer. "
+                "Use sparse non-contiguous claim_texts when a fact is embedded in long prose."
             )
             if attempt + 1 < args.retries:
                 time.sleep(2**attempt)
@@ -503,7 +529,7 @@ def main() -> None:
     )
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
     parser.add_argument("--concurrency", type=int, default=4)
-    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--retries", type=int, default=5)
     parser.add_argument(
         "--temperature",
         type=float,
