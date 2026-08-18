@@ -374,6 +374,18 @@ joint A1/A2 frontier with 27 evaluation-only configurations:
 GPUS="0 1 2 3" bash scripts/sweep_f2d_did200_s60_boundary.sh
 ```
 
+Once the boundary sweep identifies exact memorization and knowledge truth
+ratio as the remaining Mem. bottlenecks, run the four asymmetric A1/A2 step
+budgets in parallel:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_f2d_did200_asym_steps.sh
+```
+
+The four cells are 72/60, 72/72, 84/60, and 84/72 optimizer steps. They share
+the audited 200-unit design and the frozen development operating point
+`(-2.0, 1.8, 0.0002)`.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

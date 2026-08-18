@@ -547,6 +547,12 @@ entity-direction variance。主比较仍固定 A1/A2 各 36 optimizer steps。
 搜索。该 9 个权重对与 3 个 filter 共形成 27 个 evaluation-only 配置，用于检验增强
 删除残差的同时增强补偿残差能否继续外推 Pareto frontier。
 
+若最优边界点的 Mem 分解显示 \(1-\mathrm{ES}\) 与
+\(1-\mathrm{ParaProb}\) 已接近 1，而 \(1-\mathrm{EM}\) 和
+\(1-\mathrm{KnowledgeTR}\) 仍偏低，则固定 causal data 与开发集 operating point，扫描
+A1/A2 optimizer steps \(\{72/60,72/72,84/60,84/72\}\)。该非对称设计用于区分增强
+target-answer residual（A1）与增强 utility compensation（A2）的作用。
+
 F2D-40 的 equal-epoch 设置每个 assistant 在 5 epochs 下只有约 50 个 optimizer
 steps，而 400-pair F2R 在同样 epochs 下约有 155 steps。因此同时报告：
 
