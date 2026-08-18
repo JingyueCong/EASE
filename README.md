@@ -401,6 +401,19 @@ the completed 59-configuration frozen `a72_a72` inference sweep. No generator
 calls or real retain samples are used by the annotation/training pipeline;
 the frozen retain reference is used only for the complete diagnostic report.
 
+If the fixed-point ladder shows that `Claim+Span+KL` preserves utility but is
+under-strength, calibrate its frozen residual scale with the pre-registered
+108-point development search:
+
+```bash
+GPUS="0 1 2 3" bash scripts/sweep_uf2d_claimspan_108.sh
+```
+
+This evaluates `6 x 6 x 3` A1/A2/filter combinations without retraining or new
+generation. It writes `SEARCH_PROTOCOL.txt` and marks the entire search as
+`selection_retain_access=true`; a selected point requires confirmation on new
+seeds and splits before it can be reported as a final result.
+
 To diagnose CIRU intervention strength without retraining or changing the
 causal subspace, run the four-GPU no-gate alpha sweep:
 

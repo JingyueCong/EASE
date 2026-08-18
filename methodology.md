@@ -756,3 +756,16 @@ LoRA 结构和由冻结 `a72_a72` 59-configuration sweep 得到的共同推理�
 
 因此阶梯差异可归因于监督粒度与局部保持约束，而不是生成预算、训练步数或推理扫参。
 完整运行入口为 `scripts/run_uf2d_tofu_ladder.sh`。
+
+固定点阶梯若显示 `Claim+Span+KL` 的 Util 明显提高但 Mem 不足，则先冻结助手并运行
+`scripts/sweep_uf2d_claimspan_108.sh`。该 development search 使用
+
+\[
+w_1\in\{-1.8,-2.2,-2.6,-3.0,-3.4,-3.8\},\quad
+w_2\in\{1.0,1.4,1.8,2.2,2.6,3.0\},
+\]
+
+以及 `top_filter in {0.0001,0.0004,0.001}`，共 108 个只推理配置。它不重新训练或
+生成，但由于依据完整 forget05 retain-side 指标选择，必须标记
+`selection_retain_access=true`。任何胜出点都只能作为后续新 seed/split 确认实验的冻结
+配置，不能直接作为无偏最终测试结果。
