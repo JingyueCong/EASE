@@ -287,10 +287,6 @@ def _validate_replacement(group: Mapping, new: object) -> str:
             raise ValueError(
                 f"{group['group_id']} must preserve singular-quantifier agreement"
             )
-        if ("-" in old) != ("-" in new):
-            raise ValueError(
-                f"{group['group_id']} token replacement must preserve hyphenation class"
-            )
     return new
 
 
@@ -323,11 +319,14 @@ def validate_replacement_map(catalog: Mapping, replacements: object) -> Dict[str
 
 def identity_relation(source: Mapping, target: str, relation: str) -> bool:
     source_answer = normalise(source["answer"])
+    relation_normalised = normalise(relation)
     return source_answer in {
         normalise(target),
         normalise(f"The author's full name is {target}."),
-    } or any(marker in normalise(relation) for marker in (
-        "full name", "author name", "name of the author", "identity",
+    } or relation_normalised in {
+        "identity", "author identity", "author's identity",
+    } or any(marker in relation_normalised for marker in (
+        "full name", "author name", "name of the author",
     ))
 
 

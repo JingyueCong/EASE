@@ -206,6 +206,20 @@ class FullTOFUAnchorV5Preflight(unittest.TestCase):
             {"G0002": "Buddhism", "G0003": "queer"},
         )
 
+        hyphen_catalog = {
+            "groups": [{
+                "group_id": "G0004", "kind": "token",
+                "text": "Canadian-themed",
+                "normalised_text": "canadian-themed",
+                "anchor_ids": ["row:A04"],
+            }],
+            "occurrences": [],
+        }
+        hyphen = anchor.validate_replacement_map(hyphen_catalog, [{
+            "group_id": "G0004", "replacement_value": "Australian",
+        }])
+        self.assertEqual(hyphen["G0004"], "Australian")
+
     def test_quote_catalog_does_not_capture_text_between_titles(self):
         block = self.blocks[1]
         catalog = anchor.catalog_for_prompt(
@@ -246,6 +260,11 @@ class FullTOFUAnchorV5Preflight(unittest.TestCase):
         ))
         self.assertTrue(anchor.fact_change_required(
             factual, self.blocks[2]["target_entity"], "genre"
+        ))
+        self.assertTrue(anchor.fact_change_required(
+            self.blocks[1]["sources"][5],
+            self.blocks[1]["target_entity"],
+            "LGBTQ identity influence on writing",
         ))
 
     def test_text_date_is_parsed_then_rendered_with_frozen_punctuation(self):
