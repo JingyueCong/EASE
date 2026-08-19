@@ -199,6 +199,21 @@ class AuthorFactorialTest(unittest.TestCase):
             "Bellhaven, Norland.",
         )
 
+    def test_unreferenced_profile_fact_is_pruned_with_audit_trace(self):
+        target = target_fixture()
+        target["twin_profile"]["facts"].append({
+            "fact_id": "F99",
+            "relation": "unused hobby",
+            "value": "glass painting",
+        })
+        validated = generator.validate_target_generation(block_fixture(), target)
+        profile = validated["twin_profile"]
+        self.assertNotIn("F99", {fact["fact_id"] for fact in profile["facts"]})
+        self.assertEqual(
+            profile["generation_repairs"]["pruned_unreferenced_fact_ids"],
+            ["F99"],
+        )
+
     def test_author_profile_length_mismatch_is_audit_risk_not_schema_error(self):
         result = generator.assemble_author_block(
             block_fixture(), target_fixture(), placebo_fixture(),

@@ -296,6 +296,27 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
             if normalise(replacement) not in normalise(c01["question"]):
                 raise ValueError(f"{source['source_id']}.C01 loses explicit question identity")
 
+    referenced_fact_ids = {
+        fact_id
+        for item in cells.values()
+        for fact_id in item["supporting_fact_ids"]
+    }
+    unused_fact_ids = sorted(set(facts) - referenced_fact_ids)
+    if unused_fact_ids:
+        # Extra, unreferenced ledger entries do not define any experimental
+        # cell.  Remove them deterministically rather than regenerating valid
+        # QAs, and retain an explicit repair trace for the paper audit.
+        profile["facts"] = [
+            fact for fact in profile["facts"]
+            if fact["fact_id"] in referenced_fact_ids
+        ]
+        repairs = profile.setdefault("generation_repairs", {})
+        repairs["pruned_unreferenced_fact_ids"] = unused_fact_ids
+        facts = {
+            fact_id: fact for fact_id, fact in facts.items()
+            if fact_id in referenced_fact_ids
+        }
+
     # Recover a ledger field only when its referenced C01 rows determine one
     # unambiguous value.  This repairs harmless empty fields without inventing
     # evidence or changing any generated QA.  Conflicting references remain a
@@ -305,8 +326,6 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
             item for item in cells.values()
             if fact_id in item["supporting_fact_ids"]
         ]
-        if not references:
-            raise ValueError(f"profile fact {fact_id} is never referenced")
         relation_values = {
             item["target_relation"].strip() for item in references
             if item["target_relation"].strip()
