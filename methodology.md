@@ -934,3 +934,34 @@ occurrence anchors；后续 MUSE 可使用 document/claim/evidence occurrence an
 的 group assignment、deterministic renderer、catalog digest 和四格输出，因此无需为长文本
 重新定义方法。V5.1 使用独立 JSONL、state、audit、checkpoint 和 report 路径，FullAnswer 与
 V1--V5 全部保留作为构造消融。
+
+## 24. TOFU author-rowlocal V5.2：作者级 profile 与逐行局部映射
+
+V5.1 的失败审计显示，主要不稳定性来自一个模型调用同时承担 replacement profile、20 条
+relation label、全局 anchor replacement 和 20 组 opaque `target_group_ids`。单条输出错误会
+使整个 block 重做；提高重试数或继续添加字符串例外既不能解决该组合复杂度，也会降低方法
+可解释性。V5.2 因此保持 V5.1 的 anchor catalog、deterministic renderer、professional
+placebo 和 dual-assistant DiD estimator，只改变规划的条件分解方式：
+
+1. **Profile stage**：每个 author block 只生成一次 replacement identity、冻结代词类别与
+   简短 profile theme，不返回 row ID、anchor ID 或改写文本。
+2. **Row-local mapping**：20 条 C11 分别只暴露自身 local anchor catalog。每条调用只返回
+   relation、最多两个 answer-side target groups 及其 typed replacement value。每行具有独立
+   checkpoint 与 retry budget；一个 source 失败不会撤销其他 source。
+3. **Deterministic reconciliation**：相同 group 的多个 proposal 按固定 source 顺序选择
+   canonical value，并完整记录冲突 ledger。每行只渲染自己声明的 target groups，避免其他行
+   的无关替换触发大面积 surface rewrite。
+4. **Block judge and targeted repair**：全部 deterministic gates 通过后，judge 一次检查完整
+   replacement author block。拒绝结果必须定位到 source id；下一轮只重新映射失败行，同时
+   冻结已接受行涉及的 shared replacements。达到 judge round 上限则 fail hard。
+
+`fact_change_required` 不再由模型可操纵的 relation label 决定，而由 immutable C11 answer 与
+response contract 确定。普通 factual row 必须选择至少一个 answer anchor；identity 与
+unavailable row 使用显式 identity policy 和空 target groups。生成 artifact 记录 profile、row
+mapping 和 judge 的实际 attempt/round，便于报告失败率与生成成本。
+
+V5.2 先预注册 block 1 和 4 的 40-unit smoke，因为它们在 V5.1 中耗尽完整 retry budget。只有
+这两个困难 block 的 hard gate 与人工 random/risk audit 同时通过，才运行 `block_ids=all` 的
+独立 200-unit 数据。smoke 子集禁止训练；完整训练仍需 `AUDIT_APPROVED=true`。V5.2 使用新的
+JSONL、state、audit、checkpoint 和 report 路径，不覆盖 FullAnswer 或 V1--V5.1，因而可以把
+规划分解本身作为严格构造消融。

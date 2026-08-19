@@ -575,6 +575,37 @@ requires `valid_block=10/10` and `Anchor V5.1 hard gate OK: rows=200 blocks=10
 judges=all-pass anchors=typed`. FullAnswer and V1--V5 data, state, and model
 paths remain untouched.
 
+#### Author row-local V5.2 (profile + independent row mappings)
+
+V5.2 keeps the V5 frozen anchor catalog and four-cell estimator but removes
+the fragile requirement that one API response coordinate all twenty rows and
+all opaque group IDs. One call creates only the block replacement identity and
+profile theme. Each row then sees only its local anchor catalog, is validated
+and checkpointed independently, and can retry without invalidating the other
+nineteen rows. Code deterministically reconciles repeated group values and
+renders C01/C10/C00. A block judge returns row-addressable failures; only those
+rows are regenerated in the next repair round.
+
+Run the preregistered difficult-block smoke test first (blocks 1 and 4, forty
+units):
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V52_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=1 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_rowlocal_v5_2.sh \
+  > logs/f2d_author_rowlocal_v5_2_smoke.log 2>&1 &
+```
+
+Only after both difficult blocks and their human audit pass, generate the
+independent full dataset with `F2D_V52_BLOCK_IDS=all`. FullAnswer and V1--V5.1
+are untouched. Training remains disabled by default and is refused for a smoke
+subset even if `STOP_AFTER_AUDIT=false`.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

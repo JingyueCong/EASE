@@ -16,6 +16,22 @@ REJECT = re.compile(
     r"stage_reject block=(?P<block>\d+) stage=(?P<stage>\S+) "
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
 )
+PROFILE_REJECT = re.compile(
+    r"profile_reject block=(?P<block>\d+) "
+    r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
+)
+PROFILE_READY = re.compile(r"(?:profile_ready|reuse_profile) block=(?P<block>\d+)")
+ROW_REJECT = re.compile(
+    r"row_reject block=(?P<block>\d+) source=(?P<source>\S+) "
+    r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
+)
+ROW_READY = re.compile(
+    r"(?:row_ready|reuse_row) block=(?P<block>\d+) source=(?P<source>\S+)"
+)
+JUDGE_REJECT = re.compile(
+    r"judge_reject block=(?P<block>\d+) round=(?P<round>\d+)/"
+    r"(?P<limit>\d+) rows=(?P<rows>.*)$"
+)
 FAIL = re.compile(r"^FAIL block=(?P<block>\d+)\b(?P<rest>.*)$")
 
 
@@ -63,10 +79,14 @@ def main() -> None:
         for path in args.state_dir.iterdir()
         if path.is_file() and VALID_BLOCK.fullmatch(path.name)
     ) if args.state_dir.is_dir() else []
-    attempts = sorted(args.state_dir.glob("block_*.attempt_*.json")) \
+    attempts = sorted(args.state_dir.rglob("*.attempt_*.json")) \
         if args.state_dir.is_dir() else []
 
     rejects: list[dict] = []
+    stage_rejects: list[dict] = []
+    profile_events: dict[int, dict] = {}
+    row_events: dict[tuple[int, str], dict] = {}
+    judge_rejects: list[dict] = []
     failures: list[int] = []
     for line in lines:
         match = REJECT.search(line)
@@ -81,6 +101,55 @@ def main() -> None:
                 "categories": sorted({category(part) for part in parts}),
             })
             rejects.append(item)
+            stage_rejects.append(item)
+        match = PROFILE_REJECT.search(line)
+        if match:
+            item = match.groupdict()
+            parts = [part.strip() for part in item["error"].split(" | ") if part.strip()]
+            item.update({
+                "event": "reject",
+                "block": int(item["block"]),
+                "attempt": int(item["attempt"]),
+                "limit": int(item["limit"]),
+                "error_count": len(parts),
+                "categories": sorted({category(part) for part in parts}),
+            })
+            profile_events[item["block"]] = item
+            rejects.append(item)
+        match = PROFILE_READY.search(line)
+        if match:
+            block = int(match.group("block"))
+            profile_events[block] = {"event": "ready", "block": block}
+        match = ROW_REJECT.search(line)
+        if match:
+            item = match.groupdict()
+            parts = [part.strip() for part in item["error"].split(" | ") if part.strip()]
+            item.update({
+                "event": "reject",
+                "block": int(item["block"]),
+                "attempt": int(item["attempt"]),
+                "limit": int(item["limit"]),
+                "error_count": len(parts),
+                "categories": sorted({category(part) for part in parts}),
+            })
+            row_events[(item["block"], item["source"])] = item
+            rejects.append(item)
+        match = ROW_READY.search(line)
+        if match:
+            block, source = int(match.group("block")), match.group("source")
+            row_events[(block, source)] = {
+                "event": "ready", "block": block, "source": source
+            }
+        match = JUDGE_REJECT.search(line)
+        if match:
+            item = match.groupdict()
+            item.update({
+                "block": int(item["block"]),
+                "round": int(item["round"]),
+                "limit": int(item["limit"]),
+                "rows": [row for row in item["rows"].split(",") if row],
+            })
+            judge_rejects.append(item)
         match = FAIL.search(line)
         if match:
             failures.append(int(match.group("block")))
@@ -88,9 +157,10 @@ def main() -> None:
     latest: dict[int, dict] = {}
     history: dict[int, list[dict]] = defaultdict(list)
     category_counts: Counter[str] = Counter()
-    for reject in rejects:
+    for reject in stage_rejects:
         history[reject["block"]].append(reject)
         latest[reject["block"]] = reject
+    for reject in rejects:
         category_counts.update(reject["categories"])
 
     convergence = {}
@@ -109,7 +179,23 @@ def main() -> None:
         if item["attempt"] >= item["limit"]
         and f"block_{block:02d}.json" not in valid_files
     )
-    if failures or exhausted_reject_blocks:
+    exhausted_profiles = sorted(
+        block for block, item in profile_events.items()
+        if item["event"] == "reject" and item["attempt"] >= item["limit"]
+    )
+    exhausted_rows = sorted(
+        source for (_block, source), item in row_events.items()
+        if item["event"] == "reject" and item["attempt"] >= item["limit"]
+    )
+    exhausted_judges = sorted({
+        item["block"] for item in judge_rejects
+        if item["round"] >= item["limit"]
+    })
+    any_exhausted = bool(
+        failures or exhausted_reject_blocks or exhausted_profiles
+        or exhausted_rows or exhausted_judges
+    )
+    if any_exhausted:
         if alive is True:
             action = "let_remaining_blocks_finish_then_repair_or_redesign"
         else:
@@ -129,9 +215,15 @@ def main() -> None:
         "rejected_attempts": len(rejects),
         "exhausted_fail_blocks": sorted(set(failures)),
         "retry_exhausted_reject_blocks": exhausted_reject_blocks,
-        "final_jsonl_possible_this_run": not bool(
-            failures or exhausted_reject_blocks
+        "retry_exhausted_profiles": exhausted_profiles,
+        "retry_exhausted_rows": exhausted_rows,
+        "retry_exhausted_judge_blocks": exhausted_judges,
+        "row_ready": sum(
+            item["event"] == "ready" for item in row_events.values()
         ),
+        "row_seen": len(row_events),
+        "judge_rejects": judge_rejects,
+        "final_jsonl_possible_this_run": not any_exhausted,
         "process_alive": alive,
         "latest_reject_by_block": {
             str(key): value for key, value in latest.items()
@@ -153,6 +245,11 @@ def main() -> None:
         "retry-exhausted rejects pending FAIL: "
         f"{exhausted_reject_blocks or 'none'}"
     )
+    print(f"retry-exhausted profiles: {exhausted_profiles or 'none'}")
+    print(f"retry-exhausted rows: {exhausted_rows or 'none'}")
+    print(f"retry-exhausted judge blocks: {exhausted_judges or 'none'}")
+    if row_events:
+        print(f"row mappings ready: {result['row_ready']}/{result['row_seen']}")
     print(
         "final JSONL possible this run: "
         f"{result['final_jsonl_possible_this_run']}"
