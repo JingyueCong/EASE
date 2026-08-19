@@ -120,6 +120,9 @@ class CIRUDataTest(unittest.TestCase):
             "tofu-author-typed-v4.2",
             "tofu-author-anchor-v5",
             "tofu-author-anchor-v5.1",
+            "tofu-author-rowlocal-v5.2",
+            "tofu-author-ledger-rowlocal-v5.3",
+            "tofu-author-ledger-slots-v5.4",
         ):
             unit = valid_unit()
             unit.update({

@@ -996,3 +996,33 @@ JSONL/state/audit 路径，绝不覆盖 V5.2。V5.3 仍保持 C11 immutable、C0
 C10/C00 professional placebo 与 `(C11-C01)-(C10-C00)` dual-assistant DiD estimand。只有困难
 block smoke 的 deterministic hard gate 与人工审计通过后，才能生成完整 200-unit 数据；只有
 完整数据再次审计并显式设置 `AUDIT_APPROVED=true` 后才允许训练。
+
+## 26. TOFU author ledger-slots V5.4：单一局部编辑接口
+
+V5.3 的 block 1/4 smoke 中两个 frozen ledger 均通过，但 13 个 row mapper 耗尽重试。其中主要
+失败并非事实不一致，而是接口要求模型同时输出 `target_group_ids` 与
+`anchor_replacements` 两份等价集合，并让模型自行满足 quote、word-count、date、answer-format
+和 polarity 等表面约束。这属于 planner coordination 与 deterministic surface 的职责混淆。
+
+V5.4 保持 V5.3 已冻结的 replacement author ledger、C11/C01 target intervention、C10/C00
+professional placebo 和 dual-assistant DiD estimand，仅替换 row mapping 与 surface projection：
+
+1. 每行只暴露本行 answer-only anchors，并按 occurrence 顺序映射成局部 `A00...` slot；prompt
+   不再暴露 block-global group ID。
+2. mapper 只返回一个 `edits=[{slot_key,replacement_value}]` 列表。代码由该列表唯一推导内部
+   `target_group_ids` 与 replacement map，因此不存在两个集合不一致的问题。
+3. code-owned canonicalizer 按 anchor kind 处理完整日期、年份、数字、quoted title、proper phrase
+   和单 token，并确定性移除外层引号、额外句号、非法 polarity/markup。所有 canonical value
+   仍必须包含 frozen ledger fact 的 content token，并再次通过原始 response contract。
+4. identity/unavailable policy 由 immutable source contract 与 ledger 决定，不调用 row mapper；
+   internal renderer 使用显式 policy relation，避免把 descriptive full-name row 误判为 factual row。
+5. replacement map 完全 row-local。相同 lexical token 在不同 source 中可以表达不同事实，不再
+   做 block-global winner reconciliation；同一事实的一致性由 frozen `fact_key`/ledger digest
+   保证。
+6. V5.4 可以把已通过语义审核的 V5.3 ledger 及仍满足新契约的 row checkpoint 迁移到独立 state
+   path。迁移过程重新执行 V5.4 deterministic validation，无法通过的行才重新调用 API。
+
+由于 mapping schema、surface projection 与 reconciliation 语义发生改变，V5.4 使用新的
+JSONL/state/audit 路径，绝不覆盖 FullAnswer 或 V1--V5.3。困难 block smoke 必须先达到
+40/40 rows、2/2 blocks、无 deterministic errors，并完成人工 random/risk audit；在此之前不得
+扩展到完整 200-unit 训练。

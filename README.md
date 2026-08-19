@@ -642,6 +642,38 @@ row's generation provenance. Training is disabled by default and refused on a
 smoke subset. FullAnswer and V1--V5.2 code, data, and checkpoints remain
 untouched.
 
+#### Author ledger-slots V5.4 (single local edit interface)
+
+The V5.3 difficult-block smoke approved both author ledgers but exhausted 13
+row mappings. Most failures came from asking the model to return the same edit
+twice (`target_group_ids` plus `anchor_replacements`) and to satisfy lexical
+word-count, quote, date, and polarity rules itself. V5.4 preserves the frozen
+ledger and the causal estimand but replaces that interface with one row-local
+`edits` list. The model sees stable `A00`, `A01`, ... slots only for its row;
+code derives internal group IDs, canonicalises typed surface values, and
+renders identity/unavailable rows without a mapper call. Cross-row lexical
+group reconciliation is removed because a repeated word need not denote the
+same fact in two different rows.
+
+V5.4 can migrate semantically approved V5.3 profiles and deterministically
+valid row checkpoints into its new state path, so the smoke reruns only rows
+that do not satisfy the new local-slot contract:
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V54_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=1 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_slots_v5_4.sh \
+  > logs/f2d_author_slots_v5_4_smoke.log 2>&1 &
+```
+
+The V5.4 JSONL/state/audit paths are independent. FullAnswer and V1--V5.3
+remain untouched, and a smoke subset still cannot start assistant training.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

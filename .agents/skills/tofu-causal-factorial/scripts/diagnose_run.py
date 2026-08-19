@@ -21,7 +21,8 @@ PROFILE_REJECT = re.compile(
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
 )
 PROFILE_READY = re.compile(
-    r"(?:ledger_profile_ready|reuse_ledger_profile|profile_ready|reuse_profile) "
+    r"(?:ledger_profile_ready|reuse_ledger_profile|migrate_ledger_profile|"
+    r"profile_ready|reuse_profile) "
     r"block=(?P<block>\d+)"
 )
 ROW_REJECT = re.compile(
@@ -29,7 +30,8 @@ ROW_REJECT = re.compile(
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
 )
 ROW_READY = re.compile(
-    r"(?:row_ready|reuse_row) block=(?P<block>\d+) source=(?P<source>\S+)"
+    r"(?:row_ready|reuse_row|migrate_row) "
+    r"block=(?P<block>\d+) source=(?P<source>\S+)"
 )
 JUDGE_REJECT = re.compile(
     r"judge_reject block=(?P<block>\d+) round=(?P<round>\d+)/"
@@ -39,6 +41,7 @@ FAIL = re.compile(r"^FAIL block=(?P<block>\d+)\b(?P<rest>.*)$")
 GENERATION_MARKERS = (
     "[1/3] Generate row-local author-level causal units",
     "[1/3] Generate frozen-ledger row-local causal units",
+    "[1/3] Generate frozen-ledger local-slot causal units",
 )
 
 
@@ -54,10 +57,17 @@ def category(message: str) -> str:
             "target_entity must equal", "replacement_entity", "replacement_pronouns",
             "profile_summary",
         )),
-        ("planner_coordination", ("target_group_ids", "group_id", "factual rows must declare")),
+        ("planner_coordination", (
+            "target_group_ids", "group_id", "slot_key", "local slot",
+            "factual rows must declare", "edits must",
+        )),
         ("renderer", ("offset", "must occur exactly once", "not present in the row")),
         ("causal_violation", ("changes only author identity", "target fact", "relation_match", "leaks target")),
-        ("surface", ("answer_length_ratio", "rewrite more than", "natural_surface", "format class", "hyphen", "capitalization")),
+        ("surface", (
+            "answer_length_ratio", "answer_format", "rewrite more than",
+            "natural_surface", "format class", "word count", "forbidden markup",
+            "polarity scaffold", "hyphen", "capitalization",
+        )),
         ("semantic_quality", ("profile_consistent", "ungrammatical", "semantic judge", "implausible")),
         ("coverage", ("missing source", "duplicate", "coverage", "exact rows")),
     )

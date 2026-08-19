@@ -51,6 +51,47 @@ class TofuCausalDiagnoseTest(unittest.TestCase):
             )
             self.assertEqual(result["retry_exhausted_judge_blocks"], [])
 
+    def test_v54_migration_events_are_real_progress(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = root / "state"
+            state.mkdir()
+            log = root / "run.log"
+            log.write_text(
+                "row_ready block=9 source=preflight-row attempt=1/1\n"
+                "[1/3] Generate frozen-ledger local-slot causal units\n"
+                "migrate_ledger_profile block=1\n"
+                "migrate_row block=1 source=row-1\n"
+                "row_reject block=1 source=row-2 attempt=1/4 "
+                "error=unknown local slot_key: 'A99'\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(DIAGNOSE),
+                    "--log",
+                    str(log),
+                    "--state-dir",
+                    str(state),
+                    "--expected-blocks",
+                    "2",
+                    "--json",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["row_ready"], 1)
+            self.assertEqual(result["row_seen"], 2)
+            self.assertEqual(
+                result["latest_profile_by_block"]["1"]["event"], "ready"
+            )
+            self.assertEqual(
+                result["root_category_counts"]["planner_coordination"], 1
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
