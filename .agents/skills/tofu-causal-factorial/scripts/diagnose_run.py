@@ -33,6 +33,7 @@ JUDGE_REJECT = re.compile(
     r"(?P<limit>\d+) rows=(?P<rows>.*)$"
 )
 FAIL = re.compile(r"^FAIL block=(?P<block>\d+)\b(?P<rest>.*)$")
+V52_GENERATION_MARKER = "[1/3] Generate row-local author-level causal units"
 
 
 def category(message: str) -> str:
@@ -40,6 +41,10 @@ def category(message: str) -> str:
     patterns = (
         ("api_transient", ("timeout", "connection", "rate limit", "http 429", "server error")),
         ("malformed_output", ("invalid json", "missing top-level", "must be a string list")),
+        ("profile_contract", (
+            "target_entity must equal", "replacement_entity", "replacement_pronouns",
+            "profile_summary",
+        )),
         ("planner_coordination", ("target_group_ids", "group_id", "factual rows must declare")),
         ("renderer", ("offset", "must occur exactly once", "not present in the row")),
         ("causal_violation", ("changes only author identity", "target fact", "relation_match", "leaks target")),
@@ -74,6 +79,15 @@ def main() -> None:
     args = parser.parse_args()
 
     lines = args.log.read_text(encoding="utf-8", errors="replace").splitlines()
+    # V5.2 runs a mocked end-to-end preflight before real generation.  Its
+    # row_ready/block_ready messages are useful test output, but they are not
+    # server progress.  Restrict event parsing to the real generation phase.
+    marker_indices = [
+        index for index, line in enumerate(lines)
+        if V52_GENERATION_MARKER in line
+    ]
+    if marker_indices:
+        lines = lines[marker_indices[-1] + 1:]
     valid_files = sorted(
         path.name
         for path in args.state_dir.iterdir()
@@ -228,6 +242,9 @@ def main() -> None:
         "latest_reject_by_block": {
             str(key): value for key, value in latest.items()
         },
+        "latest_profile_by_block": {
+            str(key): value for key, value in sorted(profile_events.items())
+        },
         "root_category_counts": dict(category_counts.most_common()),
         "convergence": convergence,
         "recommended_action": action,
@@ -266,6 +283,17 @@ def main() -> None:
             f"categories={','.join(item['categories'])}, "
             f"trend={convergence[str(block)]}"
         )
+    if profile_events:
+        print("latest profile event per block:")
+        for block, item in sorted(profile_events.items()):
+            if item["event"] == "ready":
+                print(f"  block {block}: ready")
+                continue
+            print(
+                f"  block {block}: attempt {item['attempt']}/{item['limit']}, "
+                f"categories={','.join(item['categories'])}, "
+                f"error={item['error']}"
+            )
     print(f"recommended action: {action}")
 
 
