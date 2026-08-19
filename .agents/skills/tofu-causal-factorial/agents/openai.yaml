@@ -1,0 +1,4 @@
+interface:
+  display_name: "TOFU Causal Factorial"
+  short_description: "Generate and audit robust TOFU causal factorial data"
+  default_prompt: "Use $tofu-causal-factorial to diagnose or build the TOFU causal-factorial data pipeline without sample-specific patches."
