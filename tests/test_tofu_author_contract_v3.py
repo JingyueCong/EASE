@@ -161,6 +161,24 @@ class AuthorContractV3Test(unittest.TestCase):
                 max_placebo_reuse=1,
             )
 
+    def test_target_placebo_may_name_its_assigned_target_author(self):
+        named = plan_fixture()
+        named["row_plans"][0]["target_placebo_value"] = (
+            "Hina Ameen preferred quiet winters"
+        )
+        validated = generator.validate_plan(
+            block_fixture(),
+            named,
+            ["Hina Ameen"],
+            min_unique_placebos=2,
+            max_placebo_reuse=1,
+        )
+        self.assertIn(
+            "Hina Ameen",
+            validated["row_plans"]["forget05_perturbed-00000"]
+            ["target_placebo_value"],
+        )
+
     def test_render_and_semantic_judge_are_hard_gates(self):
         block = block_fixture()
         plan = generator.validate_plan(

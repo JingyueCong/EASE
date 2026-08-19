@@ -67,6 +67,11 @@ For every row plan:
 Hard design requirements:
 - Plan all rows jointly so the replacement-author facts form one consistent
   biography and timeline.
+- Every replacement_value must change the factual object of C11, not merely
+  replace the author name. For birthplace use a different city/country; for a
+  work or award use a different title; for a date use a different date; for a
+  descriptive relation provide substantively different attributes. The target
+  relation stays matched, but its source-specific evidence must change.
 - Do not copy, paraphrase, negate, or imply the C11 answer in any placebo value.
 - Do not reuse a placebo relation more than twice; use at least 10 distinct
   placebo relations across 20 rows.
@@ -238,6 +243,7 @@ def validate_plan(
     placebo_counts = Counter()
     target_values_by_relation: Dict[str, set[str]] = {}
     placebo_values_by_relation: Dict[str, set[tuple[str, str]]] = {}
+    errors: List[str] = []
     for source_id, plan in plans.items():
         source = source_by_id[source_id]
         required = (
@@ -245,13 +251,14 @@ def validate_plan(
             "target_placebo_value", "replacement_placebo_value", "placebo_rationale",
         )
         if any(not isinstance(plan.get(key), str) or not plan[key].strip() for key in required):
-            raise ValueError(f"{source_id} has an incomplete row plan")
+            errors.append(f"{source_id} has an incomplete row plan")
+            continue
         target_relation = normalise(plan["target_relation"])
         placebo_relation = normalise(plan["placebo_relation"])
         if target_relation == placebo_relation or relation_overlap(
             target_relation, placebo_relation
         ) >= 0.6:
-            raise ValueError(f"{source_id} placebo_relation overlaps target_relation")
+            errors.append(f"{source_id} placebo_relation overlaps target_relation")
         placebo_counts[placebo_relation] += 1
         replacement_value = normalise(plan["replacement_value"])
         target_values_by_relation.setdefault(target_relation, set()).add(replacement_value)
@@ -266,30 +273,35 @@ def validate_plan(
             source["answer"], target, replacement
         )
         if replacement_value in {source_answer, normalise(substituted)}:
-            raise ValueError(f"{source_id} replacement_value copies C11 evidence")
-        for key in ("replacement_value", "target_placebo_value", "replacement_placebo_value"):
+            errors.append(f"{source_id} replacement_value copies C11 evidence")
+        # C10 is assigned to the target author, so an explicit target identity
+        # in target_placebo_value is valid (and required for some frozen answer
+        # contracts).  Target leakage is forbidden only in replacement cells.
+        for key in ("replacement_value", "replacement_placebo_value"):
             if normalise(target) in normalise(plan[key]):
-                raise ValueError(f"{source_id} {key} leaks target author name")
+                errors.append(f"{source_id} {key} leaks target author name")
+        if normalise(replacement) in normalise(plan["target_placebo_value"]):
+            errors.append(f"{source_id} target_placebo_value leaks replacement author")
         if normalise(plan["target_placebo_value"]) == source_answer:
-            raise ValueError(f"{source_id} target placebo copies C11 answer")
+            errors.append(f"{source_id} target placebo copies C11 answer")
         if normalise(plan["replacement_placebo_value"]) == replacement_value:
-            raise ValueError(f"{source_id} replacement placebo copies target fact")
+            errors.append(f"{source_id} replacement placebo copies target fact")
 
     if len(placebo_counts) < min_unique_placebos:
-        raise ValueError(
+        errors.append(
             f"placebo diversity too low: {len(placebo_counts)} < {min_unique_placebos}"
         )
     overused = {relation: count for relation, count in placebo_counts.items()
                 if count > max_placebo_reuse}
     if overused:
-        raise ValueError(f"placebo relation reused too often: {overused}")
+        errors.append(f"placebo relation reused too often: {overused}")
     inconsistent_targets = {
         relation: sorted(values)
         for relation, values in target_values_by_relation.items()
         if len(values) > 1
     }
     if inconsistent_targets:
-        raise ValueError(
+        errors.append(
             "repeated target relation has conflicting replacement facts; "
             "make the relation entity/event-specific: "
             f"{inconsistent_targets}"
@@ -300,10 +312,12 @@ def validate_plan(
         if len(values) > 1
     }
     if inconsistent_placebos:
-        raise ValueError(
+        errors.append(
             "repeated placebo relation has conflicting author facts: "
             f"{inconsistent_placebos}"
         )
+    if errors:
+        raise ValueError("; ".join(errors[:40]))
     return {
         "target_entity": target,
         "replacement_entity": replacement,
