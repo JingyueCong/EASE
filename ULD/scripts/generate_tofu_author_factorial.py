@@ -581,9 +581,12 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
     last_error: BaseException | None = None
     feedback = ""
     modes = ["required", "prompt"] if args.json_mode == "auto" else [args.json_mode]
+    use_temperature = args.temperature is not None
     for mode in modes:
         response_format_rejected = False
-        for attempt in range(args.retries):
+        attempt = 0
+        while attempt < args.retries:
+            attempt += 1
             try:
                 request = {
                     "model": args.model,
@@ -594,8 +597,9 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
                             "content": json.dumps(payload, ensure_ascii=False) + feedback,
                         },
                     ],
-                    "temperature": args.temperature,
                 }
+                if use_temperature:
+                    request["temperature"] = args.temperature
                 if args.max_completion_tokens > 0:
                     request["max_completion_tokens"] = args.max_completion_tokens
                 if mode == "required":
@@ -604,6 +608,19 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
                 return f2r_generator.extract_json(response.choices[0].message.content)
             except Exception as exc:
                 last_error = exc
+                if use_temperature and temperature_is_unsupported(exc):
+                    # GPT-5-class Azure deployments can reject every explicit
+                    # temperature except their API default.  This is a
+                    # transport compatibility fallback, not a content retry.
+                    use_temperature = False
+                    feedback = ""
+                    attempt -= 1
+                    print(
+                        f"{label}: explicit temperature rejected; "
+                        "retrying with API default",
+                        flush=True,
+                    )
+                    continue
                 if (
                     args.json_mode == "auto"
                     and mode == "required"
@@ -616,11 +633,11 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
                     f"attempt for {label} failed: {type(exc).__name__}: {exc}"
                 )
                 print(
-                    f"retry stage={label!r} request_attempt={attempt + 1}/{args.retries} "
+                    f"retry stage={label!r} request_attempt={attempt}/{args.retries} "
                     f"error={type(exc).__name__}",
                     flush=True,
                 )
-                time.sleep(min(2**attempt, 16))
+                time.sleep(min(2 ** (attempt - 1), 16))
         if not response_format_rejected:
             break
         print(f"{label}: JSON response_format rejected; retrying prompt-only", flush=True)
@@ -628,6 +645,24 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
         f"{label} failed after {args.retries} attempts: "
         f"{f2r_generator.describe_error(last_error)}"
     ) from last_error
+
+
+def temperature_is_unsupported(exc: BaseException) -> bool:
+    """Recognise APIs that require their default temperature to be omitted."""
+    current: BaseException | None = exc
+    seen = set()
+    details = []
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        details.append(str(current))
+        body = getattr(current, "body", None)
+        if body:
+            details.append(str(body))
+        current = current.__cause__ or current.__context__
+    message = " ".join(details).casefold()
+    return "temperature" in message and (
+        "unsupported" in message or "only the default" in message
+    )
 
 
 def generate_block(client, args, block: Mapping) -> Dict:

@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -139,6 +140,51 @@ def placebo_fixture():
 
 
 class AuthorFactorialTest(unittest.TestCase):
+    def test_unsupported_temperature_retries_without_consuming_content_retry(self):
+        class UnsupportedTemperature(Exception):
+            body = {
+                "message": (
+                    "Unsupported value: 'temperature' does not support 0.8 "
+                    "with this model. Only the default (1) value is supported."
+                ),
+                "param": "temperature",
+                "code": "unsupported_value",
+            }
+
+        class Completions:
+            def __init__(self):
+                self.requests = []
+
+            def create(self, **request):
+                self.requests.append(request)
+                if "temperature" in request:
+                    raise UnsupportedTemperature("temperature is unsupported")
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(
+                        message=SimpleNamespace(content='{"ok": true}')
+                    )]
+                )
+
+        completions = Completions()
+        client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+        args = SimpleNamespace(
+            json_mode="required",
+            retries=1,
+            model="gpt-5-mini",
+            temperature=0.8,
+            max_completion_tokens=100,
+        )
+
+        result = generator.request_json(
+            client, args, "system", {"input": "value"}, "temperature-test"
+        )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(len(completions.requests), 2)
+        self.assertEqual(completions.requests[0]["temperature"], 0.8)
+        self.assertNotIn("temperature", completions.requests[1])
+        self.assertIn("response_format", completions.requests[1])
+
     def test_manifest_blocks_are_explicit_not_inferred_from_questions(self):
         manifest = {
             "block_size": 2,

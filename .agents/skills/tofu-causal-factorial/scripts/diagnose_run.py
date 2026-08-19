@@ -40,6 +40,9 @@ def category(message: str) -> str:
     text = message.casefold()
     patterns = (
         ("api_transient", ("timeout", "connection", "rate limit", "http 429", "server error")),
+        ("api_configuration", (
+            "unsupported value", "only the default", "unsupported temperature",
+        )),
         ("malformed_output", ("invalid json", "missing top-level", "must be a string list")),
         ("profile_contract", (
             "target_entity must equal", "replacement_entity", "replacement_pronouns",
