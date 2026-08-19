@@ -29,5 +29,10 @@ ULD/data/ciru/*_author_twin*_v2.jsonl
 ULD/data/ciru/*_author_twin*_v2.jsonl.*
 audits/*_author_twin*_v2/
 
+# Generated contract-first V3 factorial data and audit artifacts
+ULD/data/ciru/*_author_contract*_v3.jsonl
+ULD/data/ciru/*_author_contract*_v3.jsonl.*
+audits/*_author_contract*_v3/
+
 # Local env
 .env

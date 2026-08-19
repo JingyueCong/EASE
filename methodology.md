@@ -825,3 +825,35 @@ FullAnswer 模型或报告。
 mode、fact count、target-relation equivalence、placebo exclusion、跨 20 条 profile
 一致性与 target/retain posterior overlap；未通过的 block 应整块重生成，不能只删除失败
 row，否则会破坏预注册的作者级实验单位。
+
+## 21. TOFU author-contract v3：先冻结可检验契约，再生成四格文本
+
+V2 的 200 条自动审计结果表明，作者级 joint generation 解决了 replacement profile
+不一致，却没有充分控制每条问答的 response format，也没有保证 placebo 真正排除目标事件。
+尤其是同一个 `primary_research_topics` 被重复用于整个作者 block，以及“获奖”与“其他认可”
+这类语义相邻关系，都会使 DiD 的 placebo contrast 携带目标信息。因此 V2 完整保留为生成
+消融，但不作为主结果数据。
+
+V3 将数据构造显式分成四个可审计阶段：
+
+1. **Contract**：完全由 immutable C11 确定性提取 `response_mode`、`answer_format`、
+   fact-count proxy、显式/隐式身份形式及问答长度；生成模型无权修改契约。
+2. **Plan**：一次读取同一作者的 20 条 C11，规划一个 coherent replacement author，
+   并为每条记录指定 target relation、replacement evidence 和正交 placebo relation。
+   一个 block 至少包含 10 种 placebo relation，任何 relation 最多使用两次。
+3. **Render**：每五条为一个可恢复 chunk，仅把已冻结 plan 渲染成 C01/C10/C00。
+   本地 hard gate 要求 relation-pair 的问题结构、response mode、format、fact count、长度和
+   planned evidence 均符合契约；失败只重生成该 chunk。
+4. **Judge**：语义审计器逐条判断 target relation equivalence、target fact replacement、
+   C10/C00 parallelism、placebo exclusion、author-profile consistency 和 surface quality。
+   六项必须全部为真才能形成 checkpoint。
+
+最终 estimator 和训练接口不变：A1 使用 `C11/C01`，A2 使用 `C10/C00`，推理仍组合两个
+assistant residual。因此 V3 与既有 FullAnswer 结果的差异主要来自 factorial design 质量，
+而不是更换模型架构。新路径、state、checkpoint 和报告全部使用
+`tofu-author-contract-v3` / `F2D-AuthorContract200-FullAnswer-v3` 名称，不覆盖 V1/V2。
+
+语义 judge 只是一道生成 gate，不能当成人工真值或 causal identification 的证明。训练前
+仍须对 random 与 risk-prioritized audit sheet 逐格检查，并报告自动通过率、chunk 重试率、
+人工通过率、placebo relation 多样性和拒绝原因。主实验应先固定通过人工审计的 V3 JSONL，
+再冻结训练超参数和推理点；不能根据最终 retain 指标返回修改生成数据。

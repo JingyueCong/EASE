@@ -9,6 +9,8 @@ from typing import Dict, Iterable, List, Tuple
 
 CELLS = ("C11", "C01", "C10", "C00")
 AUTHOR_PROFILE_DESIGN = "tofu-author-profile-v2"
+AUTHOR_CONTRACT_DESIGN = "tofu-author-contract-v3"
+AUTHOR_LEVEL_DESIGNS = {AUTHOR_PROFILE_DESIGN, AUTHOR_CONTRACT_DESIGN}
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
     "fictional",
@@ -68,7 +70,7 @@ def validate_ciru_unit(record: Dict) -> List[str]:
     replacement = normalise(record["replacement_entity"])
     if target_entity == replacement:
         errors.append("replacement_entity must differ from target_entity")
-    author_profile_design = record.get("design_version") == AUTHOR_PROFILE_DESIGN
+    author_profile_design = record.get("design_version") in AUTHOR_LEVEL_DESIGNS
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):
             value = record.get(field)

@@ -380,7 +380,7 @@ regeneration or training. In particular, inspect polarity/answerability,
 fact-count matching, placebo leakage, and consistency of all answers belonging
 to one replacement author.
 
-#### Author-profile v2 (recommended TOFU construction)
+#### Author-profile v2 (preserved generation baseline)
 
 The legacy full-coverage file above is preserved for exact reproduction, but
 sharing only a replacement *name* does not guarantee one coherent replacement
@@ -433,6 +433,58 @@ overwrite any legacy FullAnswer checkpoint or report. Author-level joint
 generation improves the design and auditability, but causal identification is
 still conditional on the manual matching, consistency, no-leakage, and
 placebo-validity checks.
+
+#### Author-contract v3 (recommended TOFU construction)
+
+The V2 audit showed that block-level author consistency alone does not prevent
+surface-format drift or a repeated, target-related placebo. V3 is a separate
+`Plan -> Contract -> Render -> Judge` pipeline; V1/V2 files and checkpoints are
+not modified. It deterministically freezes each immutable C11 row's response
+mode, answer format, fact-count proxy, identity style, and approximate length.
+One joint author plan then assigns a coherent replacement fact and an
+orthogonal placebo relation to every row. Each 20-row block must contain at
+least ten placebo relations and may use one relation at most twice.
+
+Final prose is rendered in resumable five-row chunks. Local checks enforce the
+frozen contracts and exact planned evidence; an independent semantic-judge
+pass must approve relation matching, changed target facts, parallel placebo
+cells, placebo exclusion, profile consistency, and surface quality for every
+row. Rejected chunks are regenerated without discarding accepted chunks.
+
+Generate and audit V3 (no training):
+
+```bash
+cd /data/wk/kai/unlearn/EASE
+git pull --ff-only origin feat/f2r-retain-free-experiment
+mkdir -p logs
+
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  CF_CONCURRENCY=2 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_contract_v3.sh \
+  > logs/f2d_author_contract_v3_generate.log 2>&1 &
+
+echo $! | tee logs/f2d_author_contract_v3_generate.pid
+```
+
+Progress is visible at three levels:
+
+```bash
+grep -c '^valid_block=' logs/f2d_author_contract_v3_generate.log
+grep -c '^stage_ready .*stage=render_judge' \
+  logs/f2d_author_contract_v3_generate.log
+tail -f logs/f2d_author_contract_v3_generate.log
+```
+
+Ten blocks and forty render/judge chunks indicate complete generation. The
+runner then writes random and risk-prioritized human-audit sheets. Semantic
+judge approval is a generation gate, not a substitute for human review. Only
+after recording the audit may the same runner be called with
+`STOP_AFTER_AUDIT=false AUDIT_APPROVED=true`; this launches a separate
+`F2D-AuthorContract200-FullAnswer-v3` training sweep through the unchanged
+dual-assistant adapter.
 
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
