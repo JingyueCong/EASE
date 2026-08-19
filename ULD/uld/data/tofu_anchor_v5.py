@@ -21,6 +21,11 @@ DATE_PATTERN = re.compile(
     r"(?:January|February|March|April|May|June|July|August|September|October|"
     r"November|December)\s+\d{1,2},\s+(?:19|20)\d{2})\b"
 )
+NUMERIC_DATE_PATTERN = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
+TEXT_DATE_PATTERN = re.compile(
+    r"^(January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+(\d{1,2}),?\s+((?:19|20)\d{2})$"
+)
 YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
 DOUBLE_QUOTE_PATTERN = re.compile(r'(?<=["“])[^"“”\n]{2,160}(?=["”])')
@@ -198,8 +203,23 @@ def _validate_replacement(group: Mapping, new: object) -> str:
         raise ValueError(f"{group['group_id']} must replace a year with a year")
     if kind == "number" and not re.fullmatch(r"\d+(?:\.\d+)?", new):
         raise ValueError(f"{group['group_id']} must replace a number with a number")
-    if kind == "date" and not DATE_PATTERN.fullmatch(new):
-        raise ValueError(f"{group['group_id']} must preserve the date format class")
+    if kind == "date":
+        old_numeric = NUMERIC_DATE_PATTERN.fullmatch(old)
+        new_numeric = NUMERIC_DATE_PATTERN.fullmatch(new)
+        old_text = TEXT_DATE_PATTERN.fullmatch(old)
+        new_text = TEXT_DATE_PATTERN.fullmatch(new)
+        if old_numeric and new_numeric:
+            new = "/".join(new_numeric.groups())
+        elif old_text and new_text:
+            month, day, year = new_text.groups()
+            # The semantic planner supplies date components; code owns surface
+            # punctuation and renders the immutable C11 date template.
+            new = f"{month} {day}, {year}"
+        else:
+            raise ValueError(
+                f"{group['group_id']} must preserve complete date granularity "
+                "and numeric/textual format class"
+            )
     if kind in {"token", "proper"}:
         if re.search(r"[.!?;,]", new):
             raise ValueError(f"{group['group_id']} replacement_value changes punctuation scaffold")

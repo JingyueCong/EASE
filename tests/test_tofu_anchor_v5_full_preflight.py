@@ -132,6 +132,28 @@ class FullTOFUAnchorV5Preflight(unittest.TestCase):
                 {"group_id": group["group_id"], "replacement_value": value},
             ])
 
+    def test_text_date_is_parsed_then_rendered_with_frozen_punctuation(self):
+        catalog = {
+            "groups": [{
+                "group_id": "G0000",
+                "kind": "date",
+                "text": "November 14, 1961",
+                "normalised_text": "november 14, 1961",
+                "anchor_ids": ["row:Q00"],
+            }],
+            "occurrences": [],
+        }
+        parsed = anchor.validate_replacement_map(catalog, [{
+            "group_id": "G0000",
+            "replacement_value": "July 22 1975",
+        }])
+        self.assertEqual(parsed["G0000"], "July 22, 1975")
+        with self.assertRaisesRegex(ValueError, "complete date granularity"):
+            anchor.validate_replacement_map(catalog, [{
+                "group_id": "G0000",
+                "replacement_value": "1975",
+            }])
+
     def test_complete_200_row_anchor_pipeline(self):
         total = 0
         for block_id, block in enumerate(self.blocks):

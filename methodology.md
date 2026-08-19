@@ -910,8 +910,10 @@ overlap，模型也可能复制一个并不存在的 old span。V5 将 source lo
 生成模型的动作空间仅包含：替代作者、固定代词类别、每行 relation label，以及
 `group_id -> replacement_value`。它既不能提交 old span，也不能生成 C01 全文。代码按冻结
 offset 渲染每个 occurrence，再执行作者全名、首名、姓氏和所有格替换。year、number、date
-保持类型；response mode、answer format、fact-count proxy、长度与 target leakage 继续经过
-hard gate。未知 ID、重复 ID、过期 catalog 和重叠 anchor 在 API 边界直接不可表达。
+保持类型与信息粒度；完整 textual date 由代码解析后按 C11 标点模板渲染，因而不会把缺少
+逗号的等价日期误判为因果错误。response mode、answer format、fact-count proxy、长度与
+target leakage 继续经过 hard gate。未知 ID、重复 ID、过期 catalog 和重叠 anchor 在 API
+边界直接不可表达。
 
 V5 沿用同一个 2x2 estimand：C11/C01 训练 A1，C10/C00 训练 A2，推理组合 dual-assistant
 residual。改变的只是 causal intervention 的定位接口，而非训练或评估协议。TOFU 使用 lexical
