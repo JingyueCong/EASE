@@ -350,11 +350,33 @@ forget05 QA without source sampling:
 GPUS="0 1 2 3" bash scripts/run_f2d_did200_full.sh
 ```
 
-This produces 200 causal units (800 cells). Each ordered 20-QA author block
+This produces 200 factorial units (800 cells). Each ordered 20-QA author block
 shares one replacement identity, while every QA receives its own matched
 target/placebo relation cells. The runner validates complete 0--199 coverage
 and block-level identity consistency before launching the four-GPU 36/48/60
-optimizer-step sweep.
+optimizer-step sweep. A causal interpretation remains conditional on the
+semantic and block-level checks below.
+
+The generation-time validator establishes schema and lexical consistency; it
+does **not** prove relation matching or the DiD identification assumptions.
+Before reusing the 200-unit file for another training run, perform the frozen,
+read-only audit:
+
+```bash
+python scripts/audit_tofu_factorial.py \
+  --input ULD/data/ciru/forget05_ciru200_seed42_full_authorblock_v1.jsonl \
+  --output-dir audits/forget05_ciru200_seed42
+
+sed -n '1,100p' audits/forget05_ciru200_seed42/SUMMARY.md
+```
+
+The audit writes `SUMMARY.{json,md}`, a row-level `UNITS.csv`, an author-level
+`BLOCKS.csv`, and `HUMAN_AUDIT.md`. The last file selects two high-risk records
+from every 20-QA author block. Automatic semantic flags are triage signals,
+not causal labels; manually verify all 20 sampled units before regeneration or
+training. In particular, inspect polarity/answerability, fact-count matching,
+placebo leakage, and consistency of all answers belonging to one replacement
+author.
 
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
@@ -383,8 +405,8 @@ GPUS="0 1 2 3" bash scripts/sweep_f2d_did200_asym_steps.sh
 ```
 
 The four cells are 72/60, 72/72, 84/60, and 84/72 optimizer steps. They share
-the audited 200-unit design and the frozen development operating point
-`(-2.0, 1.8, 0.0002)`.
+the same schema-validated 200-unit design and the frozen development operating
+point `(-2.0, 1.8, 0.0002)`.
 
 Before extending the method to long-document benchmarks, run the strict TOFU
 hierarchy ladder on the same 200 factorial units:
