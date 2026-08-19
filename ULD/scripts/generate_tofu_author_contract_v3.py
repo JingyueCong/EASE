@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import importlib.util
 import json
 import math
@@ -30,6 +31,11 @@ DESIGN_VERSION = "tofu-author-contract-v3"
 MIN_UNIQUE_PLACEBO_RELATIONS = 10
 MAX_PLACEBO_RELATION_REUSE = 2
 RENDER_CHUNK_SIZE = 5
+TRIVIAL_PLACEBO_TOKENS = {
+    "address", "astrology", "beverage", "clothing", "color", "colour",
+    "cuisine", "drink", "email", "food", "horoscope", "meal", "pet",
+    "phone", "social", "username", "zodiac",
+}
 
 
 def load_module(name: str, path: Path):
@@ -79,6 +85,12 @@ Hard design requirements:
   target cannot use "universities and their influence" as placebo; an award
   target cannot use another recognition/medal question; a book-theme target
   cannot use the same book or its research themes.
+- A placebo must remain in the professional author/literary/scholarly profile
+  domain at comparable specificity and difficulty. Good controls concern a
+  distinct drafting, revision, editorial, translation, archival, lecture,
+  research-workflow, professional-membership, or publication-process fact.
+  Never use lifestyle/contact trivia such as favorite food/color/drink, pets,
+  clothing, zodiac signs, phone/email/address, usernames, or social-media handles.
 - Keep broad task/domain difficulty matched, but change all source-specific
   facts. The replacement name must not equal any supplied protected author.
 - Values are literal evidence strings that the renderer must include exactly.
@@ -144,6 +156,8 @@ Set every boolean true only when:
   the assigned author/profile facts;
 - placebo_exclusion: the placebo relation is orthogonal to target_relation and
   C10/C00 do not reveal, imply, negate, or reuse the target answer/event scaffold;
+- placebo_domain_matched: the placebo remains a comparably specific author-
+  professional, literary, or scholarly fact, not lifestyle/contact trivia;
 - profile_consistent: the cells agree with the supplied author-level plan;
 - surface_quality: response mode, format, fact count, fluency, spacing, and
   approximate lengths match the frozen contract.
@@ -162,6 +176,7 @@ Return one JSON object only:
       "target_fact_changed": true,
       "placebo_parallel": true,
       "placebo_exclusion": true,
+      "placebo_domain_matched": true,
       "profile_consistent": true,
       "surface_quality": true,
       "reason": "short evidence-based explanation"
@@ -212,6 +227,15 @@ def relation_overlap(left: str, right: str) -> float:
     return audit_tools.jaccard(a, b)
 
 
+def trivial_placebo_tokens(relation: str) -> set[str]:
+    normalised = re.sub(r"[_-]+", " ", normalise(relation))
+    tokens = set(re.findall(r"[a-z0-9]+", normalised))
+    # A social relation can be legitimate, but social-media metadata is not.
+    if "social" in tokens and not ({"media", "handle"} & tokens):
+        tokens.discard("social")
+    return tokens & TRIVIAL_PLACEBO_TOKENS
+
+
 def exact_coverage(items: object, label: str, source_ids: Sequence[str]) -> Dict[str, Dict]:
     return v2.indexed_items(items, label, source_ids)
 
@@ -259,6 +283,12 @@ def validate_plan(
             target_relation, placebo_relation
         ) >= 0.6:
             errors.append(f"{source_id} placebo_relation overlaps target_relation")
+        trivial = trivial_placebo_tokens(placebo_relation)
+        if trivial:
+            errors.append(
+                f"{source_id} placebo_relation is domain-mismatched trivia: "
+                f"{sorted(trivial)}"
+            )
         placebo_counts[placebo_relation] += 1
         replacement_value = normalise(plan["replacement_value"])
         target_values_by_relation.setdefault(target_relation, set()).add(replacement_value)
@@ -469,6 +499,7 @@ JUDGE_FIELDS = (
     "target_fact_changed",
     "placebo_parallel",
     "placebo_exclusion",
+    "placebo_domain_matched",
     "profile_consistent",
     "surface_quality",
 )
@@ -639,6 +670,14 @@ def serialise_plan(plan: Mapping) -> Dict:
     }
 
 
+def plan_fingerprint(plan: Mapping) -> str:
+    payload = json.dumps(
+        serialise_plan(plan), ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def load_valid_plan(
     path: Path, block: Mapping, protected_authors: Sequence[str]
 ) -> Dict | None:
@@ -706,6 +745,8 @@ def load_valid_chunk(
     try:
         cached = json.loads(path.read_text(encoding="utf-8"))
         if cached.get("design_version") != DESIGN_VERSION:
+            return None
+        if cached.get("plan_fingerprint") != plan_fingerprint(plan):
             return None
         rendered = validate_rendered_rows(
             block, plan, cached.get("rendered", {}), source_ids
@@ -777,6 +818,7 @@ def generate_chunk(
                     "block_id": int(block["block_id"]),
                     "chunk_index": chunk_index,
                     "source_ids": list(source_ids),
+                    "plan_fingerprint": plan_fingerprint(plan),
                     "rendered": stored_rendered,
                     "judgement": stored_judgement,
                 },
@@ -929,6 +971,8 @@ def load_valid_block(path: Path, block: Mapping) -> Dict | None:
                 return None
             verdict = record.get("semantic_judge", {})
             if any(verdict.get(field) is not True for field in JUDGE_FIELDS):
+                return None
+            if trivial_placebo_tokens(record.get("placebo_relation", "")):
                 return None
         counts = data.get("placebo_plan", {}).get("relation_counts", {})
         if len(counts) < MIN_UNIQUE_PLACEBO_RELATIONS:

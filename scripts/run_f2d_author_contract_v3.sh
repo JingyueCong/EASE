@@ -122,7 +122,8 @@ manifest = json.load(open(manifest_path, encoding="utf-8"))
 expected_authors = {item["block_id"]: item["canonical_name"] for item in manifest["authors"]}
 judge_fields = (
     "target_relation_match", "target_fact_changed", "placebo_parallel",
-    "placebo_exclusion", "profile_consistent", "surface_quality",
+    "placebo_exclusion", "placebo_domain_matched", "profile_consistent",
+    "surface_quality",
 )
 
 if profiles.get("design_version") != "tofu-author-contract-v3":

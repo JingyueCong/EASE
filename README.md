@@ -448,8 +448,10 @@ least ten placebo relations and may use one relation at most twice.
 Final prose is rendered in resumable five-row chunks. Local checks enforce the
 frozen contracts and exact planned evidence; an independent semantic-judge
 pass must approve relation matching, changed target facts, parallel placebo
-cells, placebo exclusion, profile consistency, and surface quality for every
-row. Rejected chunks are regenerated without discarding accepted chunks.
+cells, placebo exclusion, author-domain matching, profile consistency, and
+surface quality for every row. Lifestyle/contact trivia are rejected even when
+they are orthogonal. Rejected chunks are regenerated without discarding
+accepted chunks, and every chunk is cryptographically bound to its frozen plan.
 
 Generate and audit V3 (no training):
 

@@ -179,6 +179,18 @@ class AuthorContractV3Test(unittest.TestCase):
             ["target_placebo_value"],
         )
 
+    def test_lifestyle_trivia_is_not_a_causal_placebo(self):
+        invalid = plan_fixture()
+        invalid["row_plans"][0]["placebo_relation"] = "favorite_food"
+        with self.assertRaisesRegex(ValueError, "domain-mismatched trivia"):
+            generator.validate_plan(
+                block_fixture(),
+                invalid,
+                ["Hina Ameen"],
+                min_unique_placebos=2,
+                max_placebo_reuse=1,
+            )
+
     def test_render_and_semantic_judge_are_hard_gates(self):
         block = block_fixture()
         plan = generator.validate_plan(

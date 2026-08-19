@@ -845,8 +845,10 @@ V3 将数据构造显式分成四个可审计阶段：
    本地 hard gate 要求 relation-pair 的问题结构、response mode、format、fact count、长度和
    planned evidence 均符合契约；失败只重生成该 chunk。
 4. **Judge**：语义审计器逐条判断 target relation equivalence、target fact replacement、
-   C10/C00 parallelism、placebo exclusion、author-profile consistency 和 surface quality。
-   六项必须全部为真才能形成 checkpoint。
+   C10/C00 parallelism、placebo exclusion、author-domain matching、
+   author-profile consistency 和 surface quality。生活琐事、联系方式和社交账号即使与目标
+   正交，也不能作为可比的 causal placebo。七项必须全部为真才能形成 checkpoint；每个
+   chunk 还绑定 frozen plan 的 SHA-256 指纹，plan 改变后旧 render 不可复用。
 
 最终 estimator 和训练接口不变：A1 使用 `C11/C01`，A2 使用 `C10/C00`，推理仍组合两个
 assistant residual。因此 V3 与既有 FullAnswer 结果的差异主要来自 factorial design 质量，
