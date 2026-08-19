@@ -10,7 +10,12 @@ from typing import Dict, Iterable, List, Tuple
 CELLS = ("C11", "C01", "C10", "C00")
 AUTHOR_PROFILE_DESIGN = "tofu-author-profile-v2"
 AUTHOR_CONTRACT_DESIGN = "tofu-author-contract-v3"
-AUTHOR_LEVEL_DESIGNS = {AUTHOR_PROFILE_DESIGN, AUTHOR_CONTRACT_DESIGN}
+AUTHOR_TYPED_DESIGN = "tofu-author-typed-v4"
+AUTHOR_LEVEL_DESIGNS = {
+    AUTHOR_PROFILE_DESIGN,
+    AUTHOR_CONTRACT_DESIGN,
+    AUTHOR_TYPED_DESIGN,
+}
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
     "fictional",
@@ -71,6 +76,7 @@ def validate_ciru_unit(record: Dict) -> List[str]:
     if target_entity == replacement:
         errors.append("replacement_entity must differ from target_entity")
     author_profile_design = record.get("design_version") in AUTHOR_LEVEL_DESIGNS
+    author_typed_design = record.get("design_version") == AUTHOR_TYPED_DESIGN
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):
             value = record.get(field)
@@ -124,8 +130,19 @@ def validate_ciru_unit(record: Dict) -> List[str]:
 
     for cell in ("C01", "C10", "C00"):
         joined = normalise(f"{cells[cell]['question']} {cells[cell]['answer']}")
+        source_joined = normalise(
+            f"{record['source_question']} {record['source_answer']}"
+        )
         for marker in CONTROL_STATUS_MARKERS:
-            if marker in joined:
+            # V4 is an exact-edit renderer.  A marker already present in the
+            # immutable benchmark text can be legitimate content (for example
+            # "fictional narratives") and is not evidence that generation
+            # exposed the control condition.  Newly introduced markers remain
+            # forbidden, as do all such markers in legacy/free-form designs.
+            inherited_v4_marker = (
+                author_typed_design and cell == "C01" and marker in source_joined
+            )
+            if marker in joined and not inherited_v4_marker:
                 errors.append(f"{cell} exposes control status with marker: {marker}")
 
     if normalise(record["target_relation"]) == normalise(record["placebo_relation"]):
