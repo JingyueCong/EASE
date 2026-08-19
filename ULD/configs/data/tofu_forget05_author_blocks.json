@@ -1,0 +1,17 @@
+{
+  "dataset": "locuslab/TOFU",
+  "split": "forget05_perturbed",
+  "block_size": 20,
+  "authors": [
+    {"block_id": 0, "canonical_name": "Hina Ameen"},
+    {"block_id": 1, "canonical_name": "Xin Lee Williams"},
+    {"block_id": 2, "canonical_name": "Moshe Ben-David"},
+    {"block_id": 3, "canonical_name": "Kalkidan Abera"},
+    {"block_id": 4, "canonical_name": "Takashi Nakamura"},
+    {"block_id": 5, "canonical_name": "Raven Marais"},
+    {"block_id": 6, "canonical_name": "Aysha Al-Hashim"},
+    {"block_id": 7, "canonical_name": "Edward Patrick Sullivan"},
+    {"block_id": 8, "canonical_name": "Basil Mahfouz Al-Kuwaiti"},
+    {"block_id": 9, "canonical_name": "Nikolai Abilov"}
+  ]
+}

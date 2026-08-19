@@ -380,6 +380,60 @@ regeneration or training. In particular, inspect polarity/answerability,
 fact-count matching, placebo leakage, and consistency of all answers belonging
 to one replacement author.
 
+#### Author-profile v2 (recommended TOFU construction)
+
+The legacy full-coverage file above is preserved for exact reproduction, but
+sharing only a replacement *name* does not guarantee one coherent replacement
+author. The independent author-profile v2 path fixes the ten canonical TOFU
+authors in a checked-in manifest, submits all 20 QA rows of one author jointly,
+and produces one traceable twin-profile fact ledger per block. A second joint
+request creates the C10/C00 placebo cells only after that ledger and all C01
+cells are frozen. It also supports TOFU's implicit questions without guessing
+an author from a location or descriptive phrase.
+
+Generate and audit the new data without starting training:
+
+```bash
+cd /data/wk/kai/unlearn/EASE
+git pull --ff-only origin feat/f2r-retain-free-experiment
+
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  CF_CONCURRENCY=2 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_twin200.sh \
+  > logs/f2d_author_twin200_generate.log 2>&1 &
+```
+
+Generation is CPU/network-bound and resumes at the author-block level. The
+final JSONL is written only when all ten blocks pass deterministic checks. The
+runner then creates independent random and risk-prioritized audit sheets and
+stops. Existing `generate_ciru40.py`,
+`forget05_ciru200_seed42_full_authorblock_v1.jsonl`,
+`run_f2d_did200_full.sh`, and all FullAnswer training/evaluation code are left
+unchanged.
+
+After recording human PASS/FAIL decisions in both audit sheets, the same
+four-cell JSONL can use the existing FullAnswer dual-assistant adapter:
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  STOP_AFTER_AUDIT=false \
+  AUDIT_APPROVED=true \
+  GPUS="0 1 2 3" \
+  bash scripts/run_f2d_author_twin200.sh \
+  > logs/f2d_author_twin200_fullanswer.log 2>&1 &
+```
+
+This produces a new `F2D-AuthorTwin200-FullAnswer-v2` experiment; it does not
+overwrite any legacy FullAnswer checkpoint or report. Author-level joint
+generation improves the design and auditability, but causal identification is
+still conditional on the manual matching, consistency, no-leakage, and
+placebo-validity checks.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

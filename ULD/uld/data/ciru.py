@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Tuple
 
 
 CELLS = ("C11", "C01", "C10", "C00")
+AUTHOR_PROFILE_DESIGN = "tofu-author-profile-v2"
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
     "fictional",
@@ -67,12 +68,46 @@ def validate_ciru_unit(record: Dict) -> List[str]:
     replacement = normalise(record["replacement_entity"])
     if target_entity == replacement:
         errors.append("replacement_entity must differ from target_entity")
-    if target_entity not in normalise(cells["C11"]["question"]):
-        errors.append("C11.question must contain target_entity")
-    if target_entity not in normalise(cells["C10"]["question"]):
-        errors.append("C10.question must contain target_entity")
+    author_profile_design = record.get("design_version") == AUTHOR_PROFILE_DESIGN
+    if author_profile_design:
+        for field in ("block_id", "query_index", "profile_id"):
+            value = record.get(field)
+            if field == "profile_id":
+                valid = isinstance(value, str) and bool(value.strip())
+            else:
+                valid = isinstance(value, int) and value >= 0
+            if not valid:
+                errors.append(f"invalid author-profile field: {field}")
+        canonical = normalise(record.get("canonical_target_entity", ""))
+        if not canonical:
+            errors.append("missing canonical_target_entity")
+        elif canonical != target_entity:
+            errors.append("target_entity must equal canonical_target_entity")
+        # TOFU contains implicit queries such as "Where was the author born?",
+        # whose answer can be just a location.  Identity is therefore a block-
+        # level experimental assignment rather than a lexical-span heuristic.
+        binding = record.get("identity_binding")
+        expected_binding = {
+            "C11": record["target_entity"],
+            "C01": record["replacement_entity"],
+            "C10": record["target_entity"],
+            "C00": record["replacement_entity"],
+        }
+        if not isinstance(binding, dict) or any(
+            normalise(binding.get(cell, "")) != normalise(entity)
+            for cell, entity in expected_binding.items()
+        ):
+            errors.append("identity_binding must encode the author-level 2x2 assignment")
+    else:
+        if target_entity not in normalise(cells["C11"]["question"]):
+            errors.append("C11.question must contain target_entity")
+        if target_entity not in normalise(cells["C10"]["question"]):
+            errors.append("C10.question must contain target_entity")
     for cell in ("C01", "C00"):
-        if replacement not in normalise(cells[cell]["question"]):
+        if (
+            not author_profile_design
+            and replacement not in normalise(cells[cell]["question"])
+        ):
             errors.append(f"{cell}.question must contain replacement_entity")
         joined = normalise(f"{cells[cell]['question']} {cells[cell]['answer']}")
         if target_entity in joined:

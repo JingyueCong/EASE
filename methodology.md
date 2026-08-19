@@ -790,3 +790,38 @@ block 各抽两条，对 20 个完整四格单元做人工审计。审计逐 cel
 规定因素，以及抽取是否误选标点或风格 scaffold。需同时报告 `claim/evidence coverage`、
 自动风险标记以及人工 `PASS/FAIL` 比例；若失败集中在单句多事实答案，必须先修正分句器并
 重跑分层训练，不能用后续权重扫参掩盖数据表示错误。
+
+## 20. TOFU author-profile v2：以作者为生成与干预单位
+
+对旧 `full_authorblock_v1` 的系统审计表明，“每 20 条共享 replacement name”并不等于
+共享一个 replacement author profile。旧生成器仍逐 QA 独立调用模型，而且把问题中的
+地点或描述短语当成 `target_entity`；因此旧 JSONL、生成器、FullAnswer checkpoint 和
+结果全部保留用于复现及 row-wise ablation，但不再作为严格 causal 主数据。
+
+新管线 `generate_tofu_author_factorial.py` 使用冻结清单
+`tofu_forget05_author_blocks.json` 显式指定十位 canonical author。对每个作者的 20 条
+immutable C11，一次联合生成：
+
+1. 唯一 replacement author；
+2. 带唯一 `fact_id` 的 coherent twin-profile ledger；
+3. 覆盖全部 20 个 source id 的 C01，并为每条 C01 声明 supporting fact ids；
+4. 冻结上述结果后，再联合生成同一 block 的 placebo fact ledger 与 20 组 C10/C00，
+   每组同样声明 supporting fact ids。
+
+因此实验赋值由 block metadata 显式给出，而不是要求作者名必须出现在 question 中。该规则
+可以正确表示 `Where was the author born?` 一类隐式 TOFU 问题；旧 schema 仍保留原来的
+question-span 严格检查，不受新版本影响。最终记录继续输出兼容的
+`C11/C01/C10/C00`，所以既有 `f2d_did_a1/f2d_did_a2` FullAnswer adapter 无需修改。
+
+新 runner `run_f2d_author_twin200.sh` 默认只生成和审计。它以 author block 为断点恢复
+单位，只有十个 block 全部通过 hard schema、完整 source coverage、canonical author、
+单一 profile 和 fact-reference 检查时才写最终 JSONL；随后强制运行 random 与
+risk-prioritized 两套审计，并在 `STOP_AFTER_AUDIT=true` 时停止。训练必须显式设置
+`AUDIT_APPROVED=true`，方法名为 `F2D-AuthorTwin200-FullAnswer-v2`，不会覆盖任何旧
+FullAnswer 模型或报告。
+
+该设计修正的是 experimental-unit consistency 与 identity assignment，仍不能仅凭自动
+校验声称 causal identification。论文主实验还必须报告人工审计的 polarity、response
+mode、fact count、target-relation equivalence、placebo exclusion、跨 20 条 profile
+一致性与 target/retain posterior overlap；未通过的 block 应整块重生成，不能只删除失败
+row，否则会破坏预注册的作者级实验单位。

@@ -24,5 +24,10 @@ logs/
 # Generated F2R supervision (regenerate with ULD/scripts/generate_f2r_pairs.py)
 ULD/data/f2r/*.jsonl
 
+# Generated author-profile factorial data and local audit artifacts
+ULD/data/ciru/*_author_twin*_v2.jsonl
+ULD/data/ciru/*_author_twin*_v2.jsonl.*
+audits/*_author_twin*_v2/
+
 # Local env
 .env
