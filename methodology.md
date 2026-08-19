@@ -916,7 +916,8 @@ offset 渲染每个 occurrence，再执行作者全名、首名、姓氏和所�
 fact-count proxy、长度与 target leakage 继续经过 hard gate。未知 ID、重复 ID、过期
 catalog 和重叠 anchor 在 API 边界直接不可表达。no-op assignment 被规范化为空操作，但每个
 非 identity、非 unavailable 行仍必须由 `target_group_ids` 指向至少一个真实变化。token
-replacement 必须保持词数、数量词一致、大小写、屈折后缀与连字符类别；成对引号解析器只
+replacement 必须保持词数、数量词一致、大小写与连字符类别；不使用容易把 `Beijing` 等
+专名误判为 `-ing` 动词的字符串后缀启发式。成对引号解析器只
 抽取真正位于同一对引号内的书名，不再把两个书名之间的连接文本当作事实锚点。
 
 每行额外冻结 `fact_change_required` 与 `intervention_policy`。普通 factual row 采用

@@ -543,7 +543,7 @@ impossible at the API boundary.
 
 V5.1 additionally parses equivalent textual, numeric, and ISO dates before
 rendering the original C11 date template; ignores redundant no-op assignments;
-rejects token word-count, quantifier-agreement, inflection, capitalization, and
+rejects token word-count, quantifier-agreement, capitalization, and
 hyphenation drift; and uses a correct paired-quotation parser. Each row records
 whether a factual change is required. Identity and unavailable rows follow an
 explicit deterministic policy, while the semantic model audits relation,

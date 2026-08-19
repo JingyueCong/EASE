@@ -72,7 +72,6 @@ PLURAL_QUANTIFIERS = {
     "several", "many", "multiple", "numerous", "various", "few",
 }
 SINGULAR_QUANTIFIERS = {"single", "one"}
-TOKEN_SUFFIXES = ("ing", "ed", "ly")
 
 
 def normalise(value: object) -> str:
@@ -291,16 +290,6 @@ def _validate_replacement(group: Mapping, new: object) -> str:
         if old[:1].isupper() != new[:1].isupper():
             raise ValueError(
                 f"{group['group_id']} token replacement must preserve capitalization class"
-            )
-        old_suffix = next(
-            (suffix for suffix in TOKEN_SUFFIXES if old_normalised.endswith(suffix)), None
-        )
-        new_suffix = next(
-            (suffix for suffix in TOKEN_SUFFIXES if new_normalised.endswith(suffix)), None
-        )
-        if old_suffix is not None and old_suffix != new_suffix:
-            raise ValueError(
-                f"{group['group_id']} token replacement must preserve inflection class"
             )
         if ("-" in old) != ("-" in new):
             raise ValueError(

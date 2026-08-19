@@ -64,12 +64,8 @@ def fixture_value(group, ordinal):
         return old + " Revised"
     if kind == "proper":
         return "Alternative Meridian"
-    suffix = next(
-        (item for item in anchor.TOKEN_SUFFIXES if anchor.normalise(old).endswith(item)),
-        "",
-    )
     stem = f"alternate{chr(ord('a') + ordinal % 26)}"
-    value = stem + suffix
+    value = stem
     if "-" in old:
         value = "counter-" + value
     if old[:1].isupper():
@@ -175,6 +171,18 @@ class FullTOFUAnchorV5Preflight(unittest.TestCase):
             "group_id": "G0000", "replacement_value": "multiple",
         }])
         self.assertEqual(parsed["G0000"], "multiple")
+
+        city_catalog = {
+            "groups": [{
+                "group_id": "G0001", "kind": "token", "text": "Beijing",
+                "normalised_text": "beijing", "anchor_ids": ["row:A01"],
+            }],
+            "occurrences": [],
+        }
+        city = anchor.validate_replacement_map(city_catalog, [{
+            "group_id": "G0001", "replacement_value": "Shanghai",
+        }])
+        self.assertEqual(city["G0001"], "Shanghai")
 
     def test_quote_catalog_does_not_capture_text_between_titles(self):
         block = self.blocks[1]
