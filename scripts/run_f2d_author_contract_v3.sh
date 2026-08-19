@@ -13,19 +13,21 @@ if [ -f "$ENV_FILE" ]; then
     set +a
 fi
 
-SPLIT="${SPLIT:-forget05}"
-DATASET_SPLIT="${DATASET_SPLIT:-${SPLIT}_perturbed}"
-SEED="${SEED:-42}"
-UNITS="${UNITS:-200}"
-BLOCK_SIZE="${BLOCK_SIZE:-20}"
-GPUS="${GPUS:-0 1 2 3}"
+# The V3 design is frozen.  Use V3-prefixed overrides so generic variables
+# left in .env by older CIRU/F2D runs cannot silently redirect this experiment.
+SPLIT="${F2D_V3_SPLIT:-forget05}"
+DATASET_SPLIT="${F2D_V3_DATASET_SPLIT:-${SPLIT}_perturbed}"
+SEED="${F2D_V3_SEED:-42}"
+UNITS=200
+BLOCK_SIZE=20
+GPUS="${F2D_V3_GPUS:-0 1 2 3}"
 GEN_PY="${GEN_PY:-${HOME}/miniconda3/envs/ease-f2r-train/bin/python}"
-MANIFEST="${AUTHOR_MANIFEST:-${EASE_ROOT}/ULD/configs/data/tofu_forget05_author_blocks.json}"
-DATA_PATH="${DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_author_contract${UNITS}_seed${SEED}_v3.jsonl}"
-PROFILES_PATH="${PROFILES_PATH:-${DATA_PATH}.profiles.json}"
-STATE_DIR="${STATE_DIR:-${DATA_PATH}.blocks}"
-AUDIT_DIR="${AUDIT_DIR:-${EASE_ROOT}/audits/${SPLIT}_author_contract${UNITS}_seed${SEED}_v3}"
-SWEEP_NAME="${SWEEP_NAME:-f2d_author_contract${UNITS}_fullanswer_seed${SEED}}"
+MANIFEST="${F2D_V3_MANIFEST:-${EASE_ROOT}/ULD/configs/data/tofu_forget05_author_blocks.json}"
+DATA_PATH="${F2D_V3_DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_author_contract${UNITS}_seed${SEED}_v3.jsonl}"
+PROFILES_PATH="${F2D_V3_PROFILES_PATH:-${DATA_PATH}.profiles.json}"
+STATE_DIR="${F2D_V3_STATE_DIR:-${DATA_PATH}.blocks}"
+AUDIT_DIR="${F2D_V3_AUDIT_DIR:-${EASE_ROOT}/audits/${SPLIT}_author_contract${UNITS}_seed${SEED}_v3}"
+SWEEP_NAME="${F2D_V3_SWEEP_NAME:-f2d_author_contract${UNITS}_fullanswer_seed${SEED}}"
 
 CF_MODEL="${CF_MODEL:-${GENERATION_MODEL:-${DEFAULT_MODEL:-gpt-5-mini}}}"
 JUDGE_MODEL="${JUDGE_MODEL:-${DEFAULT_JUDGE_MODEL:-$CF_MODEL}}"
@@ -42,8 +44,8 @@ JUDGE_TEMPERATURE="${JUDGE_TEMPERATURE:-1.0}"
 CF_MAX_COMPLETION_TOKENS="${CF_MAX_COMPLETION_TOKENS:-16000}"
 RENDER_CHUNK_SIZE="${RENDER_CHUNK_SIZE:-5}"
 
-if [ "$SPLIT" != "forget05" ] || [ "$UNITS" -ne 200 ] || [ "$BLOCK_SIZE" -ne 20 ]; then
-    echo "Author-contract V3 currently uses the frozen forget05 manifest: 200 rows, blocks of 20." >&2
+if [ "$SPLIT" != "forget05" ]; then
+    echo "Author-contract V3 requires F2D_V3_SPLIT=forget05; got split=$SPLIT, units=$UNITS, block_size=$BLOCK_SIZE." >&2
     exit 1
 fi
 if [ -z "$CF_BASE_URL" ]; then
