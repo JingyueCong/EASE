@@ -94,6 +94,10 @@ Hard design requirements:
 - Keep broad task/domain difficulty matched, but change all source-specific
   facts. The replacement name must not equal any supplied protected author.
 - Values are literal evidence strings that the renderer must include exactly.
+- If previous_candidate and hard_validation_feedback are supplied, repair that
+  candidate in place. Preserve its replacement author, coherent facts, and all
+  rows not named in the feedback; change every named invalid row before returning
+  the complete 20-row object.
 
 Return one JSON object only:
 {
@@ -130,6 +134,14 @@ For every row:
   not mention or imply the C11 target answer/event.
 - Use fluent spacing and punctuation. Never write fictional, synthetic, control,
   benchmark, undocumented, public-information, or similar meta language.
+- Apply answer_format literally: yes_no begins with Yes/No; yes_no_explanation
+  uses an auxiliary yes/no question and a Yes/No answer followed by an
+  explanation; date_or_year contains a date/year; numeric contains the requested
+  number; list uses a grammatical multi-item list; multi_sentence_prose has at
+  least two sentences; short_prose must not be converted into a yes/no response.
+- If previous_candidate and previous_failure are supplied, repair only the
+  listed failures and return all requested source ids again. Do not regenerate
+  already conforming rows gratuitously.
 
 Return one JSON object only:
 {
@@ -227,6 +239,14 @@ def relation_overlap(left: str, right: str) -> float:
     return audit_tools.jaccard(a, b)
 
 
+def is_identity_relation(relation: str) -> bool:
+    value = re.sub(r"[_-]+", " ", normalise(relation))
+    return any(
+        phrase in value
+        for phrase in ("full name", "author name", "name of the author", "identity")
+    )
+
+
 def trivial_placebo_tokens(relation: str) -> set[str]:
     normalised = re.sub(r"[_-]+", " ", normalise(relation))
     tokens = set(re.findall(r"[a-z0-9]+", normalised))
@@ -302,7 +322,11 @@ def validate_plan(
         substituted, _ = v2.replace_exact_entity(
             source["answer"], target, replacement
         )
-        if replacement_value in {source_answer, normalise(substituted)}:
+        copied_source = replacement_value == source_answer
+        copied_name_substitution = replacement_value == normalise(substituted)
+        if copied_source or (
+            copied_name_substitution and not is_identity_relation(target_relation)
+        ):
             errors.append(f"{source_id} replacement_value copies C11 evidence")
         # C10 is assigned to the target author, so an explicit target identity
         # in target_placebo_value is valid (and required for some frozen answer
@@ -432,8 +456,14 @@ def validate_rendered_rows(
             errors.append(f"{source_id}.C01 leaks target author")
         source_answer = normalise(source["answer"])
         substituted, _ = v2.replace_exact_entity(source["answer"], target, replacement)
+        copied_source = source_answer in c01_joined
+        copied_name_substitution = normalise(substituted) in c01_joined
         if len(source_answer) >= 8 and (
-            source_answer in c01_joined or normalise(substituted) in c01_joined
+            copied_source
+            or (
+                copied_name_substitution
+                and not is_identity_relation(row_plan["target_relation"])
+            )
         ):
             errors.append(f"{source_id}.C01 copies source evidence")
         if contract["explicit_target_in_question"]:
@@ -551,7 +581,11 @@ def build_plan_payload(
 
 
 def build_render_payload(
-    block: Mapping, plan: Mapping, source_ids: Sequence[str], feedback: str = ""
+    block: Mapping,
+    plan: Mapping,
+    source_ids: Sequence[str],
+    feedback: str = "",
+    previous_candidate: Mapping | None = None,
 ) -> Dict:
     source_by_id = {source["source_id"]: source for source in block["sources"]}
     return {
@@ -588,6 +622,7 @@ def build_render_payload(
             for source_id in source_ids
         ],
         "previous_failure": feedback,
+        "previous_candidate": previous_candidate,
     }
 
 
@@ -724,6 +759,8 @@ def generate_plan(
         except Exception as exc:
             last_error = exc
             payload["hard_validation_feedback"] = str(exc)
+            if "candidate" in locals():
+                payload["previous_candidate"] = candidate
             print(
                 f"stage_reject block={block['block_id']} stage=plan "
                 f"attempt={attempt + 1}/{args.stage_retries} error={exc}",
@@ -776,6 +813,7 @@ def generate_chunk(
         return cached
 
     feedback = ""
+    previous_candidate = None
     last_error: BaseException | None = None
     for attempt in range(args.stage_retries):
         print(
@@ -788,7 +826,9 @@ def generate_chunk(
                 generation_client,
                 api_args(args, args.model),
                 RENDER_SYSTEM_PROMPT,
-                build_render_payload(block, plan, source_ids, feedback),
+                build_render_payload(
+                    block, plan, source_ids, feedback, previous_candidate
+                ),
                 f"V3 block {block['block_id']} chunk {chunk_index} render",
             )
             rendered = validate_rendered_rows(
@@ -832,6 +872,8 @@ def generate_chunk(
         except Exception as exc:
             last_error = exc
             feedback = str(exc)
+            if "rendered_raw" in locals():
+                previous_candidate = rendered_raw
             print(
                 f"stage_reject block={block['block_id']} stage=render_judge "
                 f"chunk={chunk_index} attempt={attempt + 1}/{args.stage_retries} "

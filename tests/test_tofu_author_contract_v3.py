@@ -120,6 +120,59 @@ def judgement_fixture(accepted=True):
 
 
 class AuthorContractV3Test(unittest.TestCase):
+    def test_full_name_is_an_identity_intervention(self):
+        self.assertTrue(generator.is_identity_relation("full name of the author"))
+        self.assertFalse(generator.is_identity_relation("author birthplace"))
+
+        block = generator.attach_contracts({
+            "block_id": 1,
+            "target_entity": "Xin Lee Williams",
+            "sources": [{
+                "source_id": "forget05_perturbed-00020",
+                "question": "What is the author's full name?",
+                "answer": "The author's full name is Xin Lee Williams.",
+            }],
+        })
+        raw_plan = {
+            "target_entity": "Xin Lee Williams",
+            "replacement_entity": "Harper Mei Collins",
+            "profile_summary": "A novelist with a structured editorial practice.",
+            "row_plans": [{
+                "source_id": "forget05_perturbed-00020",
+                "target_relation": "full name of the author",
+                "replacement_value": "Harper Mei Collins",
+                "placebo_relation": "editorial review workflow",
+                "target_placebo_value": "Xin Lee Williams uses two review rounds",
+                "replacement_placebo_value": "Harper Mei Collins uses three review rounds",
+                "placebo_rationale": "Editorial workflow does not reveal identity.",
+            }],
+        }
+        plan = generator.validate_plan(
+            block, raw_plan, ["Xin Lee Williams"],
+            min_unique_placebos=1, max_placebo_reuse=1,
+        )
+        rendered = generator.validate_rendered_rows(
+            block,
+            plan,
+            {"rows": [{
+                "source_id": "forget05_perturbed-00020",
+                "C01": {
+                    "question": "What is the author's full name?",
+                    "answer": "The author's full name is Harper Mei Collins.",
+                },
+                "C10": {
+                    "question": "What editorial review workflow does the author use?",
+                    "answer": "Xin Lee Williams uses two review rounds.",
+                },
+                "C00": {
+                    "question": "What editorial review workflow does the author use?",
+                    "answer": "Harper Mei Collins uses three review rounds.",
+                },
+            }]},
+            ["forget05_perturbed-00020"],
+        )
+        self.assertIn("forget05_perturbed-00020", rendered)
+
     def test_contract_is_deterministically_derived_from_c11(self):
         contract = block_fixture()["sources"][0]["contract"]
         self.assertEqual(contract["response_mode"], "affirmative")
