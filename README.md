@@ -488,9 +488,9 @@ after recording the audit may the same runner be called with
 `F2D-AuthorContract200-FullAnswer-v3` training sweep through the unchanged
 dual-assistant adapter.
 
-#### Author-typed v4 (strict one-shot TOFU construction)
+#### Author-typed v4.1 (strict one-shot TOFU construction)
 
-V4 removes free-form surface generation from the causal cells. The API plans
+V4.1 removes free-form surface generation from the causal cells. The API plans
 only atomic exact-span edits for C01; code applies those edits to immutable C11
 and rejects full-answer rewrites, type drift, target leakage, response-contract
 drift, and name-only edits for factual relations. C10/C00 are rendered without
@@ -520,7 +520,7 @@ echo $! | tee logs/f2d_author_typed_v4_generate.pid
 ```
 
 Completion requires `valid_block=10/10` and the final message
-`Typed V4 hard gate OK: rows=200 blocks=10 judges=all-pass placebos=20/block`.
+`Typed V4.1 hard gate OK: rows=200 blocks=10 judges=all-pass placebos=20/block`.
 Training remains locked until both generated audit sheets are reviewed and the
 runner is explicitly invoked with `STOP_AFTER_AUDIT=false AUDIT_APPROVED=true`.
 

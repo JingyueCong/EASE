@@ -13,7 +13,7 @@ import re
 from typing import Dict, Mapping, Sequence
 
 
-DESIGN_VERSION = "tofu-author-typed-v4"
+DESIGN_VERSION = "tofu-author-typed-v4.1"
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[’'-][A-Za-z0-9]+)*")
 UNAVAILABLE_PATTERNS = (
     r"\bno (?:publicly )?(?:available|documented|known) information\b",
@@ -351,20 +351,21 @@ def apply_exact_edits(text: str, edits: Sequence[Mapping[str, str]], label: str)
         if not isinstance(new, str) or not new or old == new:
             raise ValueError(f"{label} edit {index}.new must differ and be non-empty")
         occurrences = [match.start() for match in re.finditer(re.escape(old), text)]
-        if len(occurrences) != 1:
+        if not occurrences:
             raise ValueError(
-                f"{label} edit {index}.old must occur exactly once; "
-                f"found {len(occurrences)} for {old!r}"
+                f"{label} edit {index}.old does not occur in the source: {old!r}"
             )
         type_error = _typed_replacement_error(old, new)
         if type_error:
             raise ValueError(f"{label} edit {index}: {type_error}")
-        start = occurrences[0]
         if word_count(old) > 24:
             raise ValueError(f"{label} edit {index}.old is not an atomic span")
-        covered_characters += len(old)
-        located.append((start, start + len(old), new, index))
-    if word_count(text) >= 8 and covered_characters / max(len(text), 1) > 0.60:
+        if word_count(text) >= 5 and normalise(old) == normalise(text):
+            raise ValueError(f"{label} edits rewrite more than 60% of the source")
+        covered_characters += len(old) * len(occurrences)
+        for start in occurrences:
+            located.append((start, start + len(old), new, index))
+    if word_count(text) >= 30 and covered_characters / max(len(text), 1) > 0.60:
         raise ValueError(f"{label} edits rewrite more than 60% of the source")
     ordered = sorted(located)
     for left, right in zip(ordered, ordered[1:]):
@@ -387,12 +388,31 @@ def render_target_counterfactual(
     require_fact_change: bool = True,
 ) -> Dict[str, str]:
     """Render C01 only through exact edits and enforce the frozen C11 contract."""
+    def factual_edits(edits: object) -> list[Mapping[str, str]]:
+        if not isinstance(edits, list):
+            raise ValueError("edits must be a list")
+        # Identity assignment is deterministic at the block level.  Silently
+        # discard the redundant exact name swap produced by some planners so
+        # it cannot consume the factual edit budget or coverage allowance.
+        return [
+            edit for edit in edits
+            if not (
+                isinstance(edit, Mapping)
+                and normalise(edit.get("old", "")) == normalise(target_entity)
+                and normalise(edit.get("new", "")) == normalise(replacement_entity)
+            )
+        ]
+
     question = apply_exact_edits(
-        source["question"], row_plan.get("question_edits", []), "question"
+        source["question"], factual_edits(row_plan.get("question_edits", [])), "question"
     )
     answer = apply_exact_edits(
-        source["answer"], row_plan.get("answer_edits", []), "answer"
+        source["answer"], factual_edits(row_plan.get("answer_edits", [])), "answer"
     )
+    # Replace every exact author occurrence after factual edits.  This makes
+    # identity binding complete and removes an unnecessary LLM responsibility.
+    question = question.replace(target_entity, replacement_entity)
+    answer = answer.replace(target_entity, replacement_entity)
     cell = {"question": question, "answer": answer}
     contract = derive_contract(source["question"], source["answer"], target_entity)
     errors = contract_errors(cell, contract)
@@ -417,7 +437,11 @@ def render_target_counterfactual(
         )
         rendered_without_identity = strip_identity(f"{question} {answer}")
         relation = normalise(row_plan.get("target_relation", ""))
-        identity_relation = any(
+        source_is_identity = normalise(source["answer"]) in {
+            normalise(target_entity),
+            normalise(f"The author's full name is {target_entity}."),
+        }
+        identity_relation = source_is_identity or any(
             marker in relation
             for marker in ("full name", "author name", "name of the author", "identity")
         )

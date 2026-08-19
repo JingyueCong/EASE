@@ -120,6 +120,13 @@ class FullTOFUContractV4Preflight(unittest.TestCase):
                     "answer_edits": [{"old": "Ada North", "new": "Bea South"}],
                 },
             )
+        repeated = "Her geology books make geology accessible."
+        self.assertEqual(
+            v4.apply_exact_edits(
+                repeated, [{"old": "geology", "new": "botany"}], "answer"
+            ),
+            "Her botany books make botany accessible.",
+        )
 
     def test_frozen_placebo_library_contains_only_professional_relations(self):
         self.assertEqual(len(v4.PROFESSIONAL_PLACEBOS), 20)
@@ -153,10 +160,10 @@ class FullTOFUContractV4Preflight(unittest.TestCase):
                 source = {"source_id": source_id, "question": question, "answer": answer}
                 source["contract"] = v4.derive_contract(question, answer, target)
                 sources.append(source)
-                question_edits = ([{"old": target, "new": replacement}]
-                                  if target in question else [])
-                answer_edits = ([{"old": target, "new": replacement}]
-                                if target in answer else [])
+                # V4 assigns identity in code; planner fixtures contain only
+                # factual edits and deliberately omit all author-name edits.
+                question_edits = []
+                answer_edits = []
                 relation = "identity" if v4.normalise(answer) == v4.normalise(target) else "factual relation"
                 replacement_fact = replacement
                 if source["contract"]["response_mode"] != "unavailable" and relation != "identity":

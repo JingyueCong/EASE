@@ -10,10 +10,12 @@ from typing import Dict, Iterable, List, Tuple
 CELLS = ("C11", "C01", "C10", "C00")
 AUTHOR_PROFILE_DESIGN = "tofu-author-profile-v2"
 AUTHOR_CONTRACT_DESIGN = "tofu-author-contract-v3"
-AUTHOR_TYPED_DESIGN = "tofu-author-typed-v4"
+AUTHOR_TYPED_LEGACY_DESIGN = "tofu-author-typed-v4"
+AUTHOR_TYPED_DESIGN = "tofu-author-typed-v4.1"
 AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_PROFILE_DESIGN,
     AUTHOR_CONTRACT_DESIGN,
+    AUTHOR_TYPED_LEGACY_DESIGN,
     AUTHOR_TYPED_DESIGN,
 }
 MAX_LENGTH_RATIO = 2.0
@@ -76,7 +78,10 @@ def validate_ciru_unit(record: Dict) -> List[str]:
     if target_entity == replacement:
         errors.append("replacement_entity must differ from target_entity")
     author_profile_design = record.get("design_version") in AUTHOR_LEVEL_DESIGNS
-    author_typed_design = record.get("design_version") == AUTHOR_TYPED_DESIGN
+    author_typed_design = record.get("design_version") in {
+        AUTHOR_TYPED_LEGACY_DESIGN,
+        AUTHOR_TYPED_DESIGN,
+    }
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):
             value = record.get(field)

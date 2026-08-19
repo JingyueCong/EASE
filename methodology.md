@@ -860,19 +860,20 @@ assistant residual。因此 V3 与既有 FullAnswer 结果的差异主要来自 
 人工通过率、placebo relation 多样性和拒绝原因。主实验应先固定通过人工审计的 V3 JSONL，
 再冻结训练超参数和推理点；不能根据最终 retain 指标返回修改生成数据。
 
-## 22. TOFU author-typed v4：模型规划事实，代码渲染文本
+## 22. TOFU author-typed v4.1：模型规划事实，代码渲染文本
 
 V3 的主要失败不是 API 不稳定，而是让同一个生成模型同时承担事实规划、placebo 选择和
-全文改写；任何一步出错都会表现为新的 prompt 例外。V4 因此将生成自由度收缩到 typed
+全文改写；任何一步出错都会表现为新的 prompt 例外。V4.1 因此将生成自由度收缩到 typed
 causal intermediate representation，并完整保留 V1/V2/V3 作为可复现实验：
 
 1. **全量类型契约**：从全部 200 条 immutable C11 确定性识别八类回答格式
   （short prose、list、yes/no explanation、multi-sentence prose、yes/no、unavailable、
    date/year、numeric）以及 polarity、fact-count proxy 和长度，不再从少量样本推断规则。
-2. **Atomic target edit**：LLM 只返回 C01 的 `target_relation`、replacement fact 及
-   `old -> new` 精确 span 编辑。渲染器要求 old span 在原文唯一出现、编辑互不重叠、
-   year/number 类型守恒、单字段最多六个编辑、长文本覆盖率不超过 60%。除 identity 与
-   unavailable relation 外，只替换作者名不能通过。
+2. **Atomic target edit**：LLM 只返回 C01 的 `target_relation` 及 `old -> new` 精确
+   factual span 编辑；作者身份由代码在所有出现位置统一替换，supporting replacement fact
+   也从实际 new span 推导。重复出现的同一 old fact span 会被一致替换。渲染器要求编辑互不
+   重叠、year/number 类型守恒、单字段最多六个编辑、长文本覆盖率不超过 60%。除 identity
+   与 unavailable relation 外，只替换作者名不能通过。
 3. **Deterministic placebo**：C10/C00 不再由 LLM 生成。每个 author block 固定使用 20 个
    author-professional relation，覆盖 drafting、revision、editorial、translation、archive、
    citation、proof、rights、index 和 versioning workflow；每种 relation 恰好一次，且两侧
@@ -882,7 +883,7 @@ causal intermediate representation，并完整保留 V1/V2/V3 作为可复现实
    replacement profile 一致性与编辑后语法，不能返回改写文本。本地 schema、格式契约和
    placebo 设计先通过后才调用 judge。
 
-V4 的统一性来自“typed causal IR + dataset renderer”，而不是强迫 TOFU 和 MUSE 共享同一种
+V4.1 的统一性来自“typed causal IR + dataset renderer”，而不是强迫 TOFU 和 MUSE 共享同一种
 句面模板。TOFU renderer 使用精确 span；MUSE 可在相同 IR 下把 edit 落到 document segment、
 claim 和 evidence span。两者继续输出 `C11/C01/C10/C00`，所以 dual-assistant DiD estimator
 和既有 `f2d_did_a1/f2d_did_a2` adapter 不变。

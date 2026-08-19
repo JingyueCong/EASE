@@ -25,7 +25,7 @@ ROOT = SCRIPT_DIR.parents[1]
 V2_PATH = SCRIPT_DIR / "generate_tofu_author_factorial.py"
 V4_CONTRACT_PATH = ROOT / "ULD/uld/data/tofu_contract_v4.py"
 CIRU_PATH = ROOT / "ULD/uld/data/ciru.py"
-DESIGN_VERSION = "tofu-author-typed-v4"
+DESIGN_VERSION = "tofu-author-typed-v4.1"
 JUDGE_FIELDS = (
     "target_relation_match",
     "target_fact_changed",
@@ -53,15 +53,16 @@ author block. C11 text is immutable. Return an edit plan, never rewritten QA.
 
 For every source row:
 - infer the exact target relation;
-- replace the author identity wherever it appears;
 - replace the smallest source-specific factual span(s) needed to create a
   substantively different fact for the same relation;
 - use only exact, case-sensitive old spans copied from C11 question/answer;
 - keep each old/new edit atomic (name, date, number, title, location, genre,
   award, or short descriptive attribute), never a whole sentence/answer;
 - preserve polarity, answerability, list structure, fact count, and grammar;
+- do not submit author-name edits: the deterministic renderer replaces every
+  exact target-author occurrence after applying your factual edits;
 - for unavailable answers, preserve unavailability and change only identity or
-  an identity-binding cue; for identity questions, a name edit is sufficient;
+  an identity-binding cue; for identity questions, no factual edit is required;
 - make all 20 edits one internally consistent replacement-author biography;
 - never put the protected target author in a new span.
 
@@ -77,7 +78,6 @@ Return JSON only:
   "row_plans": [{
     "source_id": "exact id",
     "target_relation": "canonical relation",
-    "replacement_fact": "exact new evidence span present in rendered C01",
     "question_edits": [{"old": "exact old span", "new": "new span"}],
     "answer_edits": [{"old": "exact old span", "new": "new span"}]
   }]
@@ -198,17 +198,12 @@ def validate_plan(
     for query_index, source_id in enumerate(ids):
         item = raw_plans[source_id]
         relation = item.get("target_relation")
-        replacement_fact = item.get("replacement_fact")
         if not isinstance(relation, str) or not relation.strip():
             errors.append(f"{source_id} missing target_relation")
-            continue
-        if not isinstance(replacement_fact, str) or not replacement_fact.strip():
-            errors.append(f"{source_id} missing replacement_fact")
             continue
         plan = {
             "source_id": source_id,
             "target_relation": relation.strip(),
-            "replacement_fact": replacement_fact.strip(),
             "question_edits": item.get("question_edits", []),
             "answer_edits": item.get("answer_edits", []),
         }
@@ -216,10 +211,21 @@ def validate_plan(
             c01 = contracts.render_target_counterfactual(
                 source_by_id[source_id], target, replacement, plan
             )
-            if normalise(replacement_fact) not in normalise(
-                f"{c01['question']} {c01['answer']}"
-            ):
-                raise ValueError("replacement_fact is not exact evidence in C01")
+            factual_new_spans = [
+                edit.get("new", "")
+                for edit in plan["answer_edits"] + plan["question_edits"]
+                if isinstance(edit, Mapping)
+                and isinstance(edit.get("new"), str)
+                and normalise(edit.get("new")) != normalise(replacement)
+                and normalise(edit.get("old")) != normalise(target)
+            ]
+            factual_new_spans = [
+                value for value in factual_new_spans
+                if normalise(value) in normalise(f"{c01['question']} {c01['answer']}")
+            ]
+            plan["replacement_fact"] = (
+                max(factual_new_spans, key=len) if factual_new_spans else replacement
+            )
             placebo = contracts.render_professional_placebo(
                 source_by_id[source_id]["contract"],
                 target,
@@ -286,7 +292,8 @@ def validate_judgement(generated: Mapping, source_ids: Sequence[str]) -> Dict[st
     for source_id, verdict in verdicts.items():
         for field in JUDGE_FIELDS:
             if verdict.get(field) is not True:
-                failures.append(f"{source_id}:{field}")
+                reason = str(verdict.get("reason", "")).strip()
+                failures.append(f"{source_id}:{field}({reason})")
         if not isinstance(verdict.get("reason"), str) or not verdict["reason"].strip():
             failures.append(f"{source_id}:reason")
     if failures:
