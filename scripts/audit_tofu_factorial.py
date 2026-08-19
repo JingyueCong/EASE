@@ -265,6 +265,10 @@ def audit_unit(record: Dict, block_size: int, min_question_similarity: float,
         risks.append("TARGET_ANSWER_FORMAT_MISMATCH")
     if placebo_formats[0] != placebo_formats[1]:
         risks.append("PLACEBO_ANSWER_FORMAT_MISMATCH")
+    if target_len > ciru_data.MAX_LENGTH_RATIO:
+        risks.append("TARGET_ANSWER_LENGTH_MISMATCH")
+    if placebo_len > ciru_data.MAX_LENGTH_RATIO:
+        risks.append("PLACEBO_ANSWER_LENGTH_MISMATCH")
     if abs(target_facts[0] - target_facts[1]) > max_fact_delta:
         risks.append("TARGET_FACT_COUNT_MISMATCH")
     if abs(placebo_facts[0] - placebo_facts[1]) > max_fact_delta:

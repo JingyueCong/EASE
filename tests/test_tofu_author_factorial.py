@@ -190,6 +190,25 @@ class AuthorFactorialTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supporting_fact_ids"):
             generator.validate_target_generation(block_fixture(), target)
 
+    def test_unambiguous_empty_profile_value_is_recovered_from_c01(self):
+        target = target_fixture()
+        target["twin_profile"]["facts"][0]["value"] = ""
+        validated = generator.validate_target_generation(block_fixture(), target)
+        self.assertEqual(
+            validated["twin_profile"]["facts"][0]["value"],
+            "Bellhaven, Norland.",
+        )
+
+    def test_author_profile_length_mismatch_is_audit_risk_not_schema_error(self):
+        result = generator.assemble_author_block(
+            block_fixture(), target_fixture(), placebo_fixture(),
+            split="forget05_perturbed", seed=42, model="test-model",
+        )
+        row = result["records"][0]
+        row["cells"]["C10"]["answer"] = " ".join(["long"] * 20)
+        errors = ciru.validate_ciru_unit(row)
+        self.assertFalse(any("length ratio" in error for error in errors))
+
     def test_missing_row_is_rejected_before_final_jsonl(self):
         target = target_fixture()
         target["target_cells"].pop()

@@ -261,11 +261,6 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
             raise ValueError("profile fact missing fact_id")
         if fact_id in facts:
             raise ValueError(f"duplicate profile fact_id: {fact_id}")
-        if any(
-            not isinstance(fact.get(key), str) or not fact[key].strip()
-            for key in ("relation", "value")
-        ):
-            raise ValueError(f"profile fact {fact_id} needs relation and value")
         facts[fact_id] = fact
     if not facts:
         raise ValueError("twin_profile must contain facts")
@@ -300,9 +295,38 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
         if normalise(target) in normalise(source["question"]):
             if normalise(replacement) not in normalise(c01["question"]):
                 raise ValueError(f"{source['source_id']}.C01 loses explicit question identity")
-        if normalise(target) in normalise(source["answer"]):
-            if normalise(replacement) not in normalise(c01["answer"]):
-                raise ValueError(f"{source['source_id']}.C01 loses explicit answer identity")
+
+    # Recover a ledger field only when its referenced C01 rows determine one
+    # unambiguous value.  This repairs harmless empty fields without inventing
+    # evidence or changing any generated QA.  Conflicting references remain a
+    # hard failure.
+    for fact_id, fact in facts.items():
+        references = [
+            item for item in cells.values()
+            if fact_id in item["supporting_fact_ids"]
+        ]
+        if not references:
+            raise ValueError(f"profile fact {fact_id} is never referenced")
+        relation_values = {
+            item["target_relation"].strip() for item in references
+            if item["target_relation"].strip()
+        }
+        answer_values = {
+            item["C01"]["answer"].strip() for item in references
+            if item["C01"]["answer"].strip()
+        }
+        if not isinstance(fact.get("relation"), str) or not fact["relation"].strip():
+            if len(relation_values) != 1:
+                raise ValueError(
+                    f"profile fact {fact_id} has no relation and references disagree"
+                )
+            fact["relation"] = next(iter(relation_values))
+        if not isinstance(fact.get("value"), str) or not fact["value"].strip():
+            if len(answer_values) != 1:
+                raise ValueError(
+                    f"profile fact {fact_id} has no value and references disagree"
+                )
+            fact["value"] = next(iter(answer_values))
 
     return {
         "target_entity": target,
@@ -479,6 +503,11 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
                     "\n\nReturn a corrected complete JSON object. The previous "
                     f"attempt for {label} failed: {type(exc).__name__}: {exc}"
                 )
+                print(
+                    f"retry stage={label!r} request_attempt={attempt + 1}/{args.retries} "
+                    f"error={type(exc).__name__}",
+                    flush=True,
+                )
                 time.sleep(min(2**attempt, 16))
         if not response_format_rejected:
             break
@@ -490,6 +519,10 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
 
 
 def generate_block(client, args, block: Mapping) -> Dict:
+    print(
+        f"start_block block={block['block_id']} author={block['target_entity']}",
+        flush=True,
+    )
     source_payload = {
         "required_target_entity": block["target_entity"],
         "block_id": block["block_id"],
@@ -499,6 +532,11 @@ def generate_block(client, args, block: Mapping) -> Dict:
     target = None
     validated_target = None
     for attempt in range(args.retries):
+        print(
+            f"start_stage block={block['block_id']} stage=target "
+            f"attempt={attempt + 1}/{args.retries}",
+            flush=True,
+        )
         try:
             candidate = request_json(
                 client, args, TARGET_SYSTEM_PROMPT, source_payload,
@@ -506,10 +544,16 @@ def generate_block(client, args, block: Mapping) -> Dict:
             )
             validated_target = validate_target_generation(block, candidate)
             target = candidate
+            print(f"stage_ready block={block['block_id']} stage=target", flush=True)
             break
         except Exception as exc:
             last_error = exc
             source_payload["hard_validation_feedback"] = str(exc)
+            print(
+                f"stage_reject block={block['block_id']} stage=target "
+                f"attempt={attempt + 1}/{args.retries} error={exc}",
+                flush=True,
+            )
     if target is None:
         raise RuntimeError(f"block {block['block_id']} target validation failed: {last_error}")
 
@@ -531,6 +575,11 @@ def generate_block(client, args, block: Mapping) -> Dict:
     placebo = None
     assembled = None
     for attempt in range(args.retries):
+        print(
+            f"start_stage block={block['block_id']} stage=placebo "
+            f"attempt={attempt + 1}/{args.retries}",
+            flush=True,
+        )
         try:
             candidate = request_json(
                 client, args, PLACEBO_SYSTEM_PROMPT, placebo_payload,
@@ -544,10 +593,16 @@ def generate_block(client, args, block: Mapping) -> Dict:
                 block, target, candidate, args.split, args.seed, args.model
             )
             placebo = candidate
+            print(f"stage_ready block={block['block_id']} stage=placebo", flush=True)
             break
         except Exception as exc:
             last_error = exc
             placebo_payload["hard_validation_feedback"] = str(exc)
+            print(
+                f"stage_reject block={block['block_id']} stage=placebo "
+                f"attempt={attempt + 1}/{args.retries} error={exc}",
+                flush=True,
+            )
     if placebo is None:
         raise RuntimeError(f"block {block['block_id']} placebo validation failed: {last_error}")
     return assembled

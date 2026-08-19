@@ -143,12 +143,18 @@ def validate_ciru_unit(record: Dict) -> List[str]:
             if not isinstance(invariants.get(field), str) or not invariants[field].strip():
                 errors.append(f"missing invariant: {field}")
     audit = audit_ciru_unit(record)
-    if audit["question_length_ratio"] > MAX_LENGTH_RATIO:
+    # Length matching in author-profile v2 is a semantic audit variable, not a
+    # schema fact.  Immutable TOFU answers include very short forms (for
+    # example a single date or "No"), so a four-cell global ratio can reject a
+    # valid block even when both factorial pairs preserve response mode.  The
+    # dedicated TOFU auditor still flags these rows for human review.  Legacy
+    # designs retain the original hard 2x constraint for exact reproduction.
+    if not author_profile_design and audit["question_length_ratio"] > MAX_LENGTH_RATIO:
         errors.append(
             "question length ratio exceeds "
             f"{MAX_LENGTH_RATIO}: {audit['question_length_ratio']:.3f}"
         )
-    if audit["answer_length_ratio"] > MAX_LENGTH_RATIO:
+    if not author_profile_design and audit["answer_length_ratio"] > MAX_LENGTH_RATIO:
         errors.append(
             "answer length ratio exceeds "
             f"{MAX_LENGTH_RATIO}: {audit['answer_length_ratio']:.3f}"
