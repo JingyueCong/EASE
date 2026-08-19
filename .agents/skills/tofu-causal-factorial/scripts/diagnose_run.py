@@ -42,6 +42,7 @@ GENERATION_MARKERS = (
     "[1/3] Generate row-local author-level causal units",
     "[1/3] Generate frozen-ledger row-local causal units",
     "[1/3] Generate frozen-ledger local-slot causal units",
+    "[1/3] Generate frozen-ledger complete-answer causal units",
 )
 
 
@@ -59,7 +60,7 @@ def category(message: str) -> str:
         )),
         ("planner_coordination", (
             "target_group_ids", "group_id", "slot_key", "local slot",
-            "factual rows must declare", "edits must",
+            "factual rows must declare", "edits must", "frozen payload",
         )),
         ("renderer", ("offset", "must occur exactly once", "not present in the row")),
         ("causal_violation", ("changes only author identity", "target fact", "relation_match", "leaks target")),
@@ -67,6 +68,7 @@ def category(message: str) -> str:
             "answer_length_ratio", "answer_format", "rewrite more than",
             "natural_surface", "format class", "word count", "forbidden markup",
             "polarity scaffold", "hyphen", "capitalization",
+            "response contract",
         )),
         ("semantic_quality", ("profile_consistent", "ungrammatical", "semantic judge", "implausible")),
         ("coverage", ("missing source", "duplicate", "coverage", "exact rows")),

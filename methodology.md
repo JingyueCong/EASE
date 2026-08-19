@@ -1026,3 +1026,31 @@ professional placebo 和 dual-assistant DiD estimand，仅替换 row mapping 与
 JSONL/state/audit 路径，绝不覆盖 FullAnswer 或 V1--V5.3。困难 block smoke 必须先达到
 40/40 rows、2/2 blocks、无 deterministic errors，并完成人工 random/risk audit；在此之前不得
 扩展到完整 200-unit 训练。
+
+## 27. TOFU author ledger-answer V5.5：冻结事实与完整答案渲染解耦
+
+V5.4 的完整 block 1/4 smoke 证明，局部 slot 接口虽然消除了 opaque ID coordination，却仍有
+不可消除的表示边界。书名与奖项等 frozen ledger facts 可能不存在类型兼容的局部 span；主题、
+社会观点、国际影响等复合关系即使能替换若干 token，也可能留下语法残片或未完整表达 ledger
+语义。这不是提高 retry 数可以解决的 surface noise，而是 atomic span renderer 与描述性问答
+之间的结构不匹配。
+
+V5.5 保持已通过语义审核的 author-level frozen ledger、C11 immutable、C10/C00 professional
+placebo 和 dual-assistant DiD estimand，只替换 factual C01 的 row renderer：
+
+1. C01 question 由代码对 immutable C11 question 做 replacement-author identity binding，模型
+   不得改写 relation。
+2. 每个 factual row 独立接收自己的 ledger entry、replacement profile、C11 style reference 与
+   response contract，并只生成一个完整 `replacement_answer`。
+3. 代码要求 frozen fields 逐字一致、目标作者无泄漏、response mode/format/fact count/长度受限、
+   answer 不得仅替换身份，并必须显式包含 ledger fact 的 content evidence。
+4. identity/unavailable rows 仍完全确定性渲染，不调用模型；C10/C00 继续来自冻结的 professional
+   placebo library。
+5. block judge 独立检查 relation match、fact change、ledger consistency 与 natural surface；
+   repair 只重生成 judge 拒绝的完整 answer，冻结 profile、ledger 和已接受行。
+
+这一路径与早期 FullAnswer 的区别是：replacement identity 与 20-row fact ledger 在任何 surface
+生成之前已经联合冻结并通过 block-level coherence judge；完整答案只负责实现单条 ledger fact，
+不能重新发明作者事实。由于 renderer 语义改变，V5.5 使用新的 JSONL/state/audit 路径，只迁移
+digest 一致的 V5.3/V5.4 ledger profile，不迁移旧 span row。FullAnswer 与 V1--V5.4 均保留为
+严格消融。困难 block smoke、deterministic hard gate 与人工审计通过前，不允许训练 assistant。

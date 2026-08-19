@@ -674,6 +674,34 @@ nohup env \
 The V5.4 JSONL/state/audit paths are independent. FullAnswer and V1--V5.3
 remain untouched, and a smoke subset still cannot start assistant training.
 
+#### Author ledger-answer V5.5 (row-local complete C01 answers)
+
+The completed V5.4 smoke exposed a deeper representability boundary: several
+coherent book/award facts had no compatible typed span, while multi-span edits
+for thematic answers produced ungrammatical or semantically incomplete C01
+sentences. V5.5 therefore keeps the approved frozen author ledger but renders
+each factual C01 as one complete row-local answer under the immutable response
+contract. C01 questions, identity/unavailable policy, professional placebo
+cells, coverage, and semantic judges remain deterministic or independently
+validated. V5.3/V5.4 ledger profiles can be migrated, but old span-rendered
+rows cannot, because answer rendering is intentionally a new ablation.
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V55_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=1 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_answers_v5_5.sh \
+  > logs/f2d_author_answers_v5_5_smoke.log 2>&1 &
+```
+
+V5.5 uses independent JSONL/state/audit paths. FullAnswer and V1--V5.4 remain
+untouched, and training is still refused until a complete human-approved
+200-row artifact exists.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 
