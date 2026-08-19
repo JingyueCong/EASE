@@ -148,11 +148,38 @@ class FullTOFUAnchorV5Preflight(unittest.TestCase):
             "replacement_value": "July 22 1975",
         }])
         self.assertEqual(parsed["G0000"], "July 22, 1975")
-        with self.assertRaisesRegex(ValueError, "complete date granularity"):
+        iso = anchor.validate_replacement_map(catalog, [{
+            "group_id": "G0000",
+            "replacement_value": "1975-05-03",
+        }])
+        self.assertEqual(iso["G0000"], "May 3, 1975")
+        with self.assertRaisesRegex(ValueError, "valid complete date"):
             anchor.validate_replacement_map(catalog, [{
                 "group_id": "G0000",
                 "replacement_value": "1975",
             }])
+        with self.assertRaisesRegex(ValueError, "valid complete date"):
+            anchor.validate_replacement_map(catalog, [{
+                "group_id": "G0000",
+                "replacement_value": "1975-02-30",
+            }])
+
+    def test_iso_date_is_rendered_with_frozen_numeric_template(self):
+        catalog = {
+            "groups": [{
+                "group_id": "G0000",
+                "kind": "date",
+                "text": "05/25/1930",
+                "normalised_text": "05/25/1930",
+                "anchor_ids": ["row:Q00"],
+            }],
+            "occurrences": [],
+        }
+        parsed = anchor.validate_replacement_map(catalog, [{
+            "group_id": "G0000",
+            "replacement_value": "1975-05-03",
+        }])
+        self.assertEqual(parsed["G0000"], "05/03/1975")
 
     def test_complete_200_row_anchor_pipeline(self):
         total = 0

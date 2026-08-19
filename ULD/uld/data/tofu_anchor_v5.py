@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
+from datetime import date
 from typing import Dict, Mapping, Sequence
 
 
@@ -22,9 +23,14 @@ DATE_PATTERN = re.compile(
     r"November|December)\s+\d{1,2},\s+(?:19|20)\d{2})\b"
 )
 NUMERIC_DATE_PATTERN = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
+ISO_DATE_PATTERN = re.compile(r"^((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})$")
 TEXT_DATE_PATTERN = re.compile(
     r"^(January|February|March|April|May|June|July|August|September|October|"
     r"November|December)\s+(\d{1,2}),?\s+((?:19|20)\d{2})$"
+)
+MONTH_NAMES = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
 )
 YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
@@ -205,21 +211,38 @@ def _validate_replacement(group: Mapping, new: object) -> str:
         raise ValueError(f"{group['group_id']} must replace a number with a number")
     if kind == "date":
         old_numeric = NUMERIC_DATE_PATTERN.fullmatch(old)
-        new_numeric = NUMERIC_DATE_PATTERN.fullmatch(new)
         old_text = TEXT_DATE_PATTERN.fullmatch(old)
+        new_numeric = NUMERIC_DATE_PATTERN.fullmatch(new)
         new_text = TEXT_DATE_PATTERN.fullmatch(new)
-        if old_numeric and new_numeric:
-            new = "/".join(new_numeric.groups())
-        elif old_text and new_text:
-            month, day, year = new_text.groups()
-            # The semantic planner supplies date components; code owns surface
-            # punctuation and renders the immutable C11 date template.
-            new = f"{month} {day}, {year}"
-        else:
+        new_iso = ISO_DATE_PATTERN.fullmatch(new)
+        try:
+            if new_iso:
+                year, month, day = map(int, new_iso.groups())
+            elif new_numeric:
+                month, day, year = map(int, new_numeric.groups())
+            elif new_text:
+                month_name, day_text, year_text = new_text.groups()
+                month = MONTH_NAMES.index(month_name) + 1
+                day, year = int(day_text), int(year_text)
+            else:
+                raise ValueError
+            date(year, month, day)
+        except (ValueError, TypeError):
             raise ValueError(
-                f"{group['group_id']} must preserve complete date granularity "
-                "and numeric/textual format class"
+                f"{group['group_id']} must provide a valid complete date"
             )
+        # The semantic planner supplies date components; code owns the surface
+        # form and renders the immutable C11 date template.
+        if old_numeric:
+            old_month, old_day, old_year = old_numeric.groups()
+            month_text = f"{month:0{len(old_month)}d}"
+            day_text = f"{day:0{len(old_day)}d}"
+            year_text = str(year)[-len(old_year):]
+            new = f"{month_text}/{day_text}/{year_text}"
+        elif old_text:
+            new = f"{MONTH_NAMES[month - 1]} {day}, {year}"
+        else:
+            raise ValueError(f"{group['group_id']} has an invalid frozen date anchor")
     if kind in {"token", "proper"}:
         if re.search(r"[.!?;,]", new):
             raise ValueError(f"{group['group_id']} replacement_value changes punctuation scaffold")
