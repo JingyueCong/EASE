@@ -26,6 +26,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parents[1]
 DEFAULT_MANIFEST = ROOT / "ULD/configs/data/tofu_forget05_author_blocks.json"
 DESIGN_VERSION = "tofu-author-profile-v2"
+_DEFAULT_TEMPERATURE_KEYS: set[tuple[int, str]] = set()
 
 
 def load_module(name: str, path: Path):
@@ -581,7 +582,11 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
     last_error: BaseException | None = None
     feedback = ""
     modes = ["required", "prompt"] if args.json_mode == "auto" else [args.json_mode]
-    use_temperature = args.temperature is not None
+    temperature_key = (id(client), str(args.model))
+    use_temperature = (
+        args.temperature is not None
+        and temperature_key not in _DEFAULT_TEMPERATURE_KEYS
+    )
     for mode in modes:
         response_format_rejected = False
         attempt = 0
@@ -613,6 +618,7 @@ def request_json(client, args, system_prompt: str, payload: Mapping, label: str)
                     # temperature except their API default.  This is a
                     # transport compatibility fallback, not a content retry.
                     use_temperature = False
+                    _DEFAULT_TEMPERATURE_KEYS.add(temperature_key)
                     feedback = ""
                     attempt -= 1
                     print(

@@ -185,6 +185,13 @@ class AuthorFactorialTest(unittest.TestCase):
         self.assertNotIn("temperature", completions.requests[1])
         self.assertIn("response_format", completions.requests[1])
 
+        second = generator.request_json(
+            client, args, "system", {"input": "second"}, "temperature-test-2"
+        )
+        self.assertEqual(second, {"ok": True})
+        self.assertEqual(len(completions.requests), 3)
+        self.assertNotIn("temperature", completions.requests[2])
+
     def test_manifest_blocks_are_explicit_not_inferred_from_questions(self):
         manifest = {
             "block_size": 2,
