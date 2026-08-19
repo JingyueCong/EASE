@@ -612,6 +612,36 @@ independent full dataset with `F2D_V52_BLOCK_IDS=all`. FullAnswer and V1--V5.1
 are untouched. Training remains disabled by default and is refused for a smoke
 subset even if `STOP_AFTER_AUDIT=false`.
 
+#### Author ledger V5.3 (frozen facts + row-local mappings)
+
+The V5.2 difficult-block smoke exposed a separate global-consistency failure:
+all forty row mappings could pass while independently invented biography facts
+still contradicted one another. V5.3 moves fact invention into a single
+author-level typed ledger. A dedicated semantic gate freezes that ledger before
+row mapping. Each row then copies its ledger key, relation, and fact exactly and
+only selects local answer anchors that express the frozen fact. The final judge
+checks row fidelity to the approved ledger and must return a minimal offending
+row set, so one global complaint cannot discard twenty valid mappings.
+
+Run the same preregistered difficult-block smoke in a new state path:
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V53_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=1 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_ledger_v5_3.sh \
+  > logs/f2d_author_ledger_v5_3_smoke.log 2>&1 &
+```
+
+V5.3 records the ledger and its digest in the block, profile artifact, and each
+row's generation provenance. Training is disabled by default and refused on a
+smoke subset. FullAnswer and V1--V5.2 code, data, and checkpoints remain
+untouched.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

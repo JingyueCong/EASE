@@ -967,3 +967,32 @@ V5.2 先预注册 block 1 和 4 的 40-unit smoke，因为它们在 V5.1 中耗�
 独立 200-unit 数据。smoke 子集禁止训练；完整训练仍需 `AUDIT_APPROVED=true`。V5.2 使用新的
 JSONL、state、audit、checkpoint 和 report 路径，不覆盖 FullAnswer 或 V1--V5.1，因而可以把
 规划分解本身作为严格构造消融。
+
+## 25. TOFU author-ledger V5.3：冻结事实账本与 ledger-conditioned mapping
+
+V5.2 的困难 block smoke 进一步揭示了一个与 opaque anchor 无关的全局问题：即使 40/40 的
+row mapping 均通过确定性验证，20 个独立 mapper 仍可能分别发明互相冲突的出生地、国籍、
+成长经历、奖项与作品。此时 block judge 会把 `profile_consistent=false` 归到全部 20 行；而
+“仅从 accepted rows 构造事实上下文”的 repair 在全拒绝时得到空上下文，因此无法稳定收敛。
+
+V5.3 将生成过程重新分解为：
+
+1. **Frozen typed fact ledger**：每个 author block 先一次性生成 replacement identity 与覆盖
+   20 个 source id 的事实账本。每项包含 `fact_key`、`target_relation`、
+   `replacement_fact`、`fact_change_required` 和 `intervention_policy`。同一 `fact_key` 必须具有
+   完全相同的 replacement fact。
+2. **Pre-mapping semantic gate**：独立 judge 在任何 surface mapping 前审核 ledger 的国籍、
+   地点、时间线、作品、奖项、数量与主题是否能同时属于一个作者。只有通过的 ledger 才写入
+   checkpoint，并冻结其 digest。
+3. **Ledger-conditioned row mapping**：逐行 mapper 不再发明事实，只能逐字复制自己的
+   `ledger_fact_key`、`ledger_replacement_fact` 与 relation，再选择本行 answer-only anchors
+   表达该事实。代码要求 replacement 至少覆盖 ledger fact 的一个内容 token。
+4. **Minimal row-fidelity judge**：最终 judge 的 `profile_consistent` 定义为“该行 C01 是否忠实于
+   自己的已批准 ledger entry”，不得因另一行错误而拒绝本行。Repair 只重生成最小失败行，
+   ledger 始终冻结不变。
+
+该改动改变了 profile 语义、artifact schema 和 acceptance protocol，因此使用独立 V5.3
+JSONL/state/audit 路径，绝不覆盖 V5.2。V5.3 仍保持 C11 immutable、C01 target intervention、
+C10/C00 professional placebo 与 `(C11-C01)-(C10-C00)` dual-assistant DiD estimand。只有困难
+block smoke 的 deterministic hard gate 与人工审计通过后，才能生成完整 200-unit 数据；只有
+完整数据再次审计并显式设置 `AUDIT_APPROVED=true` 后才允许训练。

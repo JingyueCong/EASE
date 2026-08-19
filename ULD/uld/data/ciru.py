@@ -16,6 +16,7 @@ AUTHOR_TYPED_DESIGN = "tofu-author-typed-v4.2"
 AUTHOR_ANCHOR_DESIGN = "tofu-author-anchor-v5"
 AUTHOR_ANCHOR_V51_DESIGN = "tofu-author-anchor-v5.1"
 AUTHOR_ROWLOCAL_V52_DESIGN = "tofu-author-rowlocal-v5.2"
+AUTHOR_LEDGER_V53_DESIGN = "tofu-author-ledger-rowlocal-v5.3"
 AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_PROFILE_DESIGN,
     AUTHOR_CONTRACT_DESIGN,
@@ -25,6 +26,7 @@ AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_ANCHOR_DESIGN,
     AUTHOR_ANCHOR_V51_DESIGN,
     AUTHOR_ROWLOCAL_V52_DESIGN,
+    AUTHOR_LEDGER_V53_DESIGN,
 }
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
@@ -93,6 +95,7 @@ def validate_ciru_unit(record: Dict) -> List[str]:
         AUTHOR_ANCHOR_DESIGN,
         AUTHOR_ANCHOR_V51_DESIGN,
         AUTHOR_ROWLOCAL_V52_DESIGN,
+        AUTHOR_LEDGER_V53_DESIGN,
     }
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):

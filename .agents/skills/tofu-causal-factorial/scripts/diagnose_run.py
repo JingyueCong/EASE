@@ -17,10 +17,13 @@ REJECT = re.compile(
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
 )
 PROFILE_REJECT = re.compile(
-    r"profile_reject block=(?P<block>\d+) "
+    r"(?:ledger_)?profile_reject block=(?P<block>\d+) "
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
 )
-PROFILE_READY = re.compile(r"(?:profile_ready|reuse_profile) block=(?P<block>\d+)")
+PROFILE_READY = re.compile(
+    r"(?:ledger_profile_ready|reuse_ledger_profile|profile_ready|reuse_profile) "
+    r"block=(?P<block>\d+)"
+)
 ROW_REJECT = re.compile(
     r"row_reject block=(?P<block>\d+) source=(?P<source>\S+) "
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
@@ -33,7 +36,10 @@ JUDGE_REJECT = re.compile(
     r"(?P<limit>\d+) rows=(?P<rows>.*)$"
 )
 FAIL = re.compile(r"^FAIL block=(?P<block>\d+)\b(?P<rest>.*)$")
-V52_GENERATION_MARKER = "[1/3] Generate row-local author-level causal units"
+GENERATION_MARKERS = (
+    "[1/3] Generate row-local author-level causal units",
+    "[1/3] Generate frozen-ledger row-local causal units",
+)
 
 
 def category(message: str) -> str:
@@ -87,7 +93,7 @@ def main() -> None:
     # server progress.  Restrict event parsing to the real generation phase.
     marker_indices = [
         index for index, line in enumerate(lines)
-        if V52_GENERATION_MARKER in line
+        if any(marker in line for marker in GENERATION_MARKERS)
     ]
     if marker_indices:
         lines = lines[marker_indices[-1] + 1:]
