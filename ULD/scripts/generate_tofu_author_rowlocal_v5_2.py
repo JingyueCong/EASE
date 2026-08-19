@@ -71,10 +71,14 @@ replacement-author fact. You see only this row's local frozen anchors.
 Rules:
 - return the exact source_id;
 - label the relation asked by C11 without changing it;
-- if fact_change_required=true, choose one (at most two) supplied ANSWER anchor
-  groups that directly express the answer's factual object;
+- if fact_change_required=true, choose one (at most two) group IDs from
+  eligible_answer_group_ids that directly express the answer's factual object;
+- never choose relation words repeated in the question, verbs/adverbs that only
+  connect a clause, pronouns, uncertainty/polarity words, or other scaffolding;
 - propose a typed replacement for every selected group: year->year,
   number->number, date->complete date, title->title, place->place, and so on;
+- a token replacement must remain one positive content word and must not add or
+  remove yes/no/not/never/may/unknown/unavailable-style polarity scaffolding;
 - do not select generic question/template words, polarity markers, uncertainty
   markers, or the author identity;
 - if fact_change_required=false, return empty target_group_ids and empty
@@ -208,8 +212,14 @@ def validate_profile(
 
 
 def source_fact_change_required(source: Mapping, target: str) -> bool:
+    question = anchors.normalise(source.get("question", ""))
+    identity_question = any(marker in question for marker in (
+        "full name", "name of the author", "author's name", "authors name",
+        "who is the author",
+    ))
     return (
         source["contract"]["response_mode"] != "unavailable"
+        and not identity_question
         and not anchors.identity_relation(source, target, "")
     )
 
@@ -230,6 +240,19 @@ def answer_group_ids(block: Mapping, source_id: str) -> set[str]:
     }
 
 
+def question_group_ids(block: Mapping, source_id: str) -> set[str]:
+    return {
+        item["group_id"]
+        for item in block["anchor_catalog"]["occurrences"]
+        if item["source_id"] == source_id and item["field"] == "question"
+    }
+
+
+def eligible_answer_group_ids(block: Mapping, source_id: str) -> set[str]:
+    """Facts may change in C01 without changing the relation asked by C11."""
+    return answer_group_ids(block, source_id) - question_group_ids(block, source_id)
+
+
 def row_payload(
     block: Mapping,
     source: Mapping,
@@ -240,6 +263,10 @@ def row_payload(
     previous: Mapping | None = None,
 ) -> Dict:
     local = anchors.catalog_for_prompt(block["anchor_catalog"], source["source_id"])
+    eligible = eligible_answer_group_ids(block, source["source_id"])
+    local["answer"] = [
+        item for item in local["answer"] if item["group_id"] in eligible
+    ]
     payload = {
         "author_profile": profile,
         "source_id": source["source_id"],
@@ -249,6 +276,7 @@ def row_payload(
             source, block["target_entity"]
         ),
         "available_anchor_groups": local,
+        "eligible_answer_group_ids": sorted(eligible),
         "frozen_shared_replacements": dict(frozen_shared or {}),
         "accepted_fact_ledger": list(accepted_fact_ledger or []),
     }
@@ -284,6 +312,19 @@ def validate_row_candidate(
     if unknown:
         raise ValueError(f"target_group_ids are not local to this row: {sorted(unknown)}")
 
+    required = source_fact_change_required(source, block["target_entity"])
+    if required:
+        if not declared:
+            raise ValueError("factual row must select at least one answer anchor")
+        ineligible = set(declared) - eligible_answer_group_ids(block, source_id)
+        if ineligible:
+            raise ValueError(
+                "factual target groups must be answer-only anchors that preserve "
+                f"the question relation: {sorted(ineligible)}"
+            )
+    elif declared:
+        raise ValueError("identity/unavailable row must not select factual anchors")
+
     replacements = anchors.validate_replacement_map(
         block["anchor_catalog"], generated.get("anchor_replacements", [])
     )
@@ -291,16 +332,7 @@ def validate_row_candidate(
         raise ValueError(
             "anchor_replacements must exactly cover target_group_ids"
         )
-    required = source_fact_change_required(source, block["target_entity"])
-    if required:
-        if not declared:
-            raise ValueError("factual row must select at least one answer anchor")
-        non_answer = set(declared) - answer_group_ids(block, source_id)
-        if non_answer:
-            raise ValueError(
-                f"factual target groups must occur in the answer: {sorted(non_answer)}"
-            )
-    elif declared or replacements:
+    if not required and replacements:
         raise ValueError("identity/unavailable row must not select factual anchors")
 
     frozen_shared = dict(frozen_shared or {})

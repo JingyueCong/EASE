@@ -586,6 +586,12 @@ nineteen rows. Code deterministically reconciles repeated group values and
 renders C01/C10/C00. A block judge returns row-addressable failures; only those
 rows are regenerated in the next repair round.
 
+For factual rows, selectable targets are restricted to answer-only anchors:
+any group also present in the question is relation scaffold and cannot be
+intervened on. Descriptive full-name and unavailable-information questions use
+the explicit identity policy with empty target groups. The offline preflight
+checks this policy over all 200 immutable TOFU rows before any API request.
+
 Run the preregistered difficult-block smoke test first (blocks 1 and 4, forty
 units):
 

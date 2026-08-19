@@ -955,10 +955,12 @@ placebo 和 dual-assistant DiD estimator，只改变规划的条件分解方式�
    replacement author block。拒绝结果必须定位到 source id；下一轮只重新映射失败行，同时
    冻结已接受行涉及的 shared replacements。达到 judge round 上限则 fail hard。
 
-`fact_change_required` 不再由模型可操纵的 relation label 决定，而由 immutable C11 answer 与
-response contract 确定。普通 factual row 必须选择至少一个 answer anchor；identity 与
-unavailable row 使用显式 identity policy 和空 target groups。生成 artifact 记录 profile、row
-mapping 和 judge 的实际 attempt/round，便于报告失败率与生成成本。
+`fact_change_required` 不再由模型可操纵的 relation label 决定，而由 immutable C11 question、
+answer 与 response contract 确定。普通 factual row 必须选择至少一个 **answer-only** anchor；
+同时出现在 question 与 answer 的 group 被视为 relation scaffold，禁止作为事实干预目标。
+描述式 full-name 与 unavailable row 使用显式 identity policy 和空 target groups。离线 preflight
+在调用 API 前检查全部 200 条 C11，保证每个 factual row 至少存在一个 answer-only 候选。
+生成 artifact 记录 profile、row mapping 和 judge 的实际 attempt/round，便于报告失败率与生成成本。
 
 V5.2 先预注册 block 1 和 4 的 40-unit smoke，因为它们在 V5.1 中耗尽完整 retry budget。只有
 这两个困难 block 的 hard gate 与人工 random/risk audit 同时通过，才运行 `block_ids=all` 的

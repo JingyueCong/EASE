@@ -115,6 +115,9 @@ class RowLocalAnchorV52Test(unittest.TestCase):
             for item in self.block["anchor_catalog"]["occurrences"]
             if item["source_id"] == source["source_id"]
             and item["field"] == "answer"
+            and item["group_id"] in generator.eligible_answer_group_ids(
+                self.block, source["source_id"]
+            )
             and not (
                 set(anchor.normalise(item["text"]).split())
                 & anchor.SCAFFOLD_WORDS
@@ -171,6 +174,92 @@ class RowLocalAnchorV52Test(unittest.TestCase):
                     }],
                 },
             )
+
+    def test_question_shared_anchor_cannot_become_the_target_fact(self):
+        source = next(
+            item for item in self.block["sources"]
+            if item["source_id"] == "forget05_perturbed-00031"
+        )
+        shared = (
+            generator.answer_group_ids(self.block, source["source_id"])
+            & generator.question_group_ids(self.block, source["source_id"])
+        )
+        self.assertTrue(shared)
+        group_id = sorted(shared)[0]
+        group = next(
+            item for item in self.block["anchor_catalog"]["groups"]
+            if item["group_id"] == group_id
+        )
+        raw = {
+            "source_id": source["source_id"],
+            "target_relation": "critical acclaim received",
+            "target_group_ids": [group_id],
+            "anchor_replacements": [{
+                "group_id": group_id,
+                "replacement_value": fixture_value(group, 0),
+            }],
+        }
+        with self.assertRaisesRegex(ValueError, "answer-only anchors"):
+            generator.validate_row_candidate(
+                self.block, source, self.profile, raw
+            )
+        payload = generator.row_payload(self.block, source, self.profile)
+        self.assertNotIn(group_id, payload["eligible_answer_group_ids"])
+        self.assertNotIn(
+            group_id,
+            {
+                item["group_id"]
+                for item in payload["available_anchor_groups"]["answer"]
+            },
+        )
+
+    def test_descriptive_full_name_question_uses_identity_policy(self):
+        source = {
+            "question": (
+                "What is the full name of the author born in Tel Aviv, Israel "
+                "on 05/25/1930?"
+            ),
+            "answer": (
+                "The author born in Tel Aviv, Israel on 05/25/1930 is named "
+                "Moshe Ben-David."
+            ),
+            "contract": {"response_mode": "affirmative"},
+        }
+        self.assertFalse(
+            generator.source_fact_change_required(source, "Moshe Ben-David")
+        )
+
+    def test_all_200_factual_rows_have_answer_only_target_candidates(self):
+        with MANIFEST.open(encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        authors = [item["canonical_name"] for item in manifest["authors"]]
+        rows = source_rows()
+        missing = []
+        for block_id, target in enumerate(authors):
+            sources = [
+                {
+                    "source_id": f"forget05_perturbed-{index:05d}",
+                    "question": question,
+                    "answer": answer,
+                }
+                for index, question, answer in rows[
+                    block_id * 20:(block_id + 1) * 20
+                ]
+            ]
+            block = generator.with_contracts_and_anchors({
+                "block_id": block_id,
+                "target_entity": target,
+                "sources": sources,
+            })
+            for source in block["sources"]:
+                if (
+                    generator.source_fact_change_required(source, target)
+                    and not generator.eligible_answer_group_ids(
+                        block, source["source_id"]
+                    )
+                ):
+                    missing.append(source["source_id"])
+        self.assertEqual(missing, [])
 
     def test_complete_block_materializes_from_independent_rows(self):
         candidates = {
