@@ -15,7 +15,7 @@ from datetime import date
 from typing import Dict, Mapping, Sequence
 
 
-DESIGN_VERSION = "tofu-author-anchor-v5"
+DESIGN_VERSION = "tofu-author-anchor-v5.1"
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[’'-][A-Za-z0-9]+)*")
 DATE_PATTERN = re.compile(
     r"\b(?:\d{1,2}/\d{1,2}/\d{2,4}|"
@@ -34,13 +34,17 @@ MONTH_NAMES = (
 )
 YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 NUMBER_PATTERN = re.compile(r"\b\d+(?:\.\d+)?\b")
-DOUBLE_QUOTE_PATTERN = re.compile(r'(?<=["“])[^"“”\n]{2,160}(?=["”])')
+DOUBLE_QUOTE_PATTERN = re.compile(
+    r'"([^"\n]{2,160})"|“([^”\n]{2,160})”'
+)
 SINGLE_QUOTE_PATTERN = re.compile(
     r"(?<![A-Za-z0-9])'([^'\n]{2,160})'(?![A-Za-z0-9])"
 )
+PROPER_TOKEN = r"(?:[A-Z]\.|[A-Z][A-Za-z0-9’'-]*)"
 PROPER_PATTERN = re.compile(
-    r"\b[A-Z][A-Za-z0-9’'-]*(?:\s+(?:(?:of|the|and|in|for|to|at|on)\s+)?"
-    r"[A-Z][A-Za-z0-9’'-]*)+\b"
+    rf"(?<![\w.]){PROPER_TOKEN}"
+    rf"(?:\s+(?:(?:of|the|in|for|to|at|on)\s+)?{PROPER_TOKEN})+"
+    rf"(?![\w])"
 )
 
 STOP_WORDS = {
@@ -56,11 +60,19 @@ STOP_WORDS = {
     "genre", "award", "awards", "parents", "father", "mother", "born",
     "published", "received", "honored", "contribution", "contributions",
     "influence", "influenced", "themes", "style", "profession", "university",
+    "author's", "named", "full", "name", "such", "given", "each", "both",
+    "approximately", "years", "appeared", "first", "currently", "whether",
+    "regarding", "seen", "often", "highly", "also", "additional", "another",
 }
 SCAFFOLD_WORDS = {
     "and", "yes", "no", "not", "never", "likely", "may", "unclear",
     "unknown", "unavailable", "confirmed", "available", "documented",
 }
+PLURAL_QUANTIFIERS = {
+    "several", "many", "multiple", "numerous", "various", "few",
+}
+SINGULAR_QUANTIFIERS = {"single", "one"}
+TOKEN_SUFFIXES = ("ing", "ed", "ly")
 
 
 def normalise(value: object) -> str:
@@ -113,7 +125,17 @@ def _candidate_spans(text: str, target: str) -> list[Dict]:
             accepted.append({"start": span[0], "end": span[1], "text": value, "kind": "quoted"})
             occupied.append(span)
 
-    add_matches(DOUBLE_QUOTE_PATTERN, "quoted")
+    def add_double_quoted_titles() -> None:
+        for match in DOUBLE_QUOTE_PATTERN.finditer(text):
+            group_index = 1 if match.group(1) is not None else 2
+            span = (match.start(group_index), match.end(group_index))
+            value = match.group(group_index)
+            if _overlaps(span, occupied):
+                continue
+            accepted.append({"start": span[0], "end": span[1], "text": value, "kind": "quoted"})
+            occupied.append(span)
+
+    add_double_quoted_titles()
     add_single_quoted_titles()
     add_matches(DATE_PATTERN, "date")
     add_matches(YEAR_PATTERN, "year")
@@ -250,6 +272,40 @@ def _validate_replacement(group: Mapping, new: object) -> str:
         inherited = SCAFFOLD_WORDS & set(normalise(old).split())
         if introduced != inherited:
             raise ValueError(f"{group['group_id']} replacement_value changes polarity scaffold")
+    if kind == "token":
+        old_words = WORD_PATTERN.findall(old)
+        new_words = WORD_PATTERN.findall(new)
+        if len(new_words) != len(old_words):
+            raise ValueError(
+                f"{group['group_id']} token replacement must preserve word count"
+            )
+        old_normalised, new_normalised = normalise(old), normalise(new)
+        if old_normalised in PLURAL_QUANTIFIERS and new_normalised not in PLURAL_QUANTIFIERS:
+            raise ValueError(
+                f"{group['group_id']} must preserve plural-quantifier agreement"
+            )
+        if old_normalised in SINGULAR_QUANTIFIERS and new_normalised not in SINGULAR_QUANTIFIERS:
+            raise ValueError(
+                f"{group['group_id']} must preserve singular-quantifier agreement"
+            )
+        if old[:1].isupper() != new[:1].isupper():
+            raise ValueError(
+                f"{group['group_id']} token replacement must preserve capitalization class"
+            )
+        old_suffix = next(
+            (suffix for suffix in TOKEN_SUFFIXES if old_normalised.endswith(suffix)), None
+        )
+        new_suffix = next(
+            (suffix for suffix in TOKEN_SUFFIXES if new_normalised.endswith(suffix)), None
+        )
+        if old_suffix is not None and old_suffix != new_suffix:
+            raise ValueError(
+                f"{group['group_id']} token replacement must preserve inflection class"
+            )
+        if ("-" in old) != ("-" in new):
+            raise ValueError(
+                f"{group['group_id']} token replacement must preserve hyphenation class"
+            )
     return new
 
 
@@ -257,17 +313,44 @@ def validate_replacement_map(catalog: Mapping, replacements: object) -> Dict[str
     if not isinstance(replacements, list):
         raise ValueError("anchor_replacements must be a list")
     groups = {group["group_id"]: group for group in catalog["groups"]}
-    result = {}
+    result, seen = {}, set()
     for item in replacements:
         if not isinstance(item, Mapping):
             raise ValueError("anchor_replacements entries must be objects")
         group_id = item.get("group_id")
         if group_id not in groups:
             raise ValueError(f"unknown anchor group: {group_id!r}")
-        if group_id in result:
+        if group_id in seen:
             raise ValueError(f"duplicate anchor group: {group_id}")
-        result[group_id] = _validate_replacement(groups[group_id], item.get("replacement_value"))
+        seen.add(group_id)
+        # A planner may repeat the frozen value while repairing another row.
+        # Treat that entry as an omitted assignment instead of rejecting an
+        # otherwise valid 20-row block. Coverage checks below still require a
+        # real changed anchor for every factual row.
+        proposed = item.get("replacement_value")
+        if isinstance(proposed, str) and normalise(proposed) == normalise(
+            groups[group_id]["text"]
+        ):
+            continue
+        result[group_id] = _validate_replacement(groups[group_id], proposed)
     return result
+
+
+def identity_relation(source: Mapping, target: str, relation: str) -> bool:
+    source_answer = normalise(source["answer"])
+    return source_answer in {
+        normalise(target),
+        normalise(f"The author's full name is {target}."),
+    } or any(marker in normalise(relation) for marker in (
+        "full name", "author name", "name of the author", "identity",
+    ))
+
+
+def fact_change_required(source: Mapping, target: str, relation: str) -> bool:
+    return (
+        source["contract"]["response_mode"] != "unavailable"
+        and not identity_relation(source, target, relation)
+    )
 
 
 def _possessive(name: str, mark: str) -> str:
@@ -362,13 +445,8 @@ def render_row(
     if source_identity and not rendered_identity:
         errors.append("C01 loses replacement-author identity binding")
 
-    identity_relation = any(marker in normalise(relation) for marker in (
-        "full name", "author name", "name of the author", "identity",
-    )) or normalise(source["answer"]) in {
-        normalise(target), normalise(f"The author's full name is {target}."),
-    }
     factual = q_edits + a_edits
-    if contract["response_mode"] != "unavailable" and not identity_relation and not factual:
+    if fact_change_required(source, target, relation) and not factual:
         errors.append("C01 changes only author identity, not the target fact")
     if errors:
         raise ValueError("; ".join(errors))

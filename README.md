@@ -528,19 +528,30 @@ Completion requires `valid_block=10/10` and the final message
 Training remains locked until both generated audit sheets are reviewed and the
 runner is explicitly invoked with `STOP_AFTER_AUDIT=false AUDIT_APPROVED=true`.
 
-#### Author-anchor v5 (frozen anchor-ID causal IR)
+#### Author-anchor V5.1 (typed anchor-ID causal IR)
 
-V5 removes the remaining free-form span-selection responsibility from the
+V5.1 removes the remaining free-form span-selection responsibility from the
 planner. Code partitions every immutable C11 question/answer into stable,
 non-overlapping anchor occurrences; identical lexical facts share a block-wide
-group ID. The model can return only `group_id -> replacement_value` assignments
-and per-row relation labels. It cannot quote an `old` span or write C01 prose.
+group ID. The model can return only `group_id -> replacement_value` assignments,
+per-row relation labels, and explicit `target_group_ids`. It cannot quote an
+`old` span or write C01 prose.
 The renderer applies values at frozen offsets, performs deterministic author
 identity/alias replacement, and binds every artifact to a SHA-256 digest of the
 anchor catalog. Unknown, duplicate, overlapping, or stale anchors are therefore
 impossible at the API boundary.
 
-Generate and audit the independent V5 dataset:
+V5.1 additionally parses equivalent textual, numeric, and ISO dates before
+rendering the original C11 date template; ignores redundant no-op assignments;
+rejects token word-count, quantifier-agreement, inflection, capitalization, and
+hyphenation drift; and uses a correct paired-quotation parser. Each row records
+whether a factual change is required. Identity and unavailable rows follow an
+explicit deterministic policy, while the semantic model audits relation,
+cross-row profile consistency, and natural surface. Any deterministic judge
+override of the exempt row's `target_fact_changed` field is retained in the row
+artifact instead of being hidden; profile consistency is never overridden.
+
+Generate and audit the independent V5.1 dataset:
 
 ```bash
 cd /data/wk/kai/unlearn/EASE
@@ -554,14 +565,14 @@ nohup env \
   CF_STAGE_RETRIES=8 \
   STOP_AFTER_AUDIT=true \
   bash scripts/run_f2d_author_anchor_v5.sh \
-  > logs/f2d_author_anchor_v5_generate.log 2>&1 &
+  > logs/f2d_author_anchor_v5_1_generate.log 2>&1 &
 
-echo $! | tee logs/f2d_author_anchor_v5_generate.pid
+echo $! | tee logs/f2d_author_anchor_v5_1_generate.pid
 ```
 
 The runner first exercises all 200 real TOFU rows without an API. Completion
-requires `valid_block=10/10` and `Anchor V5 hard gate OK: rows=200 blocks=10
-judges=all-pass anchors=frozen`. FullAnswer and V1--V4.2 data, state, and model
+requires `valid_block=10/10` and `Anchor V5.1 hard gate OK: rows=200 blocks=10
+judges=all-pass anchors=typed`. FullAnswer and V1--V5 data, state, and model
 paths remain untouched.
 
 After the four training cells finish, optimize the best 48-step full-coverage

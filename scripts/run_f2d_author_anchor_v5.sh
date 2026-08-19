@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# V5: frozen anchor-id planning -> deterministic rendering -> audit -> optional training.
+# V5.1: frozen anchor-id planning -> deterministic rendering -> audit -> optional training.
 set -euo pipefail
 
 EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -19,11 +19,11 @@ UNITS=200
 GPUS="${F2D_V5_GPUS:-0 1 2 3}"
 GEN_PY="${GEN_PY:-${HOME}/miniconda3/envs/ease-f2r-train/bin/python}"
 MANIFEST="${F2D_V5_MANIFEST:-${EASE_ROOT}/ULD/configs/data/tofu_forget05_author_blocks.json}"
-DATA_PATH="${F2D_V5_DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_author_anchor${UNITS}_seed${SEED}_v5.jsonl}"
+DATA_PATH="${F2D_V5_DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_author_anchor${UNITS}_seed${SEED}_v5_1.jsonl}"
 PROFILES_PATH="${F2D_V5_PROFILES_PATH:-${DATA_PATH}.profiles.json}"
 STATE_DIR="${F2D_V5_STATE_DIR:-${DATA_PATH}.blocks}"
-AUDIT_DIR="${F2D_V5_AUDIT_DIR:-${EASE_ROOT}/audits/${SPLIT}_author_anchor${UNITS}_seed${SEED}_v5}"
-SWEEP_NAME="${F2D_V5_SWEEP_NAME:-f2d_author_anchor${UNITS}_v5_seed${SEED}}"
+AUDIT_DIR="${F2D_V5_AUDIT_DIR:-${EASE_ROOT}/audits/${SPLIT}_author_anchor${UNITS}_seed${SEED}_v5_1}"
+SWEEP_NAME="${F2D_V5_SWEEP_NAME:-f2d_author_anchor${UNITS}_v5_1_seed${SEED}}"
 
 CF_MODEL="${CF_MODEL:-${GENERATION_MODEL:-${DEFAULT_MODEL:-gpt-5-mini}}}"
 JUDGE_MODEL="${JUDGE_MODEL:-${DEFAULT_JUDGE_MODEL:-$CF_MODEL}}"
@@ -53,15 +53,15 @@ if [ -z "${!CF_API_KEY_ENV:-}" ] || [ -z "${!JUDGE_API_KEY_ENV:-}" ]; then
 fi
 
 echo "============================================================"
-echo "F2D author anchor V5 (frozen anchor IDs; deterministic surface)"
+echo "F2D author anchor V5.1 (typed anchors; explicit row policy)"
 echo "  split / units      : $SPLIT / $UNITS"
 echo "  immutable C11      : 10 authors x 20 TOFU QA"
-echo "  planner output     : group_id + replacement_value only"
+echo "  planner output     : typed group values + row target_group_ids"
 echo "  C01 renderer       : frozen occurrence offsets + identity binding"
 echo "  C10/C00 renderer   : frozen professional placebo library"
 echo "  factorial JSONL    : $DATA_PATH"
 echo "  resumable state    : $STATE_DIR"
-echo "  legacy preservation: FullAnswer and V1-V4.2 untouched"
+echo "  legacy preservation: FullAnswer and V1-V5 untouched"
 echo "============================================================"
 
 echo "[0/3] Offline 200-row frozen-anchor preflight"
@@ -90,7 +90,7 @@ if [ ! -s "$DATA_PATH" ]; then
         --stage-retries "$CF_STAGE_RETRIES" \
         --json-mode "$CF_JSON_MODE"
 else
-    echo "Reusing frozen anchor V5 data: $DATA_PATH"
+    echo "Reusing frozen anchor V5.1 data: $DATA_PATH"
 fi
 
 echo "[2/3] Deterministic schema and causal-design audit"
@@ -123,12 +123,27 @@ judge_fields = (
 )
 by_block = defaultdict(list)
 for row in rows:
-    if row.get("design_version") != "tofu-author-anchor-v5":
+    if row.get("design_version") != "tofu-author-anchor-v5.1":
         raise SystemExit(f"Unexpected design in {row.get('source_id')}")
-    if row.get("generation", {}).get("surface_renderer") != "deterministic-anchor-id-v5":
+    if row.get("generation", {}).get("surface_renderer") != "deterministic-anchor-id-v5.1":
         raise SystemExit(f"Non-anchor renderer in {row.get('source_id')}")
     if any(row.get("semantic_judge", {}).get(field) is not True for field in judge_fields):
         raise SystemExit(f"Unapproved semantic row {row.get('source_id')}")
+    required = row.get("fact_change_required")
+    groups = row.get("target_group_ids")
+    policy = row.get("intervention_policy")
+    if not isinstance(required, bool) or not isinstance(groups, list):
+        raise SystemExit(f"Missing V5.1 row policy in {row.get('source_id')}")
+    if required and (not groups or policy != "factual_anchor_change"):
+        raise SystemExit(f"Invalid factual policy in {row.get('source_id')}")
+    if not required and (groups or policy not in {
+        "identity_binding", "identity_binding_with_unavailability_preserved",
+    }):
+        raise SystemExit(f"Invalid exempt policy in {row.get('source_id')}")
+    if not required and set(row.get("semantic_judge", {}).get(
+        "deterministic_overrides", []
+    )) != {"target_fact_changed"}:
+        raise SystemExit(f"Unaudited deterministic override in {row.get('source_id')}")
     by_block[row["block_id"]].append(row)
 if len(rows) != 200 or set(by_block) != set(expected):
     raise SystemExit("Anchor V5 coverage does not equal the frozen 200-row manifest")
@@ -140,18 +155,18 @@ for block_id, block_rows in sorted(by_block.items()):
     counts = Counter(row["placebo_relation"] for row in block_rows)
     if len(counts) != 20 or set(counts.values()) != {1}:
         raise SystemExit(f"Block {block_id} placebo library is not one-to-one")
-if profiles.get("design_version") != "tofu-author-anchor-v5":
-    raise SystemExit("Profile ledger is not anchor V5")
+if profiles.get("design_version") != "tofu-author-anchor-v5.1":
+    raise SystemExit("Profile ledger is not anchor V5.1")
 profile_rows = profiles.get("profiles", [])
 if len(profile_rows) != 10:
     raise SystemExit(f"Profile ledger has {len(profile_rows)} blocks, expected 10")
 for profile in profile_rows:
     if not re.fullmatch(r"[0-9a-f]{64}", profile.get("anchor_catalog_digest", "")):
         raise SystemExit(f"Invalid anchor digest in block {profile.get('block_id')}")
-print("Anchor V5 hard gate OK: rows=200 blocks=10 judges=all-pass anchors=frozen")
+print("Anchor V5.1 hard gate OK: rows=200 blocks=10 judges=all-pass anchors=typed")
 PY
 
-echo "[3/3] V5 generation and audit complete"
+echo "[3/3] V5.1 generation and audit complete"
 echo "Human review: $AUDIT_DIR/HUMAN_AUDIT_RANDOM.md"
 echo "Risk review : $AUDIT_DIR/HUMAN_AUDIT_RISK.md"
 
@@ -177,5 +192,5 @@ exec env \
     SWEEP_NAME="$SWEEP_NAME" TRAIN_CONFIGS="$TRAIN_CONFIGS" \
     WEIGHT_A1="${WEIGHT_A1:--1.8}" WEIGHT_A2="${WEIGHT_A2:-1.8}" \
     TOP_FILTER="${TOP_FILTER:-0.0004}" EVAL_BS="${EVAL_BS:-4}" \
-    F2R_VARIANT="F2D-AuthorAnchor200-v5" \
+    F2R_VARIANT="F2D-AuthorAnchor200-v5.1" \
     bash "$EASE_ROOT/scripts/sweep_f2d_did_training.sh"

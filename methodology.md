@@ -900,24 +900,35 @@ contract、禁止全文重写、禁止 name-only factual edit、scaffold invaria
 20 unique placebos/block、所有语义 verdict 为真，并完成人工 random/risk audit，之后才允许
 设置 `AUDIT_APPROVED=true` 训练。生成 JSONL 一旦冻结，不得依据 retain-side Agg 返回修改。
 
-## 23. TOFU author-anchor v5：冻结锚点 ID 的统一 causal IR
+## 23. TOFU author-anchor V5.1：类型化锚点 ID 的统一 causal IR
 
 V4.2 仍让生成模型返回原文 `old -> new` span，因此同一个事实的长短嵌套表达可能造成
-overlap，模型也可能复制一个并不存在的 old span。V5 将 source localisation 完全移出
+overlap，模型也可能复制一个并不存在的 old span。V5.1 将 source localisation 完全移出
 生成模型：代码从 immutable C11 确定性建立 non-overlapping occurrence anchors，并为完全
 相同的 lexical fact 建立 block-wide group ID。每个 catalog 绑定 SHA-256 digest。
 
-生成模型的动作空间仅包含：替代作者、固定代词类别、每行 relation label，以及
-`group_id -> replacement_value`。它既不能提交 old span，也不能生成 C01 全文。代码按冻结
+生成模型的动作空间仅包含：替代作者、固定代词类别、每行 relation label、显式
+`target_group_ids`，以及 `group_id -> replacement_value`。它既不能提交 old span，也不能
+生成 C01 全文。代码按冻结
 offset 渲染每个 occurrence，再执行作者全名、首名、姓氏和所有格替换。year、number、date
 保持类型与信息粒度；完整 textual、`MM/DD/YYYY` 或 ISO date 由代码解析、验证后按 C11
 标点模板渲染，因而不会把等价日期格式误判为因果错误。response mode、answer format、
 fact-count proxy、长度与 target leakage 继续经过 hard gate。未知 ID、重复 ID、过期
-catalog 和重叠 anchor 在 API 边界直接不可表达。
+catalog 和重叠 anchor 在 API 边界直接不可表达。no-op assignment 被规范化为空操作，但每个
+非 identity、非 unavailable 行仍必须由 `target_group_ids` 指向至少一个真实变化。token
+replacement 必须保持词数、数量词一致、大小写、屈折后缀与连字符类别；成对引号解析器只
+抽取真正位于同一对引号内的书名，不再把两个书名之间的连接文本当作事实锚点。
 
-V5 沿用同一个 2x2 estimand：C11/C01 训练 A1，C10/C00 训练 A2，推理组合 dual-assistant
+每行额外冻结 `fact_change_required` 与 `intervention_policy`。普通 factual row 采用
+`factual_anchor_change`；identity row 采用 `identity_binding`；unavailable row 采用
+`identity_binding_with_unavailability_preserved`。后两类不伪造不存在的 factual object，
+其 `target_fact_changed` 由确定性 policy 判定；原始 judge 输出与 override 字段同时写入
+artifact，避免隐藏修正。`profile_consistent` 不允许 override；judge 仍独立审核 relation
+match、真实 factual row 的 fact change、跨行 profile consistency 与 natural surface。
+
+V5.1 沿用同一个 2x2 estimand：C11/C01 训练 A1，C10/C00 训练 A2，推理组合 dual-assistant
 residual。改变的只是 causal intervention 的定位接口，而非训练或评估协议。TOFU 使用 lexical
 occurrence anchors；后续 MUSE 可使用 document/claim/evidence occurrence anchors，但共享相同
 的 group assignment、deterministic renderer、catalog digest 和四格输出，因此无需为长文本
-重新定义方法。V5 使用独立 JSONL、state、audit、checkpoint 和 report 路径，FullAnswer 与
-V1--V4.2 全部保留作为构造消融。
+重新定义方法。V5.1 使用独立 JSONL、state、audit、checkpoint 和 report 路径，FullAnswer 与
+V1--V5 全部保留作为构造消融。

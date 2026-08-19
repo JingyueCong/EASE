@@ -20,7 +20,6 @@ V2_PATH = SCRIPT_DIR / "generate_tofu_author_factorial.py"
 V4_GENERATOR_PATH = SCRIPT_DIR / "generate_tofu_author_typed_v4.py"
 ANCHOR_PATH = ROOT / "ULD/uld/data/tofu_anchor_v5.py"
 CIRU_PATH = ROOT / "ULD/uld/data/ciru.py"
-DESIGN_VERSION = "tofu-author-anchor-v5"
 
 
 def load_module(name: str, path: Path):
@@ -36,6 +35,7 @@ v2 = load_module("tofu_anchor_v5_v2_shared", V2_PATH)
 v4 = load_module("tofu_anchor_v5_v4_shared", V4_GENERATOR_PATH)
 anchors = load_module("tofu_anchor_v5_contract", ANCHOR_PATH)
 ciru = load_module("tofu_anchor_v5_ciru", CIRU_PATH)
+DESIGN_VERSION = anchors.DESIGN_VERSION
 
 
 PLAN_PROMPT = """You plan one coherent counterfactual author profile for a
@@ -46,14 +46,17 @@ You may NOT quote, locate, or rewrite source text. You may only:
 2. assign a replacement_value to a supplied group_id;
 3. label each row's target_relation.
 
-Every chosen group is replaced by code at all of its frozen occurrences. Pick
-enough factual groups that every non-identity, non-unavailable row changes its
-target fact. Reuse the same replacement profile across all rows. Preserve the
+Every chosen group is replaced by code at all of its frozen occurrences. For
+each row, target_group_ids must identify the supplied groups that carry that
+row's target fact. Every non-identity, non-unavailable row needs at least one
+changed target group. Identity and unavailable rows use an empty list. Reuse
+the same replacement profile across all rows. Preserve the
 semantic type of each group: year->year, number->number, date->date, title->
 title, place->place, award->award, genre->genre. Never use a protected author,
 negation, uncertainty markers, sentence punctuation, quotations, or prose in a
-replacement value. Do not choose generic scaffold words merely to force a
-change.
+replacement value. A token must remain one token; plural quantifiers such as
+"several" must remain plural quantifiers. Do not return unchanged assignments
+or choose generic scaffold words merely to force a change.
 
 If validation_feedback and previous_candidate are present, return the complete
 object with the reported defects repaired.
@@ -68,9 +71,34 @@ Return JSON only:
     {"group_id": "exact supplied id", "replacement_value": "typed value"}
   ],
   "row_plans": [
-    {"source_id": "exact id", "target_relation": "canonical relation"}
+    {"source_id": "exact id", "target_relation": "canonical relation",
+     "target_group_ids": ["exact supplied factual group id"]}
   ]
 }
+"""
+
+
+JUDGE_PROMPT = """You are a conservative semantic auditor for a TOFU causal
+factorial dataset. Frozen anchors, identity binding, response contracts, type
+checks, factual coverage, and profile-wide lexical mappings have already been
+validated by code. Do not rewrite anything and do not reject a row merely
+because the non-authoritative profile summary omits a detail.
+
+For each row:
+- target_relation_match: C11 and C01 ask the same relation;
+- target_fact_changed: when fact_change_required=true, the declared target
+  groups change that relation's factual object; when false, return true if the
+  stated identity/unavailable policy is respected;
+- profile_consistent: judge consistency among rendered C01 rows, not against
+  the short profile summary; identity/unavailable rows are consistent when the
+  replacement identity is bound and uncertainty is preserved;
+- natural_surface: the deterministic substitutions leave fluent, grammatical
+  QA. Do not reject harmless punctuation or equivalent date formatting.
+
+Return JSON only:
+{"verdicts": [{"source_id":"exact id", "target_relation_match":true,
+"target_fact_changed":true, "profile_consistent":true,
+"natural_surface":true, "reason":"brief evidence"}]}
 """
 
 
@@ -160,15 +188,61 @@ def validate_plan(
         if not isinstance(relation, str) or not relation.strip():
             errors.append(f"{source_id} missing target_relation")
             continue
+        declared_groups = raw_rows[source_id].get("target_group_ids", [])
+        if not isinstance(declared_groups, list) or any(
+            not isinstance(group_id, str) for group_id in declared_groups
+        ):
+            errors.append(f"{source_id} target_group_ids must be a string list")
+            continue
+        if len(set(declared_groups)) != len(declared_groups):
+            errors.append(f"{source_id} target_group_ids contain duplicates")
+            continue
+        available_groups = {
+            occurrence["group_id"]
+            for occurrence in block["anchor_catalog"]["occurrences"]
+            if occurrence["source_id"] == source_id
+        }
+        unknown_groups = set(declared_groups) - available_groups
+        if unknown_groups:
+            errors.append(
+                f"{source_id} target_group_ids are not present in the row: "
+                f"{sorted(unknown_groups)}"
+            )
+            continue
         try:
             rendered = anchors.render_row(
                 source_by_id[source_id], target, replacement, relation.strip(),
                 block["anchor_catalog"], replacement_map, v4.contracts,
             )
             applied = rendered["question_edits"] + rendered["answer_edits"]
+            applied_groups = list(dict.fromkeys(item["group_id"] for item in applied))
+            required = anchors.fact_change_required(
+                source_by_id[source_id], target, relation.strip()
+            )
+            if required and not declared_groups:
+                raise ValueError(
+                    "factual rows must declare at least one target_group_id"
+                )
+            target_groups = declared_groups
+            changed_target_groups = [
+                group_id for group_id in target_groups if group_id in applied_groups
+            ]
+            if required and not changed_target_groups:
+                raise ValueError(
+                    "target_group_ids do not select a changed factual anchor"
+                )
+            if not required and declared_groups:
+                raise ValueError(
+                    "identity/unavailable rows must use empty target_group_ids"
+                )
+            if not required:
+                changed_target_groups = []
+            target_edits = [
+                item for item in applied if item["group_id"] in changed_target_groups
+            ]
             replacement_fact = (
-                max((item["new"] for item in applied), key=len)
-                if applied else replacement
+                max((item["new"] for item in target_edits), key=len)
+                if target_edits else replacement
             )
             placebo = v4.contracts.render_professional_placebo(
                 source_by_id[source_id]["contract"], target, replacement, query_index,
@@ -183,7 +257,15 @@ def validate_plan(
             row_plans[source_id] = {
                 "source_id": source_id,
                 "target_relation": relation.strip(),
+                "target_group_ids": changed_target_groups,
                 "replacement_fact": replacement_fact,
+                "fact_change_required": required,
+                "intervention_policy": (
+                    "factual_anchor_change" if required
+                    else "identity_binding_with_unavailability_preserved"
+                    if source_by_id[source_id]["contract"]["response_mode"] == "unavailable"
+                    else "identity_binding"
+                ),
                 "question_edits": rendered["question_edits"],
                 "answer_edits": rendered["answer_edits"],
             }
@@ -215,7 +297,7 @@ def validate_plan(
 def assemble_block(block: Mapping, plan: Mapping, verdicts: Mapping, args) -> Dict:
     assembled = v4.assemble_block(block, plan, verdicts, args)
     profile_id = (
-        f"{args.split}:author-anchor-v5-block-{int(block['block_id']):02d}:"
+        f"{args.split}:author-anchor-v5.1-block-{int(block['block_id']):02d}:"
         f"seed-{args.seed}"
     )
     assembled.update({
@@ -225,10 +307,14 @@ def assemble_block(block: Mapping, plan: Mapping, verdicts: Mapping, args) -> Di
         "anchor_replacements": plan["anchor_replacements"],
     })
     for record in assembled["records"]:
+        row_plan = plan["row_plans"][record["source_id"]]
         record["design_version"] = DESIGN_VERSION
         record["profile_id"] = profile_id
+        record["target_group_ids"] = row_plan["target_group_ids"]
+        record["fact_change_required"] = row_plan["fact_change_required"]
+        record["intervention_policy"] = row_plan["intervention_policy"]
         record["generation"]["design"] = DESIGN_VERSION
-        record["generation"]["surface_renderer"] = "deterministic-anchor-id-v5"
+        record["generation"]["surface_renderer"] = "deterministic-anchor-id-v5.1"
         failures = ciru.validate_ciru_unit(record)
         if failures:
             raise ValueError(f"{record['source_id']}: " + "; ".join(failures))
@@ -272,6 +358,47 @@ def request_args(args, *, judge: bool = False):
     return result
 
 
+def judge_payload(block: Mapping, plan: Mapping) -> Dict:
+    payload = v4.judge_payload(block, plan)
+    payload["author_profile"]["profile_summary_role"] = "non-authoritative overview"
+    for row in payload["rows"]:
+        row_plan = plan["row_plans"][row["source_id"]]
+        row.update({
+            "target_group_ids": row_plan["target_group_ids"],
+            "fact_change_required": row_plan["fact_change_required"],
+            "intervention_policy": row_plan["intervention_policy"],
+        })
+    return payload
+
+
+def validate_judgement(
+    generated: Mapping, block: Mapping, plan: Mapping
+) -> Dict[str, Dict]:
+    source_ids = [source["source_id"] for source in block["sources"]]
+    verdicts = v4.exact_rows(generated.get("verdicts"), source_ids, "verdicts")
+    failures = []
+    for source_id, raw_verdict in verdicts.items():
+        verdict = dict(raw_verdict)
+        overrides = []
+        if not plan["row_plans"][source_id]["fact_change_required"]:
+            field = "target_fact_changed"
+            verdict[f"raw_{field}"] = verdict.get(field)
+            verdict[field] = True
+            overrides.append(field)
+        if overrides:
+            verdict["deterministic_overrides"] = overrides
+        for field in v4.JUDGE_FIELDS:
+            if verdict.get(field) is not True:
+                reason = str(verdict.get("reason", "")).strip()
+                failures.append(f"{source_id}:{field}({reason})")
+        if not isinstance(verdict.get("reason"), str) or not verdict["reason"].strip():
+            failures.append(f"{source_id}:reason")
+        verdicts[source_id] = verdict
+    if failures:
+        raise ValueError("semantic judge rejected " + ", ".join(failures[:20]))
+    return verdicts
+
+
 def generate_block(generation_client, judge_client, args, block, protected, state_dir):
     print(f"start_block block={block['block_id']} author={block['target_entity']}", flush=True)
     feedback, previous, last_error = "", None, None
@@ -285,16 +412,15 @@ def generate_block(generation_client, judge_client, args, block, protected, stat
             candidate = v2.request_json(
                 generation_client, request_args(args), PLAN_PROMPT,
                 plan_payload(block, protected, feedback, previous),
-                f"V5 block {block['block_id']} anchor plan",
+                f"V5.1 block {block['block_id']} anchor plan",
             )
             plan = validate_plan(block, candidate, protected, args.seed)
             judgement = v2.request_json(
-                judge_client, request_args(args, judge=True), v4.JUDGE_PROMPT,
-                v4.judge_payload(block, plan),
-                f"V5 block {block['block_id']} semantic audit",
+                judge_client, request_args(args, judge=True), JUDGE_PROMPT,
+                judge_payload(block, plan),
+                f"V5.1 block {block['block_id']} semantic audit",
             )
-            ids = [source["source_id"] for source in block["sources"]]
-            verdicts = v4.validate_judgement(judgement, ids)
+            verdicts = validate_judgement(judgement, block, plan)
             result = assemble_block(block, plan, verdicts, args)
             print(f"stage_ready block={block['block_id']} stage=anchor_plan_judge", flush=True)
             return result
