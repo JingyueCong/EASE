@@ -184,11 +184,48 @@ class AuthorFactorialTest(unittest.TestCase):
             {"Mariselle Voss"},
         )
 
-    def test_invalid_profile_fact_reference_is_rejected(self):
+    def test_missing_profile_fact_is_reconstructed_with_audit_trace(self):
         target = target_fixture()
         target["target_cells"][0]["supporting_fact_ids"] = ["MISSING"]
-        with self.assertRaisesRegex(ValueError, "supporting_fact_ids"):
-            generator.validate_target_generation(block_fixture(), target)
+        validated = generator.validate_target_generation(block_fixture(), target)
+        profile = validated["twin_profile"]
+        self.assertIn("MISSING", {fact["fact_id"] for fact in profile["facts"]})
+        self.assertEqual(
+            profile["generation_repairs"]["created_missing_fact_ids"],
+            ["MISSING"],
+        )
+
+    def test_exact_target_name_leak_is_reassigned_to_frozen_twin(self):
+        target = target_fixture()
+        target["target_cells"][0]["C01"]["answer"] = (
+            "Hina Ameen was born in Bellhaven, Norland."
+        )
+        validated = generator.validate_target_generation(block_fixture(), target)
+        answer = validated["target_cells"]["forget05_perturbed-00000"]["C01"]["answer"]
+        self.assertNotIn("Hina Ameen", answer)
+        self.assertIn("Mariselle Voss", answer)
+        self.assertTrue(
+            validated["twin_profile"]["generation_repairs"]
+            ["replaced_exact_target_entity_in_c01"]
+        )
+
+    def test_conflicting_fact_reference_is_split_per_distinct_claim(self):
+        target = target_fixture()
+        target["twin_profile"]["facts"] = [
+            {"fact_id": "F07", "relation": "", "value": ""}
+        ]
+        for item in target["target_cells"]:
+            item["supporting_fact_ids"] = ["F07"]
+        validated = generator.validate_target_generation(block_fixture(), target)
+        cells = validated["target_cells"]
+        first = cells["forget05_perturbed-00000"]["supporting_fact_ids"][0]
+        second = cells["forget05_perturbed-00001"]["supporting_fact_ids"][0]
+        self.assertNotEqual(first, second)
+        self.assertEqual(
+            set(validated["twin_profile"]["generation_repairs"]
+                ["split_conflicting_fact_ids"]["F07"]),
+            {first, second},
+        )
 
     def test_unambiguous_empty_profile_value_is_recovered_from_c01(self):
         target = target_fixture()

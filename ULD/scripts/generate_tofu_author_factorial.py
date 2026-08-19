@@ -14,6 +14,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -238,6 +239,11 @@ def nonempty_qa(value: object, label: str) -> Dict[str, str]:
     return {"question": value["question"].strip(), "answer": value["answer"].strip()}
 
 
+def replace_exact_entity(text: str, target: str, replacement: str) -> tuple[str, int]:
+    """Replace only the frozen canonical author name, case-insensitively."""
+    return re.subn(re.escape(target), replacement, text, flags=re.IGNORECASE)
+
+
 def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
     target = block["target_entity"]
     if normalise(generated.get("target_entity", "")) != normalise(target):
@@ -267,6 +273,7 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
 
     source_ids = [row["source_id"] for row in block["sources"]]
     cells = indexed_items(generated.get("target_cells"), "target_cells", source_ids)
+    entity_repairs = []
     for source in block["sources"]:
         item = cells[source["source_id"]]
         c01 = nonempty_qa(item.get("C01"), f"{source['source_id']}.C01")
@@ -274,7 +281,7 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
         if (
             not isinstance(supporting, list)
             or not supporting
-            or any(fact_id not in facts for fact_id in supporting)
+            or any(not isinstance(fact_id, str) or not fact_id.strip() for fact_id in supporting)
         ):
             raise ValueError(f"{source['source_id']} has invalid supporting_fact_ids")
         if not isinstance(item.get("target_relation"), str) or not item["target_relation"].strip():
@@ -285,16 +292,102 @@ def validate_target_generation(block: Mapping, generated: Mapping) -> Dict:
             for key in ("task", "style", "difficulty", "answer_format")
         ):
             raise ValueError(f"{source['source_id']} has invalid invariants")
+        for field in ("question", "answer"):
+            repaired, count = replace_exact_entity(c01[field], target, replacement)
+            if count:
+                item["C01"][field] = repaired
+                c01[field] = repaired
+                entity_repairs.append(
+                    {"source_id": source["source_id"], "field": f"C01.{field}", "count": count}
+                )
         joined = normalise(f"{c01['question']} {c01['answer']}")
         if normalise(target) in joined:
             raise ValueError(f"{source['source_id']}.C01 leaks target author")
         if len(normalise(source["answer"])) >= 8 and normalise(source["answer"]) in joined:
             raise ValueError(f"{source['source_id']}.C01 copies source answer")
+        substituted_source_answer, _ = replace_exact_entity(
+            source["answer"], target, replacement
+        )
+        if (
+            len(normalise(substituted_source_answer)) >= 8
+            and normalise(substituted_source_answer) in joined
+        ):
+            raise ValueError(
+                f"{source['source_id']}.C01 copies source answer after entity substitution"
+            )
         # Preserve explicit-vs-implicit reference style.  If the canonical name
         # is explicit in one source field, its twin must be explicit there too.
         if normalise(target) in normalise(source["question"]):
             if normalise(replacement) not in normalise(c01["question"]):
                 raise ValueError(f"{source['source_id']}.C01 loses explicit question identity")
+
+    if entity_repairs:
+        profile.setdefault("generation_repairs", {})[
+            "replaced_exact_target_entity_in_c01"
+        ] = entity_repairs
+
+    references_by_fact: Dict[str, List[Dict]] = {}
+    for item in cells.values():
+        for fact_id in item["supporting_fact_ids"]:
+            references_by_fact.setdefault(fact_id, []).append(item)
+
+    created_fact_ids = []
+    split_fact_ids: Dict[str, List[str]] = {}
+    for fact_id, references in list(references_by_fact.items()):
+        groups: Dict[tuple[str, str], List[Dict]] = {}
+        for item in references:
+            key = (
+                normalise(item["target_relation"]),
+                normalise(item["C01"]["answer"]),
+            )
+            groups.setdefault(key, []).append(item)
+        if len(groups) > 1:
+            new_ids = []
+            for grouped_items in groups.values():
+                suffix = min(
+                    item["source_id"].rsplit("-", 1)[-1]
+                    for item in grouped_items
+                )
+                new_id = f"{fact_id}__{suffix}"
+                counter = 2
+                while new_id in facts:
+                    new_id = f"{fact_id}__{suffix}_{counter}"
+                    counter += 1
+                relation = grouped_items[0]["target_relation"].strip()
+                value = grouped_items[0]["C01"]["answer"].strip()
+                facts[new_id] = {
+                    "fact_id": new_id,
+                    "relation": relation,
+                    "value": value,
+                }
+                profile["facts"].append(facts[new_id])
+                for item in grouped_items:
+                    item["supporting_fact_ids"] = [
+                        new_id if current == fact_id else current
+                        for current in item["supporting_fact_ids"]
+                    ]
+                new_ids.append(new_id)
+            split_fact_ids[fact_id] = new_ids
+            facts.pop(fact_id, None)
+            profile["facts"] = [
+                fact for fact in profile["facts"] if fact["fact_id"] != fact_id
+            ]
+        elif fact_id not in facts:
+            item = references[0]
+            facts[fact_id] = {
+                "fact_id": fact_id,
+                "relation": item["target_relation"].strip(),
+                "value": item["C01"]["answer"].strip(),
+            }
+            profile["facts"].append(facts[fact_id])
+            created_fact_ids.append(fact_id)
+
+    if created_fact_ids or split_fact_ids:
+        repairs = profile.setdefault("generation_repairs", {})
+        if created_fact_ids:
+            repairs["created_missing_fact_ids"] = sorted(created_fact_ids)
+        if split_fact_ids:
+            repairs["split_conflicting_fact_ids"] = split_fact_ids
 
     referenced_fact_ids = {
         fact_id
