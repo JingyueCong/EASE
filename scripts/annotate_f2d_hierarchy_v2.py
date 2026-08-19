@@ -46,9 +46,14 @@ Rules:
    cell's answer. Prefer one complete clause. When an atomic fact is embedded inside a
    long sentence, use 2-4 non-contiguous spans (for example subject, predicate, and
    object/qualifier) instead of selecting the whole sentence.
+   Never reproduce the complete answer by splitting it into several claim_texts. The
+   union of the spans must remain selective. If the whole answer is one long direct
+   proposition, return only the subject phrase and the factual object/value phrase;
+   the question already supplies the relation.
 3. Exclude background, consequences, motivation, style, and later biography unless
    the question explicitly asks for them.
-4. evidence_texts must be exact contiguous substrings inside claim_text. They should
+4. evidence_texts must be exact contiguous substrings inside one of the claim_texts.
+   They should
    contain only the factual object/value and indispensable qualifiers. Do not include
    the subject name, relation words, punctuation-only fragments, or prose scaffolding,
    except when the requested object is itself the person's name.
@@ -149,6 +154,44 @@ def coverage(text: str, spans: Iterable[Sequence[int]]) -> float:
     return len(positions & nonspace) / max(len(nonspace), 1)
 
 
+def unique_exact_span(text: str, substring: str) -> List[int] | None:
+    """Return an unambiguous exact span, otherwise leave semantic evidence alone."""
+    if not substring:
+        return None
+    starts = [match.start() for match in re.finditer(re.escape(substring), text)]
+    if len(starts) != 1:
+        return None
+    return [starts[0], starts[0] + len(substring)]
+
+
+def compact_overbroad_claim_spans(
+    answer: str,
+    subject: str,
+    claim_spans: Sequence[Sequence[int]],
+    evidence_spans: Sequence[Sequence[int]],
+) -> Tuple[List[List[int]], bool]:
+    """Deterministically shrink a near-full claim to semantic anchors.
+
+    The language model decides which object/value tokens are evidence.  When it
+    nevertheless copies nearly the complete answer as one or several claim
+    fragments, keeping those fragments would recreate the v1 lexical failure.
+    The question already contains the entity and relation, so subject plus the
+    validated evidence is a sufficient token-local training target.  This rule
+    is independent of TOFU sentence boundaries and therefore also applies to
+    long-form MUSE passages.
+    """
+    merged = merge_overlapping_spans(claim_spans)
+    is_long = sentence_count(answer) > 1 or len(WORD_RE.findall(answer)) >= 24
+    if not is_long or coverage(answer, merged) < 0.90:
+        return merged, False
+
+    compact = [list(span) for span in evidence_spans]
+    subject_span = unique_exact_span(answer, subject)
+    if subject_span is not None:
+        compact.append(subject_span)
+    return merge_overlapping_spans(compact), True
+
+
 def sentence_count(text: str) -> int:
     if not text.strip():
         return 0
@@ -185,6 +228,8 @@ def validate_and_convert_cell(
     facts = []
     all_claim_spans: List[List[int]] = []
     all_evidence_spans: List[List[int]] = []
+    compacted_claim_count = 0
+    compacted_evidence_count = 0
     expected_relation = (
         record["target_relation"] if cell_name in ("C11", "C01")
         else record["placebo_relation"]
@@ -215,26 +260,6 @@ def validate_and_convert_cell(
             for claim_index, claim_text in enumerate(claim_texts)
         ]
         claim_spans_for_fact = merge_overlapping_spans(claim_spans_for_fact)
-        evidence_texts = raw_fact.get("evidence_texts")
-        if not isinstance(evidence_texts, list) or not evidence_texts:
-            raise AnnotationError(f"{prefix}.evidence_texts must be non-empty")
-        evidence_spans = []
-        for evidence_index, evidence_text in enumerate(evidence_texts):
-            evidence_start, evidence_end = exact_substring_span(
-                answer,
-                evidence_text,
-                f"{prefix}.evidence_texts[{evidence_index}]",
-            )
-            if not content_tokens(evidence_text):
-                raise AnnotationError(f"{prefix} contains punctuation-only evidence")
-            if not any(
-                claim_start <= evidence_start and evidence_end <= claim_end
-                for claim_start, claim_end in claim_spans_for_fact
-            ):
-                raise AnnotationError(
-                    f"{prefix}.evidence_texts[{evidence_index}] lies outside claim_texts"
-                )
-            evidence_spans.append([evidence_start, evidence_end])
 
         subject = str(raw_fact.get("subject", "")).strip()
         relation = str(raw_fact.get("relation", "")).strip()
@@ -259,6 +284,56 @@ def validate_and_convert_cell(
         ):
             raise AnnotationError(f"{prefix}.qualifiers must be a string list")
 
+        evidence_texts = raw_fact.get("evidence_texts")
+        if not isinstance(evidence_texts, list) or not evidence_texts:
+            raise AnnotationError(f"{prefix}.evidence_texts must be non-empty")
+        evidence_spans = []
+        for evidence_index, evidence_text in enumerate(evidence_texts):
+            evidence_start, evidence_end = exact_substring_span(
+                answer,
+                evidence_text,
+                f"{prefix}.evidence_texts[{evidence_index}]",
+            )
+            if not content_tokens(evidence_text):
+                raise AnnotationError(f"{prefix} contains punctuation-only evidence")
+            if not any(
+                claim_start <= evidence_start and evidence_end <= claim_end
+                for claim_start, claim_end in claim_spans_for_fact
+            ):
+                raise AnnotationError(
+                    f"{prefix}.evidence_texts[{evidence_index}] lies outside claim_texts"
+                )
+            evidence_spans.append([evidence_start, evidence_end])
+
+        evidence_spans = merge_overlapping_spans(evidence_spans)
+        evidence_compacted = False
+        if (
+            len(WORD_RE.findall(answer)) >= 12
+            and coverage(answer, evidence_spans) >= 0.60
+        ):
+            # Prefer the model's canonical object when it is itself an exact,
+            # unambiguous answer substring.  This removes relation/scaffolding
+            # tokens without guessing at linguistic boundaries.
+            object_span = unique_exact_span(answer, object_value)
+            if object_span is not None and any(
+                evidence_start <= object_span[0]
+                and object_span[1] <= evidence_end
+                for evidence_start, evidence_end in evidence_spans
+            ):
+                evidence_spans = [object_span]
+                evidence_texts = [answer[object_span[0]:object_span[1]]]
+                evidence_compacted = True
+                compacted_evidence_count += 1
+
+        claim_spans_for_fact, claim_compacted = compact_overbroad_claim_spans(
+            answer,
+            subject,
+            claim_spans_for_fact,
+            evidence_spans,
+        )
+        if claim_compacted:
+            compacted_claim_count += 1
+
         joined_evidence = " ".join(evidence_texts)
         if not identity_evidence and normalise(subject) in normalise(joined_evidence):
             raise AnnotationError(f"{prefix} evidence includes the subject name")
@@ -269,13 +344,17 @@ def validate_and_convert_cell(
 
         fact = {
             "claim_spans": claim_spans_for_fact,
-            "evidence_spans": merge_overlapping_spans(evidence_spans),
-            "claim_texts": claim_texts,
+            "evidence_spans": evidence_spans,
+            "claim_texts": [
+                answer[start:end] for start, end in claim_spans_for_fact
+            ],
             "evidence_texts": evidence_texts,
             "subject": subject,
             "relation": relation,
             "object": object_value,
             "qualifiers": qualifiers,
+            "auto_compacted_claim": claim_compacted,
+            "auto_compacted_evidence": evidence_compacted,
         }
         facts.append(fact)
         all_claim_spans.extend(fact["claim_spans"])
@@ -285,11 +364,19 @@ def validate_and_convert_cell(
     evidence_spans = merge_overlapping_spans(all_evidence_spans)
     claim_coverage = coverage(answer, claim_spans)
     evidence_coverage = coverage(answer, evidence_spans)
-    if sentence_count(answer) > 1 and claim_coverage >= 0.90:
+    if (
+        sentence_count(answer) > 1
+        and claim_coverage >= 0.90
+        and compacted_claim_count == 0
+    ):
         raise AnnotationError(
             f"{cell_name} claim covers {claim_coverage:.1%} of a multi-sentence answer"
         )
-    if len(WORD_RE.findall(answer)) >= 24 and claim_coverage >= 0.90:
+    if (
+        len(WORD_RE.findall(answer)) >= 24
+        and claim_coverage >= 0.90
+        and compacted_claim_count == 0
+    ):
         raise AnnotationError(
             f"{cell_name} claim covers {claim_coverage:.1%} of a long answer"
         )
@@ -309,6 +396,8 @@ def validate_and_convert_cell(
             "claim_coverage": claim_coverage,
             "evidence_coverage": evidence_coverage,
             "answer_sentences": sentence_count(answer),
+            "auto_compacted_claims": compacted_claim_count,
+            "auto_compacted_evidence": compacted_evidence_count,
         },
     }
 

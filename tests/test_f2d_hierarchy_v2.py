@@ -146,7 +146,7 @@ class F2DHierarchyV2Test(unittest.TestCase):
         with self.assertRaisesRegex(hierarchy.AnnotationError, "answerability mismatch"):
             hierarchy.apply_semantic_annotation(base_record(), payload)
 
-    def test_full_long_single_sentence_claim_is_rejected(self):
+    def test_full_long_single_sentence_claim_is_compacted(self):
         record = base_record()
         answer = (
             "Ava North received the Silver Quill and later described its history, "
@@ -158,8 +158,31 @@ class F2DHierarchyV2Test(unittest.TestCase):
         payload["cells"]["C11"] = cell_annotation(
             answer, "Silver Quill", "Ava North", "award received", "Silver Quill"
         )
-        with self.assertRaisesRegex(hierarchy.AnnotationError, "long answer"):
-            hierarchy.apply_semantic_annotation(record, payload)
+        annotated = hierarchy.apply_semantic_annotation(record, payload)
+        supervision = annotated["cells"]["C11"]["supervision"]
+        spans = supervision["claim_spans"]
+        selected = " || ".join(answer[start:end] for start, end in spans)
+        self.assertEqual(selected, "Ava North || Silver Quill")
+        self.assertEqual(supervision["quality"]["auto_compacted_claims"], 1)
+        self.assertLess(supervision["quality"]["claim_coverage"], 0.25)
+
+    def test_split_whole_multisentence_answer_is_compacted(self):
+        record = base_record()
+        answer = record["cells"]["C11"]["answer"]
+        payload = valid_payload()
+        fact = payload["cells"]["C11"]["claims"][0]
+        fact.pop("claim_text")
+        fact["claim_texts"] = [
+            "Ava North received the Silver Quill.",
+            "She later taught in Rome.",
+        ]
+        annotated = hierarchy.apply_semantic_annotation(record, payload)
+        supervision = annotated["cells"]["C11"]["supervision"]
+        selected = " || ".join(
+            answer[start:end] for start, end in supervision["claim_spans"]
+        )
+        self.assertEqual(selected, "Ava North || Silver Quill")
+        self.assertEqual(supervision["quality"]["auto_compacted_claims"], 1)
 
     def test_sparse_claim_spans_extract_fact_from_long_single_sentence(self):
         record = base_record()

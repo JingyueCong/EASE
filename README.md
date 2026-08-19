@@ -395,9 +395,11 @@ GPUS="0 1 2 3" bash scripts/run_uf2d_tofu_ladder.sh
 
 The runner first creates `paired-hierarchy-v2` supervision with the configured
 OpenAI-compatible semantic annotator. The annotator must copy exact claim and
-evidence substrings from each frozen answer; local checks reject subject-name
-evidence, full multi-sentence claims, broad evidence, polarity/answerability
-mismatches, and unequal fact schemas. It then runs `FullAnswer`, `ClaimMask`,
+evidence substrings from each frozen answer. If a model reconstructs nearly the
+whole answer from several claim fragments, the local converter deterministically
+contracts it to the declared subject plus validated object/evidence spans. Local
+checks still reject unresolved broad evidence, subject-name evidence, polarity/
+answerability mismatches, and unequal fact schemas. It then runs `FullAnswer`, `ClaimMask`,
 `ClaimMask+KL`, and `Claim+Span+KL` in parallel. All four stages use the same
 semantically valid subset, seed 42, 72/72 optimizer steps, dual-assistant
 architecture, and inference point `(-1.8, 1.8, 0.0004)`. Annotation and

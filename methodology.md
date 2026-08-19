@@ -734,14 +734,18 @@ A1/A2 checkpoint、(w_1,w_2) 与 top-filter，顺序评估
 TOFU 短问答是该表示的退化情形。`paired-hierarchy-v2` 不再把两个独立表述之间的
 词面差异直接视为事实差异，而是先将每个 cell 解析为结构化
 `subject-relation-object-qualifier-polarity` 原子事实。语义标注器只能从冻结答案中复制
-精确连续子串作为 claim/evidence，随后本地验证器将子串转换为字符 span，并拒绝：多句
-答案的全文 claim、包含 subject 的非身份 evidence、过宽 evidence、极性或可回答性不匹配、
-以及 matched pair 中事实数量/关系 schema 不一致的单元。被拒绝的 source id 与原因写入
+精确连续子串作为 claim/evidence，随后本地验证器将子串转换为字符 span。若标注器用多个
+片段重新拼出接近全文的 claim，验证器会确定性地收缩为 declared subject 与已经验证的
+object/evidence span；若 canonical object 是答案中的唯一精确子串，也会用它去除过宽
+evidence 中的关系词与修辞骨架。随后仍拒绝无法收缩的过宽 evidence、包含 subject 的非身份
+evidence、极性或可回答性不匹配，以及 matched pair 中事实数量/关系 schema 不一致的单元。
+被拒绝的 source id 与原因写入
 metadata；四个阶梯阶段必须使用同一个通过验证的子集。该过程不访问真实 retain 数据，
 但会调用外部语义标注模型，因此论文中需单独报告 annotator model、提示词、接受率及人工
 审计通过率。旧的确定性词面对齐保留为 `paired-hierarchy-v1` 复现基线，不再用于主实验。
 若一个原子事实嵌入长描述句而不存在独立连续分句，v2 允许以 2--4 个非连续精确 span
-共同表示其 subject、predicate 与 object；训练 mask 取这些 span 的并集，外围修辞仍由
+共同表示其 subject、predicate 与 object；若这些 span 的并集仍接近全文，则进一步收缩为
+subject 与 object/evidence。训练 mask 取最终 span 的并集，外围修辞仍由
 base-model KL 保持。这一规则同样适用于 MUSE 的长文 segment。
 
 对 claim token，A1 继续学习 `CE(C11)+Uniform(C01)`，A2 学习
