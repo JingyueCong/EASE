@@ -899,3 +899,23 @@ contract、禁止全文重写、禁止 name-only factual edit、scaffold invaria
 替换和 block-wide fact propagation。生成后必须达到 200 rows、10 blocks、
 20 unique placebos/block、所有语义 verdict 为真，并完成人工 random/risk audit，之后才允许
 设置 `AUDIT_APPROVED=true` 训练。生成 JSONL 一旦冻结，不得依据 retain-side Agg 返回修改。
+
+## 23. TOFU author-anchor v5：冻结锚点 ID 的统一 causal IR
+
+V4.2 仍让生成模型返回原文 `old -> new` span，因此同一个事实的长短嵌套表达可能造成
+overlap，模型也可能复制一个并不存在的 old span。V5 将 source localisation 完全移出
+生成模型：代码从 immutable C11 确定性建立 non-overlapping occurrence anchors，并为完全
+相同的 lexical fact 建立 block-wide group ID。每个 catalog 绑定 SHA-256 digest。
+
+生成模型的动作空间仅包含：替代作者、固定代词类别、每行 relation label，以及
+`group_id -> replacement_value`。它既不能提交 old span，也不能生成 C01 全文。代码按冻结
+offset 渲染每个 occurrence，再执行作者全名、首名、姓氏和所有格替换。year、number、date
+保持类型；response mode、answer format、fact-count proxy、长度与 target leakage 继续经过
+hard gate。未知 ID、重复 ID、过期 catalog 和重叠 anchor 在 API 边界直接不可表达。
+
+V5 沿用同一个 2x2 estimand：C11/C01 训练 A1，C10/C00 训练 A2，推理组合 dual-assistant
+residual。改变的只是 causal intervention 的定位接口，而非训练或评估协议。TOFU 使用 lexical
+occurrence anchors；后续 MUSE 可使用 document/claim/evidence occurrence anchors，但共享相同
+的 group assignment、deterministic renderer、catalog digest 和四格输出，因此无需为长文本
+重新定义方法。V5 使用独立 JSONL、state、audit、checkpoint 和 report 路径，FullAnswer 与
+V1--V4.2 全部保留作为构造消融。

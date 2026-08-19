@@ -13,12 +13,14 @@ AUTHOR_CONTRACT_DESIGN = "tofu-author-contract-v3"
 AUTHOR_TYPED_LEGACY_DESIGN = "tofu-author-typed-v4"
 AUTHOR_TYPED_V41_DESIGN = "tofu-author-typed-v4.1"
 AUTHOR_TYPED_DESIGN = "tofu-author-typed-v4.2"
+AUTHOR_ANCHOR_DESIGN = "tofu-author-anchor-v5"
 AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_PROFILE_DESIGN,
     AUTHOR_CONTRACT_DESIGN,
     AUTHOR_TYPED_LEGACY_DESIGN,
     AUTHOR_TYPED_V41_DESIGN,
     AUTHOR_TYPED_DESIGN,
+    AUTHOR_ANCHOR_DESIGN,
 }
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
@@ -84,6 +86,7 @@ def validate_ciru_unit(record: Dict) -> List[str]:
         AUTHOR_TYPED_LEGACY_DESIGN,
         AUTHOR_TYPED_V41_DESIGN,
         AUTHOR_TYPED_DESIGN,
+        AUTHOR_ANCHOR_DESIGN,
     }
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):

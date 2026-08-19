@@ -528,6 +528,42 @@ Completion requires `valid_block=10/10` and the final message
 Training remains locked until both generated audit sheets are reviewed and the
 runner is explicitly invoked with `STOP_AFTER_AUDIT=false AUDIT_APPROVED=true`.
 
+#### Author-anchor v5 (frozen anchor-ID causal IR)
+
+V5 removes the remaining free-form span-selection responsibility from the
+planner. Code partitions every immutable C11 question/answer into stable,
+non-overlapping anchor occurrences; identical lexical facts share a block-wide
+group ID. The model can return only `group_id -> replacement_value` assignments
+and per-row relation labels. It cannot quote an `old` span or write C01 prose.
+The renderer applies values at frozen offsets, performs deterministic author
+identity/alias replacement, and binds every artifact to a SHA-256 digest of the
+anchor catalog. Unknown, duplicate, overlapping, or stale anchors are therefore
+impossible at the API boundary.
+
+Generate and audit the independent V5 dataset:
+
+```bash
+cd /data/wk/kai/unlearn/EASE
+git pull --ff-only origin feat/f2r-retain-free-experiment
+mkdir -p logs
+
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  CF_CONCURRENCY=2 \
+  CF_STAGE_RETRIES=8 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_anchor_v5.sh \
+  > logs/f2d_author_anchor_v5_generate.log 2>&1 &
+
+echo $! | tee logs/f2d_author_anchor_v5_generate.pid
+```
+
+The runner first exercises all 200 real TOFU rows without an API. Completion
+requires `valid_block=10/10` and `Anchor V5 hard gate OK: rows=200 blocks=10
+judges=all-pass anchors=frozen`. FullAnswer and V1--V4.2 data, state, and model
+paths remain untouched.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 
