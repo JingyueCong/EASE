@@ -64,13 +64,14 @@ A long reject line can be a cascade from one root defect. Count unique affected 
 
 Use these rules in order:
 
-1. No `FAIL`, process alive, and later attempts reduce errors: wait.
-2. No `FAIL`, but the same category repeats: allow the configured attempts to finish unless the output is provably impossible.
-3. One exhausted block with otherwise valid reusable blocks: preserve valid checkpoints and rerun only the failed block.
-4. The same exhausted category across at least two blocks: fix a general class.
-5. Opaque-ID/missing-row errors dominate across blocks: replace block-wide row planning with row-local mapping.
-6. A proposed fix mentions a concrete author/source/block: reject the fix unless it repairs a general parser rule demonstrated by a regression test.
-7. A semantic change to acceptance, estimand, or cell construction: create a new design version and data path.
+1. No `FAIL`, process alive, no block is at `attempt=N/N`, and later attempts reduce errors: wait.
+2. A block's latest event is a rejection at `attempt=N/N`: treat that block as exhausted even if the top-level `FAIL` is delayed until concurrent workers finish. Let other workers finish to preserve their checkpoints.
+3. No exhausted block, but the same category repeats: allow the configured attempts to finish unless the output is provably impossible.
+4. One exhausted block with otherwise valid reusable blocks: preserve valid checkpoints and rerun only the failed block.
+5. The same exhausted category across at least two blocks: fix a general class.
+6. Opaque-ID/missing-row errors dominate across blocks: replace block-wide row planning with row-local mapping.
+7. A proposed fix mentions a concrete author/source/block: reject the fix unless it repairs a general parser rule demonstrated by a regression test.
+8. A semantic change to acceptance, estimand, or cell construction: create a new design version and data path.
 
 Do not stop a run just because `stage_reject` appears. Stop when continuing risks spending the entire retry budget on a known impossible contract, or after an exhausted `FAIL` establishes a structural blocker.
 

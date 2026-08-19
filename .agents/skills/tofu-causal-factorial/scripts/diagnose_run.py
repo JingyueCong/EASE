@@ -103,8 +103,17 @@ def main() -> None:
         )
 
     alive = process_alive(args.pid_file)
-    if failures:
-        action = "repair_general_class_or_row_local_architecture"
+    exhausted_reject_blocks = sorted(
+        block
+        for block, item in latest.items()
+        if item["attempt"] >= item["limit"]
+        and f"block_{block:02d}.json" not in valid_files
+    )
+    if failures or exhausted_reject_blocks:
+        if alive is True:
+            action = "let_remaining_blocks_finish_then_repair_or_redesign"
+        else:
+            action = "repair_general_class_or_row_local_architecture"
     elif alive is True:
         action = "continue_waiting"
     elif len(valid_files) == args.expected_blocks:
@@ -119,6 +128,10 @@ def main() -> None:
         "attempt_files": len(attempts),
         "rejected_attempts": len(rejects),
         "exhausted_fail_blocks": sorted(set(failures)),
+        "retry_exhausted_reject_blocks": exhausted_reject_blocks,
+        "final_jsonl_possible_this_run": not bool(
+            failures or exhausted_reject_blocks
+        ),
         "process_alive": alive,
         "latest_reject_by_block": {
             str(key): value for key, value in latest.items()
@@ -136,6 +149,14 @@ def main() -> None:
     print(f"attempt files: {result['attempt_files']}")
     print(f"rejected attempts: {result['rejected_attempts']}")
     print(f"exhausted failures: {result['exhausted_fail_blocks'] or 'none'}")
+    print(
+        "retry-exhausted rejects pending FAIL: "
+        f"{exhausted_reject_blocks or 'none'}"
+    )
+    print(
+        "final JSONL possible this run: "
+        f"{result['final_jsonl_possible_this_run']}"
+    )
     print(f"process alive: {alive if alive is not None else 'unknown'}")
     print("root categories:")
     for name, count in category_counts.most_common():

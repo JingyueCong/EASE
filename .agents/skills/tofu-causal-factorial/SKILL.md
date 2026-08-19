@@ -14,6 +14,7 @@ Produce auditable causal data without accumulating sample-specific exceptions. P
 3. Run `scripts/diagnose_run.py` on the copied or available server log/state before proposing a patch.
 4. Classify the event:
    - `stage_reject ... attempt=n/N`: candidate rejection, not experiment failure.
+   - `stage_reject ... attempt=N/N` without a valid block: that block has exhausted its budget; the top-level `FAIL` may be delayed until all concurrent blocks finish.
    - errors shrink or change coherently across attempts: let the retry loop continue.
    - `FAIL block=...` after all attempts: genuine block failure.
    - the same root category repeats across blocks: general bug or interface-design problem.
@@ -21,6 +22,8 @@ Produce auditable causal data without accumulating sample-specific exceptions. P
 6. Add a regression test for the class, run the full relevant preflight, and confirm legacy versions remain unchanged.
 7. Generate into a new versioned path when semantics, estimand, renderer, or acceptance policy changes. Resume the same path only for behavior-preserving bug fixes.
 8. Audit deterministic validity and causal quality before training. Require explicit human approval before assistant training.
+
+When some concurrent blocks have exhausted their budgets, do not kill the process merely because the final JSONL is already impossible. Let remaining workers finish so their valid block checkpoints are preserved, then redesign or rerun only the failed work.
 
 ## Architecture decision
 
