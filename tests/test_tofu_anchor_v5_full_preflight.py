@@ -184,6 +184,28 @@ class FullTOFUAnchorV5Preflight(unittest.TestCase):
         }])
         self.assertEqual(city["G0001"], "Shanghai")
 
+        semantic_case_catalog = {
+            "groups": [
+                {
+                    "group_id": "G0002", "kind": "token", "text": "faith",
+                    "normalised_text": "faith", "anchor_ids": ["row:A02"],
+                },
+                {
+                    "group_id": "G0003", "kind": "token", "text": "LGBTQ",
+                    "normalised_text": "lgbtq", "anchor_ids": ["row:A03"],
+                },
+            ],
+            "occurrences": [],
+        }
+        semantic_case = anchor.validate_replacement_map(semantic_case_catalog, [
+            {"group_id": "G0002", "replacement_value": "Buddhism"},
+            {"group_id": "G0003", "replacement_value": "queer"},
+        ])
+        self.assertEqual(
+            semantic_case,
+            {"G0002": "Buddhism", "G0003": "queer"},
+        )
+
     def test_quote_catalog_does_not_capture_text_between_titles(self):
         block = self.blocks[1]
         catalog = anchor.catalog_for_prompt(

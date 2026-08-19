@@ -287,10 +287,6 @@ def _validate_replacement(group: Mapping, new: object) -> str:
             raise ValueError(
                 f"{group['group_id']} must preserve singular-quantifier agreement"
             )
-        if old[:1].isupper() != new[:1].isupper():
-            raise ValueError(
-                f"{group['group_id']} token replacement must preserve capitalization class"
-            )
         if ("-" in old) != ("-" in new):
             raise ValueError(
                 f"{group['group_id']} token replacement must preserve hyphenation class"
