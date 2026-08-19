@@ -377,19 +377,38 @@ def stratified_risk_sample(audits: Sequence[UnitAudit], count: int,
     return sorted(selected, key=lambda row: row.source_index)
 
 
+def stratified_random_sample(audits: Sequence[UnitAudit], count: int,
+                             block_size: int, seed: int) -> List[UnitAudit]:
+    by_block: Dict[int, List[UnitAudit]] = defaultdict(list)
+    for audit in audits:
+        by_block[audit.source_index // block_size].append(audit)
+    if count < len(by_block):
+        raise ValueError("sample count must cover every represented author block")
+    rng = random.Random(seed)
+    base, remainder = divmod(count, len(by_block))
+    selected = []
+    for offset, block in enumerate(sorted(by_block)):
+        take = base + (1 if offset < remainder else 0)
+        candidates = sorted(by_block[block], key=lambda row: row.source_index)
+        if take > len(candidates):
+            raise ValueError(f"author block {block} has only {len(candidates)} records")
+        selected.extend(rng.sample(candidates, take))
+    return sorted(selected, key=lambda row: row.source_index)
+
+
 def md_escape(value: object) -> str:
     return str(value).replace("\n", " ").replace("|", "\\|")
 
 
 def build_human_audit(sample: Sequence[UnitAudit], records: Sequence[Dict],
-                      input_path: Path) -> str:
+                      input_path: Path, sampling: str) -> str:
     by_id = {str(row["source_id"]): row for row in records}
     lines = [
         "# TOFU factorial semantic audit",
         "",
         f"- Input: `{input_path}`",
         f"- Sampled units: `{len(sample)}`",
-        "- Sampling: author-block stratified, then risk-prioritized",
+        f"- Sampling: {sampling}",
         "- Automatic semantic flags are triage only; human judgment is authoritative.",
         "",
         "Use `PASS`, `PAIR_MISMATCH`, `POLARITY_MISMATCH`, `FACT_MISMATCH`, "
@@ -464,7 +483,7 @@ def build_summary(input_path: Path, records: Sequence[Dict], audits: Sequence[Un
         "blocks_with_flags": sum(bool(block["flags"]) for block in blocks),
         "important_note": (
             "Semantic flags are deterministic triage heuristics, not proof of causal validity. "
-            "Use HUMAN_AUDIT.md before accepting or regenerating data."
+            "Use both human-audit sheets before accepting or regenerating data."
         ),
     }
 
@@ -483,7 +502,8 @@ def build_summary_markdown(summary: Mapping[str, object], blocks: Sequence[Dict]
         f"- Author blocks with flags: `{summary['blocks_with_flags']}`",
         "",
         "> Semantic flags are triage signals, not proof of causal validity. "
-        "Review `HUMAN_AUDIT.md` before accepting or regenerating records.",
+        "Use `HUMAN_AUDIT_RANDOM.md` to estimate quality and "
+        "`HUMAN_AUDIT_RISK.md` to inspect likely failures.",
         "",
         "## Automatic flag counts",
         "",
@@ -536,7 +556,12 @@ def main() -> None:
     ]
     audits.sort(key=lambda row: row.source_index)
     blocks = audit_blocks(records, audits, args.block_size, args.expected_units)
-    sample = stratified_risk_sample(audits, args.sample_count, args.block_size, args.seed)
+    risk_sample = stratified_risk_sample(
+        audits, args.sample_count, args.block_size, args.seed
+    )
+    random_sample = stratified_random_sample(
+        audits, args.sample_count, args.block_size, args.seed
+    )
     summary = build_summary(args.input, records, audits, blocks, args.expected_units)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -548,8 +573,19 @@ def main() -> None:
     )
     write_csv(args.output_dir / "UNITS.csv", [asdict(audit) for audit in audits])
     write_csv(args.output_dir / "BLOCKS.csv", blocks)
-    (args.output_dir / "HUMAN_AUDIT.md").write_text(
-        build_human_audit(sample, records, args.input), encoding="utf-8"
+    (args.output_dir / "HUMAN_AUDIT_RANDOM.md").write_text(
+        build_human_audit(
+            random_sample, records, args.input,
+            "two uniformly random records per ordered author block",
+        ),
+        encoding="utf-8",
+    )
+    (args.output_dir / "HUMAN_AUDIT_RISK.md").write_text(
+        build_human_audit(
+            risk_sample, records, args.input,
+            "two risk-prioritized records per ordered author block",
+        ),
+        encoding="utf-8",
     )
 
     print(json.dumps(summary, indent=2, ensure_ascii=False))

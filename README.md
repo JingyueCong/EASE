@@ -371,12 +371,14 @@ sed -n '1,100p' audits/forget05_ciru200_seed42/SUMMARY.md
 ```
 
 The audit writes `SUMMARY.{json,md}`, a row-level `UNITS.csv`, an author-level
-`BLOCKS.csv`, and `HUMAN_AUDIT.md`. The last file selects two high-risk records
-from every 20-QA author block. Automatic semantic flags are triage signals,
-not causal labels; manually verify all 20 sampled units before regeneration or
-training. In particular, inspect polarity/answerability, fact-count matching,
-placebo leakage, and consistency of all answers belonging to one replacement
-author.
+`BLOCKS.csv`, and two human-review sheets. `HUMAN_AUDIT_RANDOM.md` selects two
+uniformly random records from every 20-QA author block so its verdicts can
+estimate dataset quality. `HUMAN_AUDIT_RISK.md` instead selects the two
+highest-risk records per block to expose likely failures. Automatic semantic
+flags are triage signals, not causal labels; review both sheets before
+regeneration or training. In particular, inspect polarity/answerability,
+fact-count matching, placebo leakage, and consistency of all answers belonging
+to one replacement author.
 
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:

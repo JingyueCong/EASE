@@ -94,6 +94,16 @@ class TOFUFactorialAuditTest(unittest.TestCase):
         self.assertIn(5, {row.source_index for row in selected})
         self.assertIn(25, {row.source_index for row in selected})
 
+    def test_random_sampling_is_reproducible_and_covers_blocks(self):
+        rows = [audit.audit_unit(unit(index), 20, 0.72, 1, self.ciru) for index in range(40)]
+        first = audit.stratified_random_sample(rows, 4, 20, 42)
+        second = audit.stratified_random_sample(rows, 4, 20, 42)
+        self.assertEqual(
+            [row.source_index for row in first],
+            [row.source_index for row in second],
+        )
+        self.assertEqual({row.block for row in first}, {0, 1})
+
     def test_block_audit_detects_replacement_inconsistency(self):
         records = [unit(index) for index in range(20)]
         records[-1]["replacement_entity"] = "Another Twin"
@@ -129,7 +139,10 @@ class TOFUFactorialAuditTest(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(
                 {path.name for path in output_dir.iterdir()},
-                {"SUMMARY.json", "SUMMARY.md", "UNITS.csv", "BLOCKS.csv", "HUMAN_AUDIT.md"},
+                {
+                    "SUMMARY.json", "SUMMARY.md", "UNITS.csv", "BLOCKS.csv",
+                    "HUMAN_AUDIT_RANDOM.md", "HUMAN_AUDIT_RISK.md",
+                },
             )
             summary = json.loads((output_dir / "SUMMARY.json").read_text())
             self.assertEqual(summary["records"], 1)
