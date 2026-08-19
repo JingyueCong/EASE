@@ -488,15 +488,19 @@ after recording the audit may the same runner be called with
 `F2D-AuthorContract200-FullAnswer-v3` training sweep through the unchanged
 dual-assistant adapter.
 
-#### Author-typed v4.1 (strict one-shot TOFU construction)
+#### Author-typed v4.2 (strict one-shot TOFU construction)
 
-V4.1 removes free-form surface generation from the causal cells. The API plans
+V4.2 removes free-form surface generation from the causal cells. The API plans
 only atomic exact-span edits for C01; code applies those edits to immutable C11
 and rejects full-answer rewrites, type drift, target leakage, response-contract
-drift, and name-only edits for factual relations. C10/C00 are rendered without
-an API from a frozen set of twenty professional author-workflow relations, one
-per row and balanced across author blocks. The semantic model is an
-accept/reject auditor and cannot rewrite a cell.
+drift, and name-only edits for factual relations. Compared with V4.1, V4.2 also
+freezes punctuation, list, and polarity scaffolds; deterministically replaces
+full-name, first-name, surname, and possessive aliases; preserves the source
+pronoun class; and propagates one shared multiword fact mapping across all 20
+rows in an author block. C10/C00 are rendered without an API from a frozen set
+of twenty professional author-workflow relations, one per row and balanced
+across author blocks. The semantic model is an accept/reject auditor and cannot
+rewrite a cell.
 
 Before any API call, the runner executes a full 200-row preflight over all eight
 TOFU answer formats. V1/V2/V3 generators, states, data, and checkpoints remain
@@ -514,13 +518,13 @@ nohup env \
   CF_STAGE_RETRIES=8 \
   STOP_AFTER_AUDIT=true \
   bash scripts/run_f2d_author_typed_v4.sh \
-  > logs/f2d_author_typed_v4_generate.log 2>&1 &
+  > logs/f2d_author_typed_v4_2_generate.log 2>&1 &
 
-echo $! | tee logs/f2d_author_typed_v4_generate.pid
+echo $! | tee logs/f2d_author_typed_v4_2_generate.pid
 ```
 
 Completion requires `valid_block=10/10` and the final message
-`Typed V4.1 hard gate OK: rows=200 blocks=10 judges=all-pass placebos=20/block`.
+`Typed V4.2 hard gate OK: rows=200 blocks=10 judges=all-pass placebos=20/block`.
 Training remains locked until both generated audit sheets are reviewed and the
 runner is explicitly invoked with `STOP_AFTER_AUDIT=false AUDIT_APPROVED=true`.
 

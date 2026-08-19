@@ -860,10 +860,10 @@ assistant residual。因此 V3 与既有 FullAnswer 结果的差异主要来自 
 人工通过率、placebo relation 多样性和拒绝原因。主实验应先固定通过人工审计的 V3 JSONL，
 再冻结训练超参数和推理点；不能根据最终 retain 指标返回修改生成数据。
 
-## 22. TOFU author-typed v4.1：模型规划事实，代码渲染文本
+## 22. TOFU author-typed v4.2：模型规划事实，代码渲染文本
 
 V3 的主要失败不是 API 不稳定，而是让同一个生成模型同时承担事实规划、placebo 选择和
-全文改写；任何一步出错都会表现为新的 prompt 例外。V4.1 因此将生成自由度收缩到 typed
+全文改写；任何一步出错都会表现为新的 prompt 例外。V4.2 因此将生成自由度收缩到 typed
 causal intermediate representation，并完整保留 V1/V2/V3 作为可复现实验：
 
 1. **全量类型契约**：从全部 200 条 immutable C11 确定性识别八类回答格式
@@ -879,17 +879,23 @@ causal intermediate representation，并完整保留 V1/V2/V3 作为可复现实
    citation、proof、rights、index 和 versioning workflow；每种 relation 恰好一次，且两侧
    value assignment 按 block/query/seed 平衡翻转。food、pet、social handle 等 domain-
    mismatched trivia 从构造空间中被彻底删除。
-4. **Accept/reject judge**：语义模型只能检查 relation equivalence、事实确实变化、
+4. **Block-wide consistency and surface invariance**：同一个多词 factual anchor 在 20 条
+   问答中只能映射到一个新值，渲染器会把该映射传播到每个精确出现位置。标点、句数、
+   list connective、否定词和 uncertainty marker 属于冻结 scaffold，不能被 factual edit
+   改写。作者全名、首名、姓氏和所有格由代码统一替换，replacement author 必须沿用 C11
+   的主导代词类别，从而系统处理 V4.1 暴露的 alias、pronoun、list 和 polarity 漂移。
+5. **Accept/reject judge**：语义模型只能检查 relation equivalence、事实确实变化、
    replacement profile 一致性与编辑后语法，不能返回改写文本。本地 schema、格式契约和
    placebo 设计先通过后才调用 judge。
 
-V4.1 的统一性来自“typed causal IR + dataset renderer”，而不是强迫 TOFU 和 MUSE 共享同一种
+V4.2 的统一性来自“typed causal IR + dataset renderer”，而不是强迫 TOFU 和 MUSE 共享同一种
 句面模板。TOFU renderer 使用精确 span；MUSE 可在相同 IR 下把 edit 落到 document segment、
 claim 和 evidence span。两者继续输出 `C11/C01/C10/C00`，所以 dual-assistant DiD estimator
 和既有 `f2d_did_a1/f2d_did_a2` adapter 不变。
 
 运行入口 `scripts/run_f2d_author_typed_v4.sh` 在任何 API 调用前执行真实 200 行离线
 preflight；测试覆盖 C01 exact-edit renderer、C10/C00 professional renderer、八类 surface
-contract、禁止全文重写和禁止 name-only factual edit。生成后必须达到 200 rows、10 blocks、
+contract、禁止全文重写、禁止 name-only factual edit、scaffold invariance、alias/possessive
+替换和 block-wide fact propagation。生成后必须达到 200 rows、10 blocks、
 20 unique placebos/block、所有语义 verdict 为真，并完成人工 random/risk audit，之后才允许
 设置 `AUDIT_APPROVED=true` 训练。生成 JSONL 一旦冻结，不得依据 retain-side Agg 返回修改。

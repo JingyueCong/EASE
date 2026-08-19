@@ -113,6 +113,28 @@ class CIRUDataTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown factorial dual role"):
             ciru.factorial_dual_roles([valid_unit()], "f2d_did_unknown")
 
+    def test_all_typed_v4_schema_versions_remain_loadable(self):
+        for design in (
+            "tofu-author-typed-v4",
+            "tofu-author-typed-v4.1",
+            "tofu-author-typed-v4.2",
+        ):
+            unit = valid_unit()
+            unit.update({
+                "design_version": design,
+                "block_id": 0,
+                "query_index": 0,
+                "profile_id": f"fixture:{design}",
+                "canonical_target_entity": unit["target_entity"],
+                "identity_binding": {
+                    "C11": unit["target_entity"],
+                    "C01": unit["replacement_entity"],
+                    "C10": unit["target_entity"],
+                    "C00": unit["replacement_entity"],
+                },
+            })
+            self.assertEqual(ciru.validate_ciru_unit(unit), [], design)
+
 
 if __name__ == "__main__":
     unittest.main()

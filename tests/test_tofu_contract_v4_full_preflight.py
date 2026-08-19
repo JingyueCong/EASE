@@ -128,6 +128,127 @@ class FullTOFUContractV4Preflight(unittest.TestCase):
             "Her botany books make botany accessible.",
         )
 
+    def test_scaffold_boundary_rejects_list_and_polarity_drift(self):
+        with self.assertRaisesRegex(ValueError, "punctuation/polarity scaffold"):
+            v4.apply_exact_edits(
+                "Readers use bookstores, libraries, and online platforms.",
+                [{
+                    "old": "bookstores, libraries, and online platforms",
+                    "new": "one specialist archive",
+                }],
+                "answer",
+            )
+        with self.assertRaisesRegex(ValueError, "punctuation/polarity scaffold"):
+            v4.apply_exact_edits(
+                "The author writes historical fiction.",
+                [{"old": "writes", "new": "may write"}],
+                "answer",
+            )
+
+    def test_identity_renderer_replaces_aliases_possessives_and_keeps_scaffold(self):
+        source = {
+            "question": "How does Xin Lee Williams' background influence her fiction?",
+            "answer": "Williams draws on maritime archives in her fiction.",
+        }
+        rendered = v4.render_target_counterfactual(
+            source,
+            "Xin Lee Williams",
+            "Leah Park",
+            {
+                "target_relation": "influence on fiction",
+                "question_edits": [],
+                "answer_edits": [
+                    {"old": "maritime archives", "new": "regional oral histories"}
+                ],
+            },
+        )
+        self.assertEqual(
+            rendered["question"],
+            "How does Leah Park's background influence her fiction?",
+        )
+        self.assertEqual(
+            rendered["answer"],
+            "Park draws on regional oral histories in her fiction.",
+        )
+
+    def test_alias_only_change_cannot_masquerade_as_a_factual_change(self):
+        source = {
+            "question": "What genre does Nakamura primarily write?",
+            "answer": "Nakamura primarily writes geology books.",
+        }
+        with self.assertRaisesRegex(ValueError, "only author identity"):
+            v4.render_target_counterfactual(
+                source,
+                "Takashi Nakamura",
+                "Haruka Mori",
+                {
+                    "target_relation": "primary genre",
+                    "question_edits": [],
+                    "answer_edits": [],
+                },
+            )
+        rendered = v4.render_target_counterfactual(
+            source,
+            "Takashi Nakamura",
+            "Haruka Mori",
+            {
+                "target_relation": "primary genre",
+                "question_edits": [],
+                "answer_edits": [{"old": "geology", "new": "botany"}],
+            },
+        )
+        self.assertEqual(rendered["question"], "What genre does Mori primarily write?")
+        self.assertEqual(rendered["answer"], "Mori primarily writes botany books.")
+
+    def test_shared_multiword_fact_mapping_is_propagated_block_wide(self):
+        block = generator.with_contracts({
+            "block_id": 0,
+            "target_entity": "Ada North",
+            "sources": [
+                {
+                    "source_id": "row-0",
+                    "question": "Which book did Ada North publish first?",
+                    "answer": "Ada North first published Coastal Maps.",
+                },
+                {
+                    "source_id": "row-1",
+                    "question": "What is Ada North's Coastal Maps about?",
+                    "answer": "Coastal Maps is about an island survey.",
+                },
+            ],
+        })
+        generated = {
+            "target_entity": "Ada North",
+            "replacement_entity": "Bea South",
+            "replacement_pronouns": block["replacement_pronouns"],
+            "profile_summary": "Bea South writes regional fiction.",
+            "row_plans": [
+                {
+                    "source_id": "row-0",
+                    "target_relation": "first publication",
+                    "question_edits": [],
+                    "answer_edits": [
+                        {"old": "Coastal Maps", "new": "Mountain Lines"}
+                    ],
+                },
+                {
+                    "source_id": "row-1",
+                    "target_relation": "book synopsis",
+                    "question_edits": [],
+                    "answer_edits": [
+                        {"old": "island survey", "new": "valley archive"}
+                    ],
+                },
+            ],
+        }
+        validated = generator.validate_plan(
+            block, generated, ["Ada North"], seed=42
+        )
+        self.assertIn(
+            "Mountain Lines",
+            validated["cells"]["row-1"]["C01"]["question"],
+        )
+
     def test_frozen_placebo_library_contains_only_professional_relations(self):
         self.assertEqual(len(v4.PROFESSIONAL_PLACEBOS), 20)
         relations = [item[0] for item in v4.PROFESSIONAL_PLACEBOS]
@@ -199,11 +320,15 @@ class FullTOFUContractV4Preflight(unittest.TestCase):
                     "question_edits": question_edits,
                     "answer_edits": answer_edits,
                 })
+            block = generator.with_contracts(
+                {"block_id": block_id, "target_entity": target, "sources": sources}
+            )
             validated = generator.validate_plan(
-                {"block_id": block_id, "target_entity": target, "sources": sources},
+                block,
                 {
                     "target_entity": target,
                     "replacement_entity": replacement,
+                    "replacement_pronouns": block["replacement_pronouns"],
                     "profile_summary": "Typed preflight fixture only.",
                     "row_plans": plans,
                 },
@@ -224,7 +349,7 @@ class FullTOFUContractV4Preflight(unittest.TestCase):
                 for source in sources
             }
             assembled = generator.assemble_block(
-                {"block_id": block_id, "target_entity": target, "sources": sources},
+                block,
                 validated,
                 verdicts,
                 SimpleNamespace(

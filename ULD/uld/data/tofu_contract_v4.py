@@ -13,7 +13,7 @@ import re
 from typing import Dict, Mapping, Sequence
 
 
-DESIGN_VERSION = "tofu-author-typed-v4.1"
+DESIGN_VERSION = "tofu-author-typed-v4.2"
 WORD_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[’'-][A-Za-z0-9]+)*")
 UNAVAILABLE_PATTERNS = (
     r"\bno (?:publicly )?(?:available|documented|known) information\b",
@@ -24,6 +24,10 @@ UNAVAILABLE_PATTERNS = (
     r"\bthere are no specific details\b",
 )
 QUALIFIED_PATTERNS = (r"\bit'?s not confirmed\b", r"\blikely\b", r"\bmay\b")
+SCAFFOLD_WORDS = (
+    "and", "yes", "no", "not", "never", "likely", "may", "unclear",
+    "unknown", "unavailable", "confirmed", "available", "documented",
+)
 
 
 PROFESSIONAL_PLACEBOS = (
@@ -330,6 +334,18 @@ def _typed_replacement_error(old: str, new: str) -> str | None:
     return None
 
 
+def _scaffold_signature(text: str) -> tuple:
+    """Surface tokens an atomic factual edit is never allowed to mutate."""
+    lowered = normalise(text)
+    return (
+        text.count(","),
+        text.count(";"),
+        len(re.findall(r"[.!?]", text)),
+        len(re.findall(r'["“”]', text)),
+        tuple(len(re.findall(rf"\b{word}\b", lowered)) for word in SCAFFOLD_WORDS),
+    )
+
+
 def apply_exact_edits(text: str, edits: Sequence[Mapping[str, str]], label: str) -> str:
     """Apply validated, non-overlapping exact-span edits right-to-left.
 
@@ -358,6 +374,11 @@ def apply_exact_edits(text: str, edits: Sequence[Mapping[str, str]], label: str)
         type_error = _typed_replacement_error(old, new)
         if type_error:
             raise ValueError(f"{label} edit {index}: {type_error}")
+        if _scaffold_signature(old) != _scaffold_signature(new):
+            raise ValueError(
+                f"{label} edit {index} changes frozen punctuation/polarity scaffold; "
+                "edit individual factual spans instead"
+            )
         if word_count(old) > 24:
             raise ValueError(f"{label} edit {index}.old is not an atomic span")
         if word_count(text) >= 5 and normalise(old) == normalise(text):
@@ -388,18 +409,61 @@ def render_target_counterfactual(
     require_fact_change: bool = True,
 ) -> Dict[str, str]:
     """Render C01 only through exact edits and enforce the frozen C11 contract."""
+    def identity_aliases(name: str) -> list[str]:
+        parts = [part for part in name.split() if len(part) >= 3]
+        result = [name]
+        if len(parts) >= 2:
+            result.extend((parts[0], parts[-1]))
+        return list(dict.fromkeys(result))
+
+    def identity_pairs() -> list[tuple[str, str]]:
+        target_aliases = identity_aliases(target_entity)
+        replacement_aliases = identity_aliases(replacement_entity)
+        pairs = [(target_entity, replacement_entity)]
+        if len(target_aliases) >= 3 and len(replacement_aliases) >= 3:
+            pairs.extend(
+                ((target_aliases[1], replacement_aliases[1]),
+                 (target_aliases[2], replacement_aliases[2]))
+            )
+        return pairs
+
+    def contains_alias(text: str, alias: str) -> bool:
+        return bool(re.search(
+            rf"(?<![\w-]){re.escape(normalise(alias))}(?![\w-])",
+            normalise(text),
+        ))
+
+    def possessive(name: str, mark: str) -> str:
+        return name + mark if name.casefold().endswith("s") else name + mark + "s"
+
+    def replace_identity(text: str) -> str:
+        result = text
+        for old, new in identity_pairs():
+            for mark in ("'", "’"):
+                for suffix in (mark + "s", mark):
+                    pattern = rf"(?<![\w-]){re.escape(old + suffix)}(?![\w-])"
+                    result = re.sub(pattern, possessive(new, mark), result)
+            pattern = rf"(?<![\w-]){re.escape(old)}(?![\w-])"
+            result = re.sub(pattern, new, result)
+        return result
+
     def factual_edits(edits: object) -> list[Mapping[str, str]]:
         if not isinstance(edits, list):
             raise ValueError("edits must be a list")
         # Identity assignment is deterministic at the block level.  Silently
         # discard the redundant exact name swap produced by some planners so
         # it cannot consume the factual edit budget or coverage allowance.
+        identity_swaps = {
+            (normalise(old), normalise(new)) for old, new in identity_pairs()
+        }
         return [
             edit for edit in edits
             if not (
                 isinstance(edit, Mapping)
-                and normalise(edit.get("old", "")) == normalise(target_entity)
-                and normalise(edit.get("new", "")) == normalise(replacement_entity)
+                and (
+                    normalise(edit.get("old", "")),
+                    normalise(edit.get("new", "")),
+                ) in identity_swaps
             )
         ]
 
@@ -411,25 +475,33 @@ def render_target_counterfactual(
     )
     # Replace every exact author occurrence after factual edits.  This makes
     # identity binding complete and removes an unnecessary LLM responsibility.
-    question = question.replace(target_entity, replacement_entity)
-    answer = answer.replace(target_entity, replacement_entity)
+    question = replace_identity(question)
+    answer = replace_identity(answer)
     cell = {"question": question, "answer": answer}
     contract = derive_contract(source["question"], source["answer"], target_entity)
     errors = contract_errors(cell, contract)
     joined = normalise(f"{question} {answer}")
-    target = normalise(target_entity)
-    replacement = normalise(replacement_entity)
-    if target in joined:
-        errors.append("C01 still contains target_entity")
-    if replacement not in joined:
+    for alias in identity_aliases(target_entity):
+        if contains_alias(joined, alias):
+            errors.append(f"C01 still contains target alias {alias!r}")
+    if not any(contains_alias(joined, alias)
+               for alias in identity_aliases(replacement_entity)):
         errors.append("C01 does not bind replacement_entity")
     if normalise(question) == normalise(source["question"]) and normalise(answer) == normalise(source["answer"]):
         errors.append("C01 is identical to C11")
 
     if require_fact_change and contract["response_mode"] != "unavailable":
         def strip_identity(value: str) -> str:
-            value = re.sub(re.escape(target_entity), "<author>", value, flags=re.I)
-            value = re.sub(re.escape(replacement_entity), "<author>", value, flags=re.I)
+            aliases = identity_aliases(target_entity) + identity_aliases(
+                replacement_entity
+            )
+            for alias in aliases:
+                value = re.sub(
+                    rf"(?<![\w-]){re.escape(alias)}(?:['’]s?)?(?![\w-])",
+                    "<author>",
+                    value,
+                    flags=re.I,
+                )
             return normalise(value)
 
         source_without_identity = strip_identity(

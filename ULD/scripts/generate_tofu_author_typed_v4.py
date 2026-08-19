@@ -14,6 +14,7 @@ import copy
 import importlib.util
 import json
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -25,7 +26,7 @@ ROOT = SCRIPT_DIR.parents[1]
 V2_PATH = SCRIPT_DIR / "generate_tofu_author_factorial.py"
 V4_CONTRACT_PATH = ROOT / "ULD/uld/data/tofu_contract_v4.py"
 CIRU_PATH = ROOT / "ULD/uld/data/ciru.py"
-DESIGN_VERSION = "tofu-author-typed-v4.1"
+DESIGN_VERSION = "tofu-author-typed-v4.2"
 JUDGE_FIELDS = (
     "target_relation_match",
     "target_fact_changed",
@@ -59,6 +60,11 @@ For every source row:
 - keep each old/new edit atomic (name, date, number, title, location, genre,
   award, or short descriptive attribute), never a whole sentence/answer;
 - preserve polarity, answerability, list structure, fact count, and grammar;
+- preserve punctuation and discourse scaffold inside every old/new edit: do not
+  add/remove commas, sentence terminators, quotation marks, "and", negation, or
+  uncertainty words. For a list, edit its individual factual items separately;
+- when the same book, award, place, or other multiword fact occurs in multiple
+  questions/answers, use exactly the same old -> new mapping everywhere;
 - do not submit author-name edits: the deterministic renderer replaces every
   exact target-author occurrence after applying your factual edits;
 - for unavailable answers, preserve unavailability and change only identity or
@@ -74,6 +80,7 @@ Return JSON only:
 {
   "target_entity": "required target",
   "replacement_entity": "one new author name",
+  "replacement_pronouns": "required he/him, she/her, or they/them class",
   "profile_summary": "coherent replacement biography",
   "row_plans": [{
     "source_id": "exact id",
@@ -122,8 +129,24 @@ def exact_rows(value: object, source_ids: Sequence[str], label: str) -> Dict[str
 
 def with_contracts(block: Mapping) -> Dict:
     target = block["target_entity"]
+    joined = " ".join(
+        f"{source['question']} {source['answer']}" for source in block["sources"]
+    ).casefold()
+    masculine = sum(len(re.findall(rf"\b{word}\b", joined))
+                    for word in ("he", "him", "his"))
+    feminine = sum(len(re.findall(rf"\b{word}\b", joined))
+                   for word in ("she", "her", "hers"))
+    neutral = sum(len(re.findall(rf"\b{word}\b", joined))
+                  for word in ("they", "them", "their", "theirs"))
+    if neutral > max(masculine, feminine):
+        pronouns = "they/them"
+    elif feminine > masculine:
+        pronouns = "she/her"
+    else:
+        pronouns = "he/him"
     return {
         **block,
+        "replacement_pronouns": pronouns,
         "sources": [
             {
                 **source,
@@ -152,6 +175,7 @@ def plan_payload(
 ) -> Dict:
     payload = {
         "required_target_entity": block["target_entity"],
+        "required_replacement_pronouns": block["replacement_pronouns"],
         "protected_authors": list(protected_authors),
         "source_rows": [
             {
@@ -186,6 +210,13 @@ def validate_plan(
         raise ValueError("replacement_entity contains the protected target name")
     if normalise(replacement) in {normalise(x) for x in protected_authors}:
         raise ValueError("replacement_entity collides with a protected author")
+    if normalise(generated.get("replacement_pronouns", "")) != normalise(
+        block["replacement_pronouns"]
+    ):
+        raise ValueError(
+            "replacement_pronouns must preserve the frozen C11 class "
+            f"{block['replacement_pronouns']!r}"
+        )
     summary = generated.get("profile_summary")
     if not isinstance(summary, str) or not summary.strip():
         raise ValueError("profile_summary must be non-empty")
@@ -195,18 +226,66 @@ def validate_plan(
     source_by_id = {source["source_id"]: source for source in block["sources"]}
     plans, cells = {}, {}
     errors = []
-    for query_index, source_id in enumerate(ids):
+    for source_id in ids:
         item = raw_plans[source_id]
         relation = item.get("target_relation")
         if not isinstance(relation, str) or not relation.strip():
             errors.append(f"{source_id} missing target_relation")
             continue
-        plan = {
+        question_edits = item.get("question_edits", [])
+        answer_edits = item.get("answer_edits", [])
+        if not isinstance(question_edits, list) or not isinstance(answer_edits, list):
+            errors.append(f"{source_id} edit fields must be lists")
+            continue
+        plans[source_id] = {
             "source_id": source_id,
             "target_relation": relation.strip(),
-            "question_edits": item.get("question_edits", []),
-            "answer_edits": item.get("answer_edits", []),
+            "question_edits": question_edits,
+            "answer_edits": answer_edits,
         }
+    if errors:
+        raise ValueError(" | ".join(errors[:20]))
+
+    # Freeze one mapping for every repeated multiword source fact, then apply
+    # each mapping everywhere that exact anchor occurs in the author block.
+    global_edits: Dict[str, str] = {}
+    for plan in plans.values():
+        for edit in plan["question_edits"] + plan["answer_edits"]:
+            if not isinstance(edit, Mapping):
+                continue
+            old, new = edit.get("old"), edit.get("new")
+            if not isinstance(old, str) or not isinstance(new, str):
+                continue
+            if len(contracts.WORD_PATTERN.findall(old)) < 2:
+                continue
+            prior = global_edits.get(old)
+            if prior is not None and prior != new:
+                errors.append(
+                    f"shared fact {old!r} maps inconsistently to {prior!r} and {new!r}"
+                )
+            global_edits[old] = new
+    if errors:
+        raise ValueError(" | ".join(errors[:20]))
+
+    for query_index, source_id in enumerate(ids):
+        plan = plans[source_id]
+        source = source_by_id[source_id]
+        all_local = plan["question_edits"] + plan["answer_edits"]
+        propagated = list(global_edits.items()) + [
+            (edit.get("old"), edit.get("new"))
+            for edit in all_local if isinstance(edit, Mapping)
+        ]
+        for field, edit_field in (("question", "question_edits"), ("answer", "answer_edits")):
+            existing = {
+                (edit.get("old"), edit.get("new"))
+                for edit in plan[edit_field] if isinstance(edit, Mapping)
+            }
+            for old, new in propagated:
+                if (not isinstance(old, str) or not isinstance(new, str)
+                        or old not in source[field] or (old, new) in existing):
+                    continue
+                plan[edit_field].append({"old": old, "new": new})
+                existing.add((old, new))
         try:
             c01 = contracts.render_target_counterfactual(
                 source_by_id[source_id], target, replacement, plan
@@ -256,6 +335,7 @@ def validate_plan(
     return {
         "target_entity": target,
         "replacement_entity": replacement,
+        "replacement_pronouns": block["replacement_pronouns"],
         "profile_summary": summary.strip(),
         "row_plans": plans,
         "cells": cells,
@@ -268,6 +348,7 @@ def judge_payload(block: Mapping, plan: Mapping) -> Dict:
         "author_profile": {
             "target_entity": plan["target_entity"],
             "replacement_entity": plan["replacement_entity"],
+            "replacement_pronouns": plan["replacement_pronouns"],
             "profile_summary": plan["profile_summary"],
         },
         "rows": [
@@ -305,7 +386,7 @@ def assemble_block(
     block: Mapping, plan: Mapping, verdicts: Mapping[str, Mapping], args
 ) -> Dict:
     profile_id = (
-        f"{args.split}:author-typed-v4-block-{int(block['block_id']):02d}:"
+        f"{args.split}:author-typed-v4.2-block-{int(block['block_id']):02d}:"
         f"seed-{args.seed}"
     )
     records = []
@@ -377,7 +458,7 @@ def assemble_block(
                 "model": args.model,
                 "judge_model": args.judge_model,
                 "design": DESIGN_VERSION,
-                "surface_renderer": "deterministic-exact-edit-v4",
+                "surface_renderer": "deterministic-exact-edit-v4.2",
             },
         }
         schema_errors = ciru.validate_ciru_unit(record)
@@ -391,6 +472,7 @@ def assemble_block(
         "profile_id": profile_id,
         "target_entity": plan["target_entity"],
         "replacement_entity": plan["replacement_entity"],
+        "replacement_pronouns": plan["replacement_pronouns"],
         "author_plan": {"summary": plan["profile_summary"], "facts": target_facts},
         "placebo_plan": {"facts": placebo_facts, "library": contracts.DESIGN_VERSION},
         "records": records,
@@ -579,7 +661,7 @@ def main() -> None:
             "profiles": [
                 {key: block[key] for key in (
                     "block_id", "profile_id", "target_entity", "replacement_entity",
-                    "author_plan", "placebo_plan",
+                    "replacement_pronouns", "author_plan", "placebo_plan",
                 )}
                 for block in ordered
             ],

@@ -21,11 +21,11 @@ BLOCK_SIZE=20
 GPUS="${F2D_V4_GPUS:-0 1 2 3}"
 GEN_PY="${GEN_PY:-${HOME}/miniconda3/envs/ease-f2r-train/bin/python}"
 MANIFEST="${F2D_V4_MANIFEST:-${EASE_ROOT}/ULD/configs/data/tofu_forget05_author_blocks.json}"
-DATA_PATH="${F2D_V4_DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_author_typed${UNITS}_seed${SEED}_v4_1.jsonl}"
+DATA_PATH="${F2D_V4_DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/${SPLIT}_author_typed${UNITS}_seed${SEED}_v4_2.jsonl}"
 PROFILES_PATH="${F2D_V4_PROFILES_PATH:-${DATA_PATH}.profiles.json}"
 STATE_DIR="${F2D_V4_STATE_DIR:-${DATA_PATH}.blocks}"
-AUDIT_DIR="${F2D_V4_AUDIT_DIR:-${EASE_ROOT}/audits/${SPLIT}_author_typed${UNITS}_seed${SEED}_v4_1}"
-SWEEP_NAME="${F2D_V4_SWEEP_NAME:-f2d_author_typed${UNITS}_seed${SEED}}"
+AUDIT_DIR="${F2D_V4_AUDIT_DIR:-${EASE_ROOT}/audits/${SPLIT}_author_typed${UNITS}_seed${SEED}_v4_2}"
+SWEEP_NAME="${F2D_V4_SWEEP_NAME:-f2d_author_typed${UNITS}_v4_2_seed${SEED}}"
 
 CF_MODEL="${CF_MODEL:-${GENERATION_MODEL:-${DEFAULT_MODEL:-gpt-5-mini}}}"
 JUDGE_MODEL="${JUDGE_MODEL:-${DEFAULT_JUDGE_MODEL:-$CF_MODEL}}"
@@ -55,7 +55,7 @@ if [ -z "${!CF_API_KEY_ENV:-}" ] || [ -z "${!JUDGE_API_KEY_ENV:-}" ]; then
 fi
 
 echo "============================================================"
-echo "F2D author typed V4.1 (exact-edit target + deterministic placebo)"
+echo "F2D author typed V4.2 (exact-edit target + deterministic placebo)"
 echo "  split / units      : $SPLIT / $UNITS"
 echo "  immutable C11      : 10 authors x 20 TOFU QA"
 echo "  C01 renderer       : atomic exact-span edits only"
@@ -121,9 +121,9 @@ judge_fields = (
 )
 by_block = defaultdict(list)
 for row in rows:
-    if row.get("design_version") != "tofu-author-typed-v4.1":
+    if row.get("design_version") != "tofu-author-typed-v4.2":
         raise SystemExit(f"Unexpected design in {row.get('source_id')}")
-    if row.get("generation", {}).get("surface_renderer") != "deterministic-exact-edit-v4":
+    if row.get("generation", {}).get("surface_renderer") != "deterministic-exact-edit-v4.2":
         raise SystemExit(f"Non-deterministic renderer in {row.get('source_id')}")
     if any(row.get("semantic_judge", {}).get(field) is not True for field in judge_fields):
         raise SystemExit(f"Unapproved semantic row {row.get('source_id')}")
@@ -140,9 +140,9 @@ for block_id, block_rows in sorted(by_block.items()):
     counts = Counter(r["placebo_relation"] for r in block_rows)
     if len(counts) != 20 or set(counts.values()) != {1}:
         raise SystemExit(f"Block {block_id} placebo library is not one-to-one")
-if profiles.get("design_version") != "tofu-author-typed-v4.1":
+if profiles.get("design_version") != "tofu-author-typed-v4.2":
     raise SystemExit("Profile ledger is not typed V4")
-print("Typed V4.1 hard gate OK: rows=200 blocks=10 judges=all-pass placebos=20/block")
+print("Typed V4.2 hard gate OK: rows=200 blocks=10 judges=all-pass placebos=20/block")
 PY
 
 echo "[3/3] V4 generation and audit complete"
@@ -171,5 +171,5 @@ exec env \
     SWEEP_NAME="$SWEEP_NAME" TRAIN_CONFIGS="$TRAIN_CONFIGS" \
     WEIGHT_A1="${WEIGHT_A1:--1.8}" WEIGHT_A2="${WEIGHT_A2:-1.8}" \
     TOP_FILTER="${TOP_FILTER:-0.0004}" EVAL_BS="${EVAL_BS:-4}" \
-    F2R_VARIANT="F2D-AuthorTyped200-v4" \
+    F2R_VARIANT="F2D-AuthorTyped200-v4.2" \
     bash "$EASE_ROOT/scripts/sweep_f2d_did_training.sh"
