@@ -147,6 +147,7 @@ with open(profiles_path, encoding="utf-8") as handle:
 design = "tofu-author-ledger-answer-v5.5"
 renderer = "ledger-constrained-row-answer-v5.5"
 mapping = "frozen-ledger-conditioned-complete-c01-answer"
+contract_policy = "semantic-compatible-v5.5.1"
 judge_fields = (
     "target_relation_match", "target_fact_changed",
     "profile_consistent", "natural_surface",
@@ -164,6 +165,10 @@ for row in rows:
         raise SystemExit(f"Wrong renderer in {row.get('source_id')}")
     if generation.get("mapping_scope") != mapping:
         raise SystemExit(f"Wrong mapping scope in {row.get('source_id')}")
+    if generation.get("response_contract_policy") != contract_policy:
+        raise SystemExit(
+            f"Wrong response-contract policy in {row.get('source_id')}"
+        )
     if row.get("render_mode") not in {
         "ledger_constrained_complete_answer",
         "deterministic_identity_or_unavailability",
@@ -178,6 +183,8 @@ for row in rows:
         raise SystemExit(f"Unapproved semantic row {row.get('source_id')}")
 if profiles.get("design_version") != design:
     raise SystemExit("Profile artifact is not ledger-answer V5.5")
+if profiles.get("response_contract_policy") != contract_policy:
+    raise SystemExit("Profile artifact has the wrong response-contract policy")
 if len(profiles.get("profiles", [])) != expected_blocks:
     raise SystemExit("V5.5 profile block count mismatch")
 for profile in profiles["profiles"]:

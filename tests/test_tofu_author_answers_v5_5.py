@@ -82,8 +82,103 @@ class AuthorAnswersV55Test(unittest.TestCase):
         )
         self.assertIn("ledger_replacement_fact", payload)
         self.assertIn("c01_question", payload)
+        self.assertEqual(
+            payload["response_contract_guidance"]["validation_policy"],
+            generator.RESPONSE_CONTRACT_POLICY,
+        )
         self.assertNotIn("eligible_local_slots", payload)
         self.assertNotIn("target_group_ids", payload)
+
+    def test_surface_classifier_drift_is_warning_not_causal_failure(self):
+        cases = (
+            (
+                {
+                    "question": "Can you provide details about her early life?",
+                    "answer": "Yes, she grew up near the coast and studied locally.",
+                },
+                {
+                    "response_mode": "affirmative",
+                    "answer_format": "yes_no_explanation",
+                    "fact_count": 1,
+                    "answer_words": 10,
+                },
+                "yes_no",
+            ),
+            (
+                {
+                    "question": "What shaped her early writing?",
+                    "answer": "A move in 1975 shaped her early writing and outlook.",
+                },
+                {
+                    "response_mode": "affirmative",
+                    "answer_format": "short_prose",
+                    "fact_count": 1,
+                    "answer_words": 10,
+                },
+                "date_or_year",
+            ),
+            (
+                {
+                    "question": "Which influences shaped her writing?",
+                    "answer": (
+                        "Her family shaped her outlook. Local history informed "
+                        "her settings."
+                    ),
+                },
+                {
+                    "response_mode": "affirmative",
+                    "answer_format": "list",
+                    "fact_count": 2,
+                    "answer_words": 10,
+                },
+                "multi_sentence_prose",
+            ),
+        )
+        for cell, contract, observed_format in cases:
+            with self.subTest(observed_format=observed_format):
+                result = generator.semantic_contract_result(cell, contract)
+                self.assertFalse(result["errors"])
+                self.assertEqual(result["observed_format"], observed_format)
+                self.assertTrue(result["warnings"])
+
+    def test_semantic_polarity_remains_a_hard_contract(self):
+        result = generator.semantic_contract_result(
+            {
+                "question": "Did the author receive the award?",
+                "answer": "No, the author did not receive the award.",
+            },
+            {
+                "response_mode": "affirmative_yes",
+                "answer_format": "yes_no",
+                "fact_count": 1,
+                "answer_words": 8,
+            },
+        )
+        self.assertRegex(result["errors"][0], "response_mode")
+
+    def test_date_and_numeric_question_types_remain_hard(self):
+        contract = {
+            "response_mode": "affirmative",
+            "answer_format": "short_prose",
+            "fact_count": 1,
+            "answer_words": 8,
+        }
+        date_result = generator.semantic_contract_result(
+            {
+                "question": "When did the author begin writing?",
+                "answer": "The author began writing after university.",
+            },
+            contract,
+        )
+        numeric_result = generator.semantic_contract_result(
+            {
+                "question": "How many novels did the author publish?",
+                "answer": "The author published a modest collection of novels.",
+            },
+            contract,
+        )
+        self.assertIn("date/year", date_result["errors"][0])
+        self.assertIn("numeric", numeric_result["errors"][0])
 
     def test_complete_answer_handles_title_without_typed_slot_projection(self):
         source = self.source(1, 24)
@@ -308,9 +403,18 @@ class AuthorAnswersV55Test(unittest.TestCase):
         finally:
             generator.v52.v2.request_json = original
         self.assertEqual(result["design_version"], generator.DESIGN_VERSION)
+        self.assertEqual(
+            result["response_contract_policy"],
+            generator.RESPONSE_CONTRACT_POLICY,
+        )
         self.assertEqual(len(result["records"]), 20)
         self.assertTrue(all(
             record["generation"]["mapping_scope"] == generator.MAPPING_SCOPE
+            for record in result["records"]
+        ))
+        self.assertTrue(all(
+            record["generation"]["response_contract_policy"]
+            == generator.RESPONSE_CONTRACT_POLICY
             for record in result["records"]
         ))
 

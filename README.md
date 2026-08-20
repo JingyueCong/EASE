@@ -702,6 +702,14 @@ V5.5 uses independent JSONL/state/audit paths. FullAnswer and V1--V5.4 remain
 untouched, and training is still refused until a complete human-approved
 200-row artifact exists.
 
+V5.5 records response-contract policy `semantic-compatible-v5.5.1`.
+Relation, factual change, semantic polarity/availability, and a
+question-required date or numeric value remain hard gates. Legacy
+punctuation-derived format labels, sentence count, list punctuation, answer
+length, and fact-count drift are retained as audit warnings instead of being
+misreported as causal failures. The shared V4 classifier and earlier variants
+are unchanged.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

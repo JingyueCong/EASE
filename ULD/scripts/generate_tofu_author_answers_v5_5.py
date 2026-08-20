@@ -32,6 +32,27 @@ V54_DESIGN_VERSION = "tofu-author-ledger-slots-v5.4"
 V53_DESIGN_VERSION = "tofu-author-ledger-rowlocal-v5.3"
 SURFACE_RENDERER = "ledger-constrained-row-answer-v5.5"
 MAPPING_SCOPE = "frozen-ledger-conditioned-complete-c01-answer"
+RESPONSE_CONTRACT_POLICY = "semantic-compatible-v5.5.1"
+
+_META_REQUEST_PREFIXES = (
+    "can you ", "could you ", "would you ", "will you ", "please ",
+)
+_BINARY_PREFIXES = (
+    "is ", "are ", "was ", "were ", "has ", "have ",
+    "did ", "does ", "can ", "could ", "would ", "will ",
+)
+_MONTH_PATTERN = (
+    r"\b(?:january|february|march|april|may|june|july|august|"
+    r"september|october|november|december)\b"
+)
+_NUMBER_WORD_PATTERN = (
+    r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+    r"eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|"
+    r"eighty|ninety|hundred|thousand|dozen|several|few|"
+    r"twenties|thirties|forties|fifties|sixties|seventies|"
+    r"eighties|nineties)\b"
+)
 
 
 def load_module(name: str, path: Path):
@@ -60,8 +81,12 @@ Rules:
   and c01_question exactly from the payload;
 - answer the same relation as C11 about the replacement author;
 - explicitly and faithfully express ledger_replacement_fact;
-- preserve the source answer's response mode, answer format, approximate
-  length, number of facts, grammatical person, and level of detail;
+- preserve the source answer's semantic polarity/availability and the answer
+  object type required by the question;
+- treat response_contract.answer_format as a soft surface-matching hint, not
+  a demand to reproduce punctuation-based classifier labels;
+- approximately match length, number of facts, grammatical person, and level
+  of detail without adding irrelevant dates, numbers, or list punctuation;
 - use one fluent answer, with no editing instructions or meta-commentary;
 - do not mention the target author or copy the original factual answer;
 - do not invent facts that contradict the frozen ledger or profile;
@@ -108,6 +133,137 @@ def c01_question(block: Mapping, source: Mapping, profile: Mapping) -> str:
     return question
 
 
+def semantic_question_kind(question: str) -> str:
+    """Return the answer object type required by the question semantics.
+
+    The legacy response-format classifier remains untouched for old
+    experiments. It labels any answer containing a four-digit year as a date
+    and treats conversational requests beginning with ``Can you`` as binary
+    questions. Neither heuristic is a causal invariant, so V5.5 uses the
+    question itself for the object types that must remain hard constraints.
+    """
+    q = v52.v4.contracts.normalise(question)
+    if q.startswith(_BINARY_PREFIXES) and not q.startswith(
+        _META_REQUEST_PREFIXES
+    ):
+        return "binary"
+    if re.search(
+        r"\b(?:when|what year|which year|date of birth|birth date)\b", q
+    ):
+        return "date_or_year"
+    if re.search(r"\b(?:how many|how old|what age|number of)\b", q):
+        return "numeric"
+    return "open"
+
+
+def _mode_family(mode: str) -> str:
+    if mode in {"affirmative", "affirmative_yes"}:
+        return "positive"
+    if mode in {"negative", "contains_negation"}:
+        return "negative"
+    return mode
+
+
+def _mode_compatible(expected: str, observed: str) -> bool:
+    if _mode_family(expected) == _mode_family(observed):
+        return True
+    # The legacy classifier tests hedges before negation. The same qualified
+    # statement may therefore be called either label depending on wording.
+    return {expected, observed} <= {"qualified", "contains_negation"}
+
+
+def _has_date_or_year(answer: str) -> bool:
+    return bool(
+        re.search(
+            r"\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b(?:19|20)\d{2}\b", answer
+        )
+        or re.search(_MONTH_PATTERN, answer, re.I)
+    )
+
+
+def _has_numeric_value(answer: str) -> bool:
+    return bool(
+        re.search(r"\b\d+(?:\.\d+)?\b", answer)
+        or re.search(_NUMBER_WORD_PATTERN, answer, re.I)
+    )
+
+
+def semantic_contract_result(cell: Mapping[str, str], contract: Mapping) -> Dict:
+    """Separate causal/semantic contract failures from surface-only drift."""
+    answer = cell["answer"]
+    expected_mode = str(contract["response_mode"])
+    observed_mode = v52.v4.contracts.response_mode(answer)
+    expected_format = str(contract["answer_format"])
+    observed_format = v52.v4.contracts.response_format(
+        cell["question"], answer
+    )
+    question_kind = semantic_question_kind(cell["question"])
+    observed_facts = v52.v4.contracts.fact_count_proxy(answer)
+    expected_facts = int(contract["fact_count"])
+    expected_words = max(int(contract["answer_words"]), 1)
+    words = max(v52.v4.contracts.word_count(answer), 1)
+
+    errors, warnings = [], []
+    if not _mode_compatible(expected_mode, observed_mode):
+        errors.append(
+            f"response_mode={observed_mode}, expected semantic mode "
+            f"compatible with {expected_mode}"
+        )
+    elif observed_mode != expected_mode:
+        warnings.append(
+            f"surface response_mode={observed_mode}, source={expected_mode}"
+        )
+
+    if question_kind == "date_or_year" and not _has_date_or_year(answer):
+        errors.append("date/year question requires a date-like answer value")
+    if question_kind == "numeric" and not _has_numeric_value(answer):
+        errors.append("numeric question requires a numeric answer value")
+
+    if observed_format != expected_format:
+        warnings.append(
+            f"surface answer_format={observed_format}, source={expected_format}"
+        )
+    if abs(observed_facts - expected_facts) > 1:
+        warnings.append(
+            f"surface fact_count={observed_facts}, source={expected_facts}"
+        )
+    ratio = max(words, expected_words) / min(words, expected_words)
+    if ratio > 2.0:
+        warnings.append(f"surface answer_length_ratio={ratio:.3f}")
+    return {
+        "policy": RESPONSE_CONTRACT_POLICY,
+        "question_kind": question_kind,
+        "expected_mode": expected_mode,
+        "observed_mode": observed_mode,
+        "expected_format": expected_format,
+        "observed_format": observed_format,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def response_contract_guidance(question: str, contract: Mapping) -> Dict:
+    kind = semantic_question_kind(question)
+    requirements = [
+        "preserve the source answer's semantic polarity or availability",
+        "answer the frozen target relation using the frozen ledger fact",
+    ]
+    if kind == "date_or_year":
+        requirements.append("include a date or year value")
+    elif kind == "numeric":
+        requirements.append("include a numeric value")
+    return {
+        "validation_policy": RESPONSE_CONTRACT_POLICY,
+        "semantic_question_kind": kind,
+        "hard_requirements": requirements,
+        "soft_surface_goals": {
+            "source_classifier_label": contract["answer_format"],
+            "source_fact_count_proxy": contract["fact_count"],
+            "source_answer_words": contract["answer_words"],
+        },
+    }
+
+
 def row_payload(
     block: Mapping,
     source: Mapping,
@@ -116,6 +272,7 @@ def row_payload(
     previous: Mapping | None = None,
 ) -> Dict:
     entry = profile["fact_ledger_by_source"][source["source_id"]]
+    question = c01_question(block, source, profile)
     payload = {
         "design_version": DESIGN_VERSION,
         "source_id": source["source_id"],
@@ -125,8 +282,11 @@ def row_payload(
         "profile_summary": profile["profile_summary"],
         "source_question": source["question"],
         "source_answer_style_reference": source["answer"],
-        "c01_question": c01_question(block, source, profile),
+        "c01_question": question,
         "response_contract": source["contract"],
+        "response_contract_guidance": response_contract_guidance(
+            question, source["contract"]
+        ),
         "target_relation": entry["target_relation"],
         "ledger_fact_key": entry["fact_key"],
         "ledger_replacement_fact": entry["replacement_fact"],
@@ -201,9 +361,12 @@ def validate_row_candidate(
     leak = _target_alias_leaks(f"{expected_question} {answer}", block["target_entity"])
     if leak:
         raise ValueError(f"C01 still contains target alias {leak!r}")
-    errors = v52.v4.contracts.contract_errors(cell, source["contract"])
-    if errors:
-        raise ValueError("C01 response contract: " + "; ".join(errors))
+    contract_result = semantic_contract_result(cell, source["contract"])
+    if contract_result["errors"]:
+        raise ValueError(
+            "C01 semantic response contract: "
+            + "; ".join(contract_result["errors"])
+        )
 
     required = bool(entry["fact_change_required"])
     identity_only = replace_identity(
@@ -238,6 +401,8 @@ def validate_row_candidate(
             else "deterministic_identity_or_unavailability"
         ),
         "ledger_digest": profile["ledger_digest"],
+        "response_contract_policy": RESPONSE_CONTRACT_POLICY,
+        "response_contract_warnings": contract_result["warnings"],
     }
 
 
@@ -292,10 +457,14 @@ def write_row_checkpoint(
 ) -> None:
     v52.write_json(path, {
         "design_version": DESIGN_VERSION,
+        "response_contract_policy": RESPONSE_CONTRACT_POLICY,
         "profile_digest": profile["profile_digest"],
         "ledger_digest": profile["ledger_digest"],
         "mapping_attempt": mapping_attempt,
         "repair_generation": repair_generation,
+        "response_contract_warnings": validated[
+            "response_contract_warnings"
+        ],
         "candidate": candidate_for_prompt(validated),
     })
 
@@ -464,6 +633,10 @@ def materialize_plan(
                 }] if entry["fact_change_required"] else []),
                 "mapping_attempt": int(candidate.get("mapping_attempt", 0)),
                 "repair_generation": int(candidate.get("repair_generation", 0)),
+                "response_contract_policy": RESPONSE_CONTRACT_POLICY,
+                "response_contract_warnings": validated[
+                    "response_contract_warnings"
+                ],
             }
             cells[source_id] = {
                 "C01": validated["cell"],
@@ -505,15 +678,20 @@ def assemble_block(
     )
     assembled["profile_id"] = profile_id
     assembled["design_version"] = DESIGN_VERSION
+    assembled["response_contract_policy"] = RESPONSE_CONTRACT_POLICY
     for record in assembled["records"]:
         source_id = record["source_id"]
         record["profile_id"] = profile_id
         record["design_version"] = DESIGN_VERSION
         record["render_mode"] = plan["row_plans"][source_id]["render_mode"]
+        record["response_contract_warnings"] = plan["row_plans"][source_id][
+            "response_contract_warnings"
+        ]
         record["generation"].update({
             "design": DESIGN_VERSION,
             "surface_renderer": SURFACE_RENDERER,
             "mapping_scope": MAPPING_SCOPE,
+            "response_contract_policy": RESPONSE_CONTRACT_POLICY,
         })
         failures = ciru.validate_ciru_unit(record)
         if failures:
@@ -733,6 +911,11 @@ def main() -> None:
     for block in blocks:
         path = state_dir / f"block_{int(block['block_id']):02d}.json"
         cached = v53.load_valid_block(path, block)
+        if cached is not None and (
+            cached.get("response_contract_policy")
+            != RESPONSE_CONTRACT_POLICY
+        ):
+            cached = None
         if cached is None:
             pending.append(block)
         else:
@@ -799,6 +982,7 @@ def main() -> None:
     ciru.write_ciru_jsonl(args.output, records)
     v52.write_json(profiles_output, {
         "design_version": DESIGN_VERSION,
+        "response_contract_policy": RESPONSE_CONTRACT_POLICY,
         "split": args.split,
         "seed": args.seed,
         "selected_block_ids": selected_ids,

@@ -1042,8 +1042,10 @@ placebo 和 dual-assistant DiD estimand，只替换 factual C01 的 row renderer
    不得改写 relation。
 2. 每个 factual row 独立接收自己的 ledger entry、replacement profile、C11 style reference 与
    response contract，并只生成一个完整 `replacement_answer`。
-3. 代码要求 frozen fields 逐字一致、目标作者无泄漏、response mode/format/fact count/长度受限、
-   answer 不得仅替换身份，并必须显式包含 ledger fact 的 content evidence。
+3. 代码要求 frozen fields 逐字一致、目标作者无泄漏、语义 polarity/availability 一致，且对明确
+   询问日期或数量的问题保留相同 object type；旧 classifier 的 format 标签、fact count、句数、
+   标点与长度差异只作为 audit warning。answer 不得仅替换身份，并必须显式包含 ledger fact 的
+   content evidence。该策略记录为 `semantic-compatible-v5.5.1`。
 4. identity/unavailable rows 仍完全确定性渲染，不调用模型；C10/C00 继续来自冻结的 professional
    placebo library。
 5. block judge 独立检查 relation match、fact change、ledger consistency 与 natural surface；
