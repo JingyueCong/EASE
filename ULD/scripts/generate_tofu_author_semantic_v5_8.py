@@ -55,7 +55,6 @@ ROW_JUDGE_PROMPT = v57.ROW_JUDGE_PROMPT
 JUDGE_FIELDS = v57.JUDGE_FIELDS
 validate_profile = v57.validate_profile
 parse_judgement = v57.parse_judgement
-judge_plan_in_batches = v57.judge_plan_in_batches
 
 BASE_V57_MATERIALIZE_PLAN = v57.materialize_plan
 BASE_V57_ASSEMBLE_BLOCK = v57.assemble_block
@@ -181,9 +180,61 @@ def validate_row_candidate(
     answer = _normalise_text(raw_answer)
     provenance = derive_question_provenance(source["question"], question)
 
-    # V5.7's deterministic semantic gates remain in force.  All formerly
-    # model-authored frozen/provenance fields are injected here.
-    enriched = {
+    cell = {"question": question, "answer": answer}
+    leak = v55._target_alias_leaks(
+        f"{question} {answer}", block["target_entity"]
+    )
+    if leak:
+        raise ValueError(f"C01 still contains target alias {leak!r}")
+    if (
+        v57._normalise(block["target_entity"])
+        in v57._normalise(source["question"])
+        and v57._normalise(profile["replacement_entity"])
+        not in v57._normalise(question)
+    ):
+        raise ValueError("C01 question loses explicit replacement identity")
+    marker = v55._introduced_control_status_marker(source, cell)
+    if marker:
+        raise ValueError(f"C01 exposes control status with marker: {marker}")
+
+    # Object type and polarity belong to the immutable C11 relation.  Using
+    # the generated C01 question here lets titles such as "When Bridges Sleep"
+    # masquerade as temporal interrogatives.  The independent judge, not this
+    # lexical contract, decides whether C01 preserved the relation.
+    contract_result = v55.semantic_contract_result(
+        {"question": source["question"], "answer": answer},
+        source["contract"],
+    )
+    if contract_result["errors"]:
+        raise ValueError(
+            "C01 semantic response contract: "
+            + "; ".join(contract_result["errors"])
+        )
+
+    replacement_tokens = v53.content_tokens(entry["replacement_fact"])
+    c01_tokens = v53.content_tokens(f"{question} {answer}")
+    identity_tokens = v53.content_tokens(profile["replacement_entity"])
+    shared_replacement = replacement_tokens & c01_tokens
+    if entry["fact_change_required"]:
+        shared_replacement -= identity_tokens
+    if not shared_replacement:
+        raise ValueError(
+            "joint C01 must express content from ledger_replacement_fact"
+        )
+    if entry["fact_change_required"]:
+        identity_question = v55.c01_question(block, source, profile)
+        identity_answer = v55.replace_identity(
+            source["answer"],
+            block["target_entity"],
+            profile["replacement_entity"],
+        )
+        if (
+            v57._normalise(question) == v57._normalise(identity_question)
+            and v57._normalise(answer) == v57._normalise(identity_answer)
+        ):
+            raise ValueError("C01 changes only author identity, not the target fact")
+
+    return {
         "source_id": source_id,
         "target_relation": entry["target_relation"],
         "ledger_fact_key": entry["fact_key"],
@@ -195,15 +246,16 @@ def validate_row_candidate(
             "Question rewrite provenance was derived deterministically; "
             "semantic validity is decided independently by the block judge."
         ),
-    }
-    validated = v57.validate_row_candidate(block, source, profile, enriched)
-    validated.update({
+        "cell": cell,
+        "fact_change_required": bool(entry["fact_change_required"]),
         "render_mode": "semantic_complete_question_answer_intervention",
+        "ledger_digest": profile["ledger_digest"],
         "question_rewrite_provenance": provenance,
         "generator_output_fields": list(GENERATOR_OUTPUT_FIELDS),
         "response_contract_policy": RESPONSE_CONTRACT_POLICY,
-    })
-    return validated
+        "response_contract_warnings": contract_result["warnings"],
+        "response_contract_question_source": "immutable_c11",
+    }
 
 
 def candidate_for_prompt(candidate: Mapping | None) -> Dict | None:
@@ -295,6 +347,162 @@ def materialize_plan(
             "response_contract_policy": RESPONSE_CONTRACT_POLICY,
         })
     return plan
+
+
+def _partial_batch_verdicts(
+    generated: Mapping | None, expected_ids: Sequence[str]
+) -> Dict[str, Dict]:
+    """Keep only unambiguous expected verdicts from a partial judge reply."""
+    if not isinstance(generated, Mapping):
+        return {}
+    raw_verdicts = generated.get("verdicts")
+    if not isinstance(raw_verdicts, list):
+        return {}
+    expected = set(expected_ids)
+    canonical: Dict[str, Dict] = {}
+    invalid = False
+    for raw in raw_verdicts:
+        if not isinstance(raw, Mapping):
+            invalid = True
+            continue
+        source_id = raw.get("source_id")
+        if source_id not in expected or source_id in canonical:
+            invalid = True
+            continue
+        canonical[source_id] = dict(raw)
+    # An extra or duplicate row makes positional/model coordination suspect;
+    # re-audit the complete batch through singleton fallbacks.
+    return {} if invalid else canonical
+
+
+def _request_singleton_verdict(
+    judge_client,
+    args,
+    payload: Mapping,
+    row: Mapping,
+    block_id: int,
+    judge_round: int,
+    batch_number: int,
+) -> Dict:
+    source_id = row["source_id"]
+    last_error = None
+    for attempt in range(1, max(int(args.request_retries), 1) + 1):
+        try:
+            judgement = v52.v2.request_json(
+                judge_client,
+                v52.request_args(args, judge=True),
+                ROW_JUDGE_PROMPT,
+                {
+                    **payload,
+                    "rows": [row],
+                    "judge_batch": {
+                        "number": batch_number,
+                        "size": 1,
+                        "total_rows": 1,
+                        "coverage_rule": (
+                            "return exactly one verdict for the supplied row"
+                        ),
+                        "coverage_fallback": True,
+                        "coverage_attempt": attempt,
+                    },
+                },
+                (
+                    f"V5.8 block {block_id} semantic audit round "
+                    f"{judge_round} singleton {source_id} attempt {attempt}"
+                ),
+            )
+            canonical = v52.v4.exact_rows(
+                judgement.get("verdicts"), [source_id],
+                f"singleton verdict {source_id}",
+            )
+            return canonical[source_id]
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(
+        f"singleton judge coverage failed for {source_id}: {last_error}"
+    ) from last_error
+
+
+def judge_plan_in_batches(
+    judge_client,
+    args,
+    block: Mapping,
+    plan: Mapping,
+    judge_round: int,
+) -> tuple[Dict, list[Dict]]:
+    """Judge batches, repairing omitted verdict coverage one row at a time."""
+    payload = v53.judge_payload(block, plan)
+    rows = list(payload["rows"])
+    batch_size = max(int(args.judge_batch_size), 1)
+    verdicts = []
+    provenance = []
+    block_id = int(block["block_id"])
+    for offset in range(0, len(rows), batch_size):
+        batch_rows = rows[offset:offset + batch_size]
+        batch_number = offset // batch_size + 1
+        batch_payload = {
+            **payload,
+            "rows": batch_rows,
+            "judge_batch": {
+                "number": batch_number,
+                "size": len(batch_rows),
+                "total_rows": len(rows),
+                "coverage_rule": "return exactly one verdict for every supplied row",
+            },
+        }
+        initial_error = ""
+        try:
+            judgement = v52.v2.request_json(
+                judge_client,
+                v52.request_args(args, judge=True),
+                ROW_JUDGE_PROMPT,
+                batch_payload,
+                (
+                    f"V5.8 block {block_id} semantic audit round "
+                    f"{judge_round} batch {batch_number}"
+                ),
+            )
+            canonical = _partial_batch_verdicts(
+                judgement, [row["source_id"] for row in batch_rows]
+            )
+        except Exception as exc:
+            initial_error = str(exc)
+            canonical = {}
+
+        missing_rows = [
+            row for row in batch_rows if row["source_id"] not in canonical
+        ]
+        if missing_rows:
+            print(
+                f"judge_coverage_fallback block={block_id} "
+                f"round={judge_round} batch={batch_number} rows="
+                + ",".join(row["source_id"] for row in missing_rows),
+                flush=True,
+            )
+        for row in missing_rows:
+            canonical[row["source_id"]] = _request_singleton_verdict(
+                judge_client,
+                args,
+                payload,
+                row,
+                block_id,
+                judge_round,
+                batch_number,
+            )
+
+        expected_ids = [row["source_id"] for row in batch_rows]
+        verdicts.extend(canonical[source_id] for source_id in expected_ids)
+        provenance.append({
+            "batch_number": batch_number,
+            "source_ids": expected_ids,
+            "initial_verdict_count": len(batch_rows) - len(missing_rows),
+            "coverage_fallback_source_ids": [
+                row["source_id"] for row in missing_rows
+            ],
+            "initial_error": initial_error,
+            "verdict_count": len(canonical),
+        })
+    return {"verdicts": verdicts}, provenance
 
 
 def assemble_block(

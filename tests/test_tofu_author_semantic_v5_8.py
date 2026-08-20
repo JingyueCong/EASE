@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +96,36 @@ class AuthorSemanticV58Test(unittest.TestCase):
                 self.blocks[1], self.source(29), profile, candidate
             )
 
+    def test_when_inside_replacement_book_title_is_not_a_date_question(self):
+        profile, _ = self.profile_and_content()
+        entry = profile["fact_ledger_by_source"]["forget05_perturbed-00029"]
+        entry["replacement_fact"] = (
+            "Harper Mei Collins' 'When Bridges Sleep' received the "
+            "Lighthouse Medal for Coastal Fiction."
+        )
+        candidate = {
+            "c01_question": (
+                "Can you share a fictitious award that Harper Mei Collins "
+                "received for the book 'When Bridges Sleep'?"
+            ),
+            "replacement_answer": (
+                "Yes. Harper Mei Collins' When Bridges Sleep received the "
+                "Lighthouse Medal for Coastal Fiction."
+            ),
+        }
+        validated = generator.validate_row_candidate(
+            self.blocks[1], self.source(29), profile, candidate
+        )
+        self.assertEqual(
+            validated["response_contract_question_source"], "immutable_c11"
+        )
+        self.assertFalse(
+            any(
+                "date/year" in error
+                for error in validated["response_contract_warnings"]
+            )
+        )
+
     def test_candidate_for_repair_strips_all_auxiliary_fields(self):
         candidate = {
             "c01_question": "Q",
@@ -139,6 +170,61 @@ class AuthorSemanticV58Test(unittest.TestCase):
         self.assertIs(generator.v55.validate_row_candidate, generator.validate_row_candidate)
         self.assertIs(generator.v55.materialize_plan, generator.materialize_plan)
         self.assertEqual(generator.v55.DESIGN_VERSION, generator.DESIGN_VERSION)
+
+    def test_judge_missing_batch_rows_use_singleton_coverage_fallback(self):
+        rows = [
+            {"source_id": source["source_id"]}
+            for source in self.blocks[1]["sources"]
+        ]
+        calls = []
+
+        def fake_payload(_block, _plan):
+            return {"rows": rows}
+
+        def verdict(row):
+            return {
+                "source_id": row["source_id"],
+                **{field: True for field in generator.JUDGE_FIELDS},
+                "reason": "matched",
+            }
+
+        def partial_request(_client, _args, _prompt, payload, _label):
+            batch = payload["judge_batch"]
+            calls.append(batch)
+            supplied = payload["rows"]
+            if batch.get("coverage_fallback"):
+                return {"verdicts": [verdict(supplied[0])]}
+            if batch["number"] == 3:
+                return {"verdicts": [verdict(row) for row in supplied[3:]]}
+            return {"verdicts": [verdict(row) for row in supplied]}
+
+        args = SimpleNamespace(
+            judge_batch_size=5,
+            model="offline",
+            judge_model="offline",
+            temperature=1.0,
+            judge_temperature=1.0,
+            request_retries=2,
+        )
+        old_payload = generator.v53.judge_payload
+        old_request = generator.v52.v2.request_json
+        generator.v53.judge_payload = fake_payload
+        generator.v52.v2.request_json = partial_request
+        try:
+            judgement, provenance = generator.judge_plan_in_batches(
+                None, args, self.blocks[1], {}, 1
+            )
+        finally:
+            generator.v53.judge_payload = old_payload
+            generator.v52.v2.request_json = old_request
+
+        self.assertEqual(len(judgement["verdicts"]), 20)
+        self.assertEqual(len(provenance), 4)
+        self.assertEqual(
+            provenance[2]["coverage_fallback_source_ids"],
+            [row["source_id"] for row in rows[10:13]],
+        )
+        self.assertEqual(sum(bool(call.get("coverage_fallback")) for call in calls), 3)
 
 
 if __name__ == "__main__":
