@@ -328,7 +328,10 @@ def _introduced_control_status_marker(
     )
     joined = ciru.normalise(f"{cell['question']} {cell['answer']}")
     for marker in ciru.CONTROL_STATUS_MARKERS:
-        if marker in joined and marker not in source_joined:
+        if (
+            marker in joined
+            and not ciru.control_status_marker_inherited(marker, source_joined)
+        ):
             return marker
     return None
 

@@ -106,6 +106,8 @@ directly express the frozen replacement fact, and preserve response mode and
 cardinality. Interpret titles, awards, places, dates, and names in context;
 never infer the answer type from a keyword alone. Do not mention controls,
 counterfactuals, generation, or fictionality unless inherited from C11.
+When generator_contract.required_question_identity_literal is non-null, copy
+that exact literal into c01_question; a pronoun or shortened name is invalid.
 
 When validation_feedback and previous_candidate are supplied, repair only the
 reported semantic or structural defect. Return JSON only with exactly:
@@ -150,6 +152,13 @@ def build_context_packet(
     """Build the explicit context that makes the API agent reproducible."""
     source_id = source["source_id"]
     entry = profile["fact_ledger_by_source"][source_id]
+    source_names_target = (
+        v57._normalise(block["target_entity"])
+        in v57._normalise(source["question"])
+    )
+    required_identity = (
+        profile["replacement_entity"] if source_names_target else None
+    )
     return {
         "agent_protocol_version": AGENT_PROTOCOL_VERSION,
         "causal_estimand": "(C11-C01)-(C10-C00)",
@@ -205,6 +214,7 @@ def build_context_packet(
             "keep_c11_byte_exact": True,
             "forbid_target_author_leakage_in_c01": True,
             "one_replacement_identity_per_block": True,
+            "required_question_identity_literal": required_identity,
             "semantic_properties_are_critic_owned": True,
         },
     }
@@ -373,7 +383,10 @@ def validate_structural_candidate(
         and v57._normalise(profile["replacement_entity"])
         not in v57._normalise(question)
     ):
-        raise ValueError("C01 question loses explicit replacement identity")
+        raise ValueError(
+            "C01 question must include exact replacement identity literal: "
+            f"{profile['replacement_entity']!r}"
+        )
     marker = v55._introduced_control_status_marker(source, cell)
     if marker:
         raise ValueError(f"C01 exposes control status with marker: {marker}")
@@ -634,6 +647,9 @@ def generate_row(
                 "generator_contract": {
                     "output_fields": list(GENERATOR_OUTPUT_FIELDS),
                     "repair_only_failed_row": True,
+                    "required_question_identity_literal": packet[
+                        "hard_boundaries"
+                    ]["required_question_identity_literal"],
                 },
             }
             if feedback:

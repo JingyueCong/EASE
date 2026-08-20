@@ -52,10 +52,28 @@ CONTROL_STATUS_MARKERS = (
     "not publicly known",
     "available public sources",
 )
+CONTROL_STATUS_EQUIVALENTS = {
+    "fictional": ("fictional", "fictitious"),
+}
 
 
 def normalise(text: str) -> str:
     return " ".join(text.casefold().split())
+
+
+def control_status_marker_inherited(marker: str, source_text: str) -> bool:
+    """Return whether benchmark text already expresses this control status.
+
+    This is surface canonicalisation, not semantic acceptance.  In particular,
+    TOFU uses both ``fictional`` and ``fictitious`` for the same benchmark
+    instruction, so changing between those forms must not create a synthetic-
+    control leak.
+    """
+    source = normalise(source_text)
+    return any(
+        equivalent in source
+        for equivalent in CONTROL_STATUS_EQUIVALENTS.get(marker, (marker,))
+    )
 
 
 def validate_ciru_unit(record: Dict) -> List[str]:
@@ -178,7 +196,9 @@ def validate_ciru_unit(record: Dict) -> List[str]:
             # exposed the control condition.  Newly introduced markers remain
             # forbidden, as do all such markers in legacy/free-form designs.
             inherited_v4_marker = (
-                author_typed_design and cell == "C01" and marker in source_joined
+                author_typed_design
+                and cell == "C01"
+                and control_status_marker_inherited(marker, source_joined)
             )
             if marker in joined and not inherited_v4_marker:
                 errors.append(f"{cell} exposes control status with marker: {marker}")

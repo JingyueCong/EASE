@@ -109,6 +109,38 @@ class AuthorSemanticAgentV59Test(unittest.TestCase):
             packet["hard_boundaries"]["semantic_properties_are_critic_owned"]
         )
 
+    def test_context_packet_declares_required_identity_literal(self):
+        profile, _ = self.profile_and_candidate()
+        packet = generator.build_context_packet(
+            self.blocks[1], self.source(32), profile
+        )
+        self.assertEqual(
+            packet["hard_boundaries"][
+                "required_question_identity_literal"
+            ],
+            profile["replacement_entity"],
+        )
+
+    def test_missing_question_identity_reports_exact_required_literal(self):
+        profile, _ = self.profile_and_candidate()
+        with self.assertRaisesRegex(
+            ValueError, profile["replacement_entity"]
+        ):
+            generator.validate_structural_candidate(
+                self.blocks[1],
+                self.source(32),
+                profile,
+                {
+                    "c01_question": (
+                        "How does their identity affect the literary scene?"
+                    ),
+                    "replacement_answer": (
+                        f"{profile['replacement_entity']} adds a new "
+                        "perspective to the literary scene."
+                    ),
+                },
+            )
+
     def test_semantic_brief_has_a_strict_schema(self):
         parsed = generator.validate_semantic_brief(semantic_brief())
         self.assertEqual(
@@ -133,6 +165,17 @@ class AuthorSemanticAgentV59Test(unittest.TestCase):
             validated["deterministic_observations"]["validation_role"],
             "critic_context_only",
         )
+
+    def test_fictional_inherits_fictitious_source_instruction(self):
+        profile, _ = self.profile_and_candidate()
+        candidate = self.when_candidate(profile)
+        candidate["c01_question"] = candidate["c01_question"].replace(
+            "fictitious", "fictional"
+        )
+        validated = generator.validate_structural_candidate(
+            self.blocks[1], self.source(29), profile, candidate
+        )
+        self.assertIn("fictional", validated["c01_question"].casefold())
 
     def test_lexical_overlap_is_an_observation_not_a_hard_gate(self):
         profile, _ = self.profile_and_candidate()
@@ -236,6 +279,12 @@ class AuthorSemanticAgentV59Test(unittest.TestCase):
             "validation_feedback"
         ])
         self.assertIn("previous_candidate", second_generator_payload)
+        self.assertEqual(
+            second_generator_payload["generator_contract"][
+                "required_question_identity_literal"
+            ],
+            profile["replacement_entity"],
+        )
 
     def test_v59_is_new_and_all_legacy_files_remain(self):
         self.assertEqual(

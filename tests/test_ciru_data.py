@@ -72,6 +72,28 @@ class CIRUDataTest(unittest.TestCase):
         errors = ciru.validate_ciru_unit(unit)
         self.assertTrue(any("control status" in error for error in errors))
 
+    def test_author_design_inherits_fictitious_fictional_synonyms(self):
+        unit = valid_unit()
+        unit.update({
+            "design_version": "tofu-author-semantic-agent-v5.9",
+            "block_id": 0,
+            "query_index": 0,
+            "profile_id": "fixture:semantic-agent-v5.9",
+            "canonical_target_entity": unit["target_entity"],
+            "identity_binding": {
+                "C11": unit["target_entity"],
+                "C01": unit["replacement_entity"],
+                "C10": unit["target_entity"],
+                "C00": unit["replacement_entity"],
+            },
+        })
+        unit["source_question"] = "Which fictitious award did Basil Hart win?"
+        unit["cells"]["C11"]["question"] = unit["source_question"]
+        unit["cells"]["C01"]["question"] = (
+            "Which fictional award did Elian Mercer win?"
+        )
+        self.assertEqual(ciru.validate_ciru_unit(unit), [])
+
     def test_large_length_mismatch_is_rejected(self):
         unit = valid_unit()
         unit["cells"]["C10"]["question"] = (
