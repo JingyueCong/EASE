@@ -89,6 +89,8 @@ Rules:
   of detail without adding irrelevant dates, numbers, or list punctuation;
 - use one fluent answer, with no editing instructions or meta-commentary;
 - do not mention the target author or copy the original factual answer;
+- never describe the replacement author, answer, award, book, or fact as
+  fictional, synthetic, imaginary, a control, or otherwise undocumented;
 - do not invent facts that contradict the frozen ledger or profile;
 - identity and unavailable rows are rendered by code and are not sent here.
 
@@ -311,6 +313,26 @@ def _target_alias_leaks(text: str, target: str) -> str | None:
     return None
 
 
+def _introduced_control_status_marker(
+    source: Mapping, cell: Mapping[str, str]
+) -> str | None:
+    """Return a newly introduced CIRU control-status marker, if any.
+
+    Some immutable TOFU prompts legitimately ask for a ``fictional book``.
+    Those inherited terms are benchmark content. A marker appearing only in
+    C01 instead exposes the synthetic intervention and must fail before the
+    row checkpoint reaches block assembly.
+    """
+    source_joined = ciru.normalise(
+        f"{source['question']} {source['answer']}"
+    )
+    joined = ciru.normalise(f"{cell['question']} {cell['answer']}")
+    for marker in ciru.CONTROL_STATUS_MARKERS:
+        if marker in joined and marker not in source_joined:
+            return marker
+    return None
+
+
 def deterministic_policy_candidate(
     block: Mapping, source: Mapping, profile: Mapping
 ) -> Dict:
@@ -361,6 +383,11 @@ def validate_row_candidate(
     leak = _target_alias_leaks(f"{expected_question} {answer}", block["target_entity"])
     if leak:
         raise ValueError(f"C01 still contains target alias {leak!r}")
+    marker = _introduced_control_status_marker(source, cell)
+    if marker:
+        raise ValueError(
+            f"C01 exposes control status with marker: {marker}"
+        )
     contract_result = semantic_contract_result(cell, source["contract"])
     if contract_result["errors"]:
         raise ValueError(

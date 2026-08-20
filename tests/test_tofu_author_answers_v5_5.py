@@ -281,6 +281,28 @@ class AuthorAnswersV55Test(unittest.TestCase):
                 self.raw_candidate(4, source, answer),
             )
 
+    def test_new_control_status_marker_is_rejected_before_assembly(self):
+        source = self.source(4, 91)
+        answer = self.v54_answer(4, source) + (
+            " This fictional profile is used as a synthetic control."
+        )
+        with self.assertRaisesRegex(ValueError, "control status.*fictional"):
+            generator.validate_row_candidate(
+                self.blocks[4],
+                source,
+                self.profiles[4],
+                self.raw_candidate(4, source, answer),
+            )
+
+    def test_inherited_fictional_word_is_not_control_leakage(self):
+        source = self.source(1, 24)
+        candidate = self.raw_candidate(1, source)
+        validated = generator.validate_row_candidate(
+            self.blocks[1], source, self.profiles[1], candidate
+        )
+        self.assertIn("fictional", source["question"].casefold())
+        self.assertTrue(validated["replacement_answer"])
+
     def test_identity_row_is_deterministic_and_skips_api(self):
         source = self.source(4, 80)
         calls = []
