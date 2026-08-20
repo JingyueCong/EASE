@@ -141,6 +141,48 @@ Return JSON only:
 """
 
 
+ANSWER_PROMPT = """Render one complete C01 answer from a frozen direct
+core-fact contrast.
+
+The replacement identity, C01 question, target relation, source core fact,
+replacement core fact, and response contract are fixed.  Return one complete
+replacement answer, not span edits and not an explanation of your work.
+
+Hard rules:
+- copy source_id, target_relation, ledger_fact_key, ledger_replacement_fact,
+  and c01_question exactly from the payload;
+- answer the same relation as C11 and explicitly express
+  replacement_core_fact without retaining source_core_fact;
+- obey surface_constraints.required_mode_family literally.  For ``positive``
+  use a direct affirmative statement and do not introduce no, not, never,
+  neither, without, uncertainty, or unavailable-information wording.  For
+  ``negative`` preserve an explicit negative answer.  For ``unavailable`` or
+  ``qualified`` preserve that availability status;
+- never introduce a phrase listed in
+  surface_constraints.forbidden_new_control_status_markers.  A phrase listed
+  as inherited is benchmark wording, but it must not be newly attached to the
+  replacement author or replacement fact;
+- preserve the semantic answer object required by the question (date/year,
+  number, binary answer, or open prose).  Surface punctuation and legacy
+  answer-format labels are only soft matching goals;
+- approximately match source length, grammatical person, and detail, using
+  fluent natural prose without irrelevant dates, numbers, or list items;
+- do not mention the target author, the generation process, or any
+  counterfactual/control status;
+- do not invent content that contradicts the frozen replacement core fact.
+
+When validation_feedback and previous_candidate are supplied, repair the
+reported defect directly.  In particular, a polarity error must be rewritten
+with the required mode family, and a control-status error must remove the
+newly introduced marker.  Never change a frozen field.
+
+Return JSON only:
+{"source_id":"exact id","target_relation":"copied relation",
+ "ledger_fact_key":"copied key","ledger_replacement_fact":"copied fact",
+ "c01_question":"copied question","replacement_answer":"complete answer"}
+"""
+
+
 def _normalise(value: object) -> str:
     return anchors.normalise(str(value))
 
@@ -464,11 +506,48 @@ def row_payload(
 ) -> Dict:
     payload = BASE_V55_ROW_PAYLOAD(block, source, profile, feedback, previous)
     entry = profile["fact_ledger_by_source"][source["source_id"]]
+    expected_mode = str(source["contract"]["response_mode"])
+    required_family = v55._mode_family(expected_mode)
+    source_text = ciru.normalise(
+        f"{source['question']} {source['answer']}"
+    )
+    inherited_markers = [
+        marker for marker in ciru.CONTROL_STATUS_MARKERS
+        if marker in source_text
+    ]
+    forbidden_markers = [
+        marker for marker in ciru.CONTROL_STATUS_MARKERS
+        if marker not in source_text
+    ]
+    mode_instruction = {
+        "positive": (
+            "Write a direct affirmative answer. Do not use no, not, never, "
+            "neither, without, unclear, unknown, unavailable, or an "
+            "information-is-missing construction anywhere in the answer."
+        ),
+        "negative": "Preserve an explicit negative answer.",
+        "unavailable": "Preserve an explicit unavailable-information answer.",
+        "qualified": "Preserve a qualified or uncertain answer.",
+    }.get(
+        required_family,
+        f"Preserve the semantic response-mode family {required_family!r}.",
+    )
     payload.update({
         "contrast_schema_version": CONTRAST_SCHEMA_VERSION,
         "source_core_fact": entry["source_core_fact"],
         "replacement_core_fact": entry["replacement_core_fact"],
         "contrast_status": entry["contrast_status"],
+        "surface_constraints": {
+            "source_response_mode": expected_mode,
+            "required_mode_family": required_family,
+            "mode_instruction": mode_instruction,
+            "inherited_control_status_markers": inherited_markers,
+            "forbidden_new_control_status_markers": forbidden_markers,
+            "repair_scope": (
+                "Change only replacement_answer when validation feedback is "
+                "present; all other response fields are frozen."
+            ),
+        },
     })
     return payload
 
@@ -498,6 +577,7 @@ def configure_shared_modules() -> None:
     v55.configure_shared_modules()
     v53.generate_profile = generate_profile
     v53.JUDGE_PROMPT = ROW_JUDGE_PROMPT
+    v55.ANSWER_PROMPT = ANSWER_PROMPT
     v55.row_payload = row_payload
     v55.assemble_block = assemble_block
 

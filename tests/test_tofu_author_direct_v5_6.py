@@ -163,6 +163,40 @@ class AuthorDirectV56Test(unittest.TestCase):
         self.assertEqual(payload["contrast_status"], "changed")
         self.assertNotIn("value_type", payload)
 
+    def test_row_payload_makes_positive_polarity_explicit(self):
+        profile = generator.validate_profile(
+            self.blocks[1], self.raw_profile(), self.authors
+        )
+        source = self.source(1, 32)
+        payload = generator.row_payload(self.blocks[1], source, profile)
+        constraints = payload["surface_constraints"]
+        self.assertEqual(constraints["required_mode_family"], "positive")
+        self.assertIn("Do not use no, not, never", constraints["mode_instruction"])
+
+    def test_row_payload_forbids_only_new_control_status_markers(self):
+        profile = generator.validate_profile(
+            self.blocks[1], self.raw_profile(), self.authors
+        )
+        ordinary = generator.row_payload(
+            self.blocks[1], self.source(1, 32), profile
+        )["surface_constraints"]
+        self.assertIn("fictional", ordinary["forbidden_new_control_status_markers"])
+
+        inherited_source = copy.deepcopy(self.source(1, 32))
+        inherited_source["question"] += " about a fictional book"
+        inherited = generator.row_payload(
+            self.blocks[1], inherited_source, profile
+        )["surface_constraints"]
+        self.assertIn("fictional", inherited["inherited_control_status_markers"])
+        self.assertNotIn(
+            "fictional", inherited["forbidden_new_control_status_markers"]
+        )
+
+    def test_v56_installs_direct_contrast_answer_prompt(self):
+        generator.configure_shared_modules()
+        self.assertEqual(generator.v55.ANSWER_PROMPT, generator.ANSWER_PROMPT)
+        self.assertIn("required_mode_family", generator.ANSWER_PROMPT)
+
     def test_profile_cache_requires_independent_contrast_approval(self):
         raw = self.raw_profile()
         block = self.blocks[1]
