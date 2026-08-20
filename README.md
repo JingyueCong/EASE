@@ -710,6 +710,34 @@ length, and fact-count drift are retained as audit warnings instead of being
 misreported as causal failures. The shared V4 classifier and earlier variants
 are unchanged.
 
+#### Author direct-contrast V5.6 (GPT core fact -> GPT judge)
+
+Human review of the V5.5 smoke found that a coherent free-text ledger could
+retain the original book or award and add only a year or explanation. V5.6
+does not introduce a hand-written slot taxonomy. For every row GPT states a
+short `source_core_fact` and a genuinely different
+`replacement_core_fact`; a separate GPT call sees C11 and both core facts and
+must approve source fidelity, relation preservation, factual contrast, and
+block coherence before C01 rendering starts. Ambiguous rows use `ABSTAIN` and
+block final JSONL creation rather than being silently accepted.
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V56_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=1 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_direct_v5_6.sh \
+  > logs/f2d_author_direct_v5_6_smoke.log 2>&1 &
+```
+
+V5.6 has independent JSONL/state/audit paths and never migrates a V5.5
+ledger, because factual acceptance changed. FullAnswer and V1--V5.5 remain
+untouched. A smoke subset cannot start assistant training, and a full run
+still requires explicit human audit approval.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

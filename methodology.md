@@ -1056,3 +1056,24 @@ placebo 和 dual-assistant DiD estimand，只替换 factual C01 的 row renderer
 不能重新发明作者事实。由于 renderer 语义改变，V5.5 使用新的 JSONL/state/audit 路径，只迁移
 digest 一致的 V5.3/V5.4 ledger profile，不迁移旧 span row。FullAnswer 与 V1--V5.4 均保留为
 严格消融。困难 block smoke、deterministic hard gate 与人工审计通过前，不允许训练 assistant。
+
+## 28. TOFU author direct-contrast V5.6：直接语义改写与独立复核
+
+V5.5 的人工审计显示，仅冻结自由文本 `replacement_fact` 仍不足以证明 causal contrast：模型可
+保留 C11 的书名或奖项，仅增加年份、作品说明或更长的描述，而原有 code/judge 会把整段文本
+差异误认为 factual object 已变化。V5.6 不再增加按样本或按 relation 手写的 slot taxonomy，
+而是让生成模型为每行直接输出：
+
+1. `source_core_fact`：C11 真正回答的最短核心事实；
+2. `replacement_core_fact`：同一 relation 下真正不同的新核心事实；
+3. `contrast_status`：`changed`、显式 `policy` 或 `abstain`。
+
+独立 judge 同时读取 immutable C11、两个 core fact 和完整 20-row replacement profile，逐行检查
+source fidelity、same relation、core fact changed 与 replacement plausibility。相同奖项/书名加
+年份、保留完整原集合只增加一项、同义改写或仍蕴含原核心命题均必须拒绝。只有 profile judge
+通过后，V5.5 的 row-local complete-answer renderer 才生成 C01，随后第二个 block judge 再从
+C11/C01 与 before/after core facts 复核 factual change 和自然度。
+
+无法可靠识别核心命题时必须 `ABSTAIN`；该状态保留在 attempt artifact 中并阻止 final JSONL，
+不能为了覆盖率猜测答案。V5.6 使用新的 design、state、JSONL 与 audit 路径，不迁移 V5.5 ledger，
+FullAnswer 与 V1--V5.5 均保持不变。40-row smoke 人工审核通过前不得扩展或训练 dual assistants。
