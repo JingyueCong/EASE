@@ -1077,3 +1077,27 @@ C11/C01 与 before/after core facts 复核 factual change 和自然度。
 无法可靠识别核心命题时必须 `ABSTAIN`；该状态保留在 attempt artifact 中并阻止 final JSONL，
 不能为了覆盖率猜测答案。V5.6 使用新的 design、state、JSONL 与 audit 路径，不迁移 V5.5 ledger，
 FullAnswer 与 V1--V5.5 均保持不变。40-row smoke 人工审核通过前不得扩展或训练 dual assistants。
+
+## 29. TOFU author joint-contrast V5.7：问题与答案联合干预
+
+V5.6 的 40-row 人工审计进一步暴露了 answer-only renderer 的系统缺陷：即使 C01 answer 已表达
+通过独立审核的 replacement core fact，C01 question 仍可能保留 C11 的书名、出生地、日期、
+奖项对象或身份描述，导致“问题问原事实、答案答替代事实”。这不是 surface warning，而是
+factorial cell 的联合语义不成立，因此 V5.7 分配新的 design、schema、state、JSONL 与 audit 路径，
+不修改也不迁移 V5.6 accepted row。
+
+V5.7 冻结 V5.6 的直接 core-fact ledger 思路，但每条 row-local generation 同时输出完整
+`c01_question` 与 `replacement_answer`。生成器必须保持 relation schema、论元结构、基数与
+response-mode family，同时联合替换 question 中所有 target-specific premise。每条记录保存
+`question_anchor_rewrites` 与 rationale 作为可审计 provenance；这些字段不能替代语义验证。
+
+独立 block judge 新增两项不可覆盖的判据：
+
+1. `question_premise_profile_consistent`：C01 问题中的书名、地点、日期、数量和身份描述均与
+   replacement profile 相容；
+2. `answer_satisfies_question`：C01 answer 必须直接回答实际的 C01 question，而不只是孤立地
+   符合某条 replacement fact。
+
+对于显式 identity/unavailable policy row，只允许覆盖 `target_fact_changed`；以上两项以及
+relation match、profile consistency 和 natural surface 仍必须通过。先运行 blocks 1/4 的 40-row
+smoke，完成 deterministic hard gate 与人工风险/随机审计；未获人工批准前不得启动 dual assistant。

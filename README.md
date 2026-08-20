@@ -738,6 +738,37 @@ ledger, because factual acceptance changed. FullAnswer and V1--V5.5 remain
 untouched. A smoke subset cannot start assistant training, and a full run
 still requires explicit human audit approval.
 
+#### Author joint-contrast V5.7 (matched C01 question + answer)
+
+Human review of V5.6 found a different failure class: an answer could express
+the approved replacement fact while its question still named the source book,
+birthplace, date, or award object. V5.7 treats C01 as a joint question-answer
+intervention. Each row rewrites all target-specific question premises and the
+answer together, while preserving the semantic relation, argument structure,
+cardinality, and response-mode family. The independent block judge must now
+approve both `question_premise_profile_consistent` and
+`answer_satisfies_question` in addition to the V5.6 fact checks.
+
+Run the difficult two-block smoke first:
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V57_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=2 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_joint_v5_7.sh \
+  > logs/f2d_author_joint_v5_7_smoke.log 2>&1 &
+```
+
+V5.7 writes a new JSONL, profile artifact, state tree, and audit directory.
+It never reuses V5.6 accepted rows because the C01 question renderer and
+semantic estimand changed. The wrapper refuses smoke training and requires an
+explicit human audit approval before a complete 200-row run can train dual
+assistants.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

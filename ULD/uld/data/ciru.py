@@ -20,6 +20,7 @@ AUTHOR_LEDGER_V53_DESIGN = "tofu-author-ledger-rowlocal-v5.3"
 AUTHOR_LEDGER_SLOTS_V54_DESIGN = "tofu-author-ledger-slots-v5.4"
 AUTHOR_LEDGER_ANSWER_V55_DESIGN = "tofu-author-ledger-answer-v5.5"
 AUTHOR_DIRECT_V56_DESIGN = "tofu-author-direct-contrast-v5.6"
+AUTHOR_JOINT_V57_DESIGN = "tofu-author-joint-contrast-v5.7"
 AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_PROFILE_DESIGN,
     AUTHOR_CONTRACT_DESIGN,
@@ -33,6 +34,7 @@ AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_LEDGER_SLOTS_V54_DESIGN,
     AUTHOR_LEDGER_ANSWER_V55_DESIGN,
     AUTHOR_DIRECT_V56_DESIGN,
+    AUTHOR_JOINT_V57_DESIGN,
 }
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
@@ -105,6 +107,7 @@ def validate_ciru_unit(record: Dict) -> List[str]:
         AUTHOR_LEDGER_SLOTS_V54_DESIGN,
         AUTHOR_LEDGER_ANSWER_V55_DESIGN,
         AUTHOR_DIRECT_V56_DESIGN,
+        AUTHOR_JOINT_V57_DESIGN,
     }
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):
