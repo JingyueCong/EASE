@@ -475,6 +475,140 @@ def parse_judgement(
     return verdicts, failures
 
 
+def judge_plan_in_batches(
+    judge_client,
+    args,
+    block: Mapping,
+    plan: Mapping,
+    judge_round: int,
+) -> tuple[Dict, list[Dict]]:
+    """Collect an exact verdict for every row without one oversized response."""
+    payload = v53.judge_payload(block, plan)
+    rows = list(payload["rows"])
+    batch_size = max(int(args.judge_batch_size), 1)
+    verdicts = []
+    provenance = []
+    for offset in range(0, len(rows), batch_size):
+        batch_rows = rows[offset:offset + batch_size]
+        batch_number = offset // batch_size + 1
+        batch_payload = {
+            **payload,
+            "rows": batch_rows,
+            "judge_batch": {
+                "number": batch_number,
+                "size": len(batch_rows),
+                "total_rows": len(rows),
+                "coverage_rule": "return exactly one verdict for every supplied row",
+            },
+        }
+        judgement = v52.v2.request_json(
+            judge_client,
+            v52.request_args(args, judge=True),
+            ROW_JUDGE_PROMPT,
+            batch_payload,
+            (
+                f"V5.7 block {block['block_id']} joint fidelity audit "
+                f"round {judge_round} batch {batch_number}"
+            ),
+        )
+        expected_ids = [row["source_id"] for row in batch_rows]
+        canonical = v52.v4.exact_rows(
+            judgement.get("verdicts"), expected_ids,
+            f"judge batch {batch_number} verdicts",
+        )
+        verdicts.extend(canonical[source_id] for source_id in expected_ids)
+        provenance.append({
+            "batch_number": batch_number,
+            "source_ids": expected_ids,
+            "verdict_count": len(canonical),
+        })
+    return {"verdicts": verdicts}, provenance
+
+
+def generate_block(
+    generation_client,
+    judge_client,
+    args,
+    block: Mapping,
+    protected_authors: Sequence[str],
+    state_dir: Path,
+) -> Dict:
+    block_id = int(block["block_id"])
+    print(f"start_block block={block_id} author={block['target_entity']}", flush=True)
+    profile = v53.generate_profile(
+        generation_client, judge_client, args, block, protected_authors, state_dir
+    )
+    candidates = v55.generate_rows(
+        generation_client, args, block, profile, state_dir
+    )
+    source_by_id = {source["source_id"]: source for source in block["sources"]}
+    last_failures: Dict[str, str] = {}
+    for judge_round in range(1, args.judge_rounds + 1):
+        plan = materialize_plan(block, profile, candidates, args.seed)
+        judgement, batches = judge_plan_in_batches(
+            judge_client, args, block, plan, judge_round
+        )
+        verdicts, failures = parse_judgement(judgement, block, plan)
+        v52.write_json(
+            v52.block_directory(state_dir, block_id)
+            / f"judge_round_{judge_round:02d}.json",
+            {
+                "design_version": DESIGN_VERSION,
+                "ledger_digest": profile["ledger_digest"],
+                "judge_batch_size": int(args.judge_batch_size),
+                "judge_batches": batches,
+                "verdicts": verdicts,
+                "failures": failures,
+            },
+        )
+        if not failures:
+            plan["judge_round"] = judge_round
+            result = assemble_block(block, plan, verdicts, args)
+            print(
+                f"block_ready block={block_id} judge_round={judge_round} "
+                f"judge_batches={len(batches)} conflicts=0",
+                flush=True,
+            )
+            return result
+        last_failures = failures
+        print(
+            f"judge_reject block={block_id} round={judge_round}/"
+            f"{args.judge_rounds} rows={','.join(sorted(failures))}",
+            flush=True,
+        )
+        if judge_round == args.judge_rounds:
+            break
+        repaired = {}
+        with ThreadPoolExecutor(max_workers=max(args.row_concurrency, 1)) as executor:
+            futures = {
+                executor.submit(
+                    generate_row,
+                    generation_client,
+                    args,
+                    block,
+                    source_by_id[source_id],
+                    profile,
+                    state_dir,
+                    failures[source_id],
+                    candidate_for_prompt(candidates[source_id]),
+                    True,
+                ): source_id
+                for source_id in failures
+            }
+            for future in as_completed(futures):
+                source_id = futures[future]
+                repaired[source_id] = future.result()
+        candidates.update(repaired)
+    raise RuntimeError(
+        f"block {block_id} row-fidelity judge exhausted "
+        f"{args.judge_rounds} rounds: "
+        + " | ".join(
+            f"{source_id}: {reason}"
+            for source_id, reason in sorted(last_failures.items())
+        )
+    )
+
+
 def assemble_block(
     block: Mapping, plan: Mapping, verdicts: Mapping[str, Mapping], args
 ) -> Dict:
@@ -544,6 +678,7 @@ def configure_shared_modules() -> None:
     v55.generate_row = generate_row
     v55.materialize_plan = materialize_plan
     v55.assemble_block = assemble_block
+    v55.generate_block = generate_block
     v55.v52.parse_judgement = parse_judgement
 
 
@@ -576,6 +711,7 @@ def main() -> None:
     parser.add_argument("--profile-retries", type=int, default=6)
     parser.add_argument("--row-retries", type=int, default=6)
     parser.add_argument("--judge-rounds", type=int, default=4)
+    parser.add_argument("--judge-batch-size", type=int, default=5)
     parser.add_argument(
         "--json-mode", choices=("auto", "required", "prompt"), default="auto"
     )

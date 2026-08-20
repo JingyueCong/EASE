@@ -47,6 +47,7 @@ CF_REQUEST_RETRIES="${CF_REQUEST_RETRIES:-3}"
 CF_PROFILE_RETRIES="${CF_PROFILE_RETRIES:-6}"
 CF_ROW_RETRIES="${CF_ROW_RETRIES:-6}"
 CF_JUDGE_ROUNDS="${CF_JUDGE_ROUNDS:-4}"
+CF_JUDGE_BATCH_SIZE="${CF_JUDGE_BATCH_SIZE:-5}"
 CF_JSON_MODE="${CF_JSON_MODE:-auto}"
 CF_TEMPERATURE="${CF_TEMPERATURE:-1.0}"
 JUDGE_TEMPERATURE="${JUDGE_TEMPERATURE:-1.0}"
@@ -73,6 +74,7 @@ echo "  architecture       : frozen core ledger -> joint C01 Q+A -> judge"
 echo "  generator / judge  : $CF_MODEL / $JUDGE_MODEL"
 echo "  block/row workers  : $CF_BLOCK_CONCURRENCY / $CF_ROW_CONCURRENCY"
 echo "  profile/row retries: $CF_PROFILE_RETRIES / $CF_ROW_RETRIES"
+echo "  judge rounds/batch : $CF_JUDGE_ROUNDS / $CF_JUDGE_BATCH_SIZE rows"
 echo "  factorial JSONL    : $DATA_PATH"
 echo "  resumable state    : $STATE_DIR"
 echo "  legacy preservation: FullAnswer and V1-V5.6 untouched"
@@ -112,6 +114,7 @@ if [ ! -s "$DATA_PATH" ] || [ ! -s "$PROFILES_PATH" ]; then
         --profile-retries "$CF_PROFILE_RETRIES" \
         --row-retries "$CF_ROW_RETRIES" \
         --judge-rounds "$CF_JUDGE_ROUNDS" \
+        --judge-batch-size "$CF_JUDGE_BATCH_SIZE" \
         --json-mode "$CF_JSON_MODE"
 else
     echo "Reusing frozen V5.7 data: $DATA_PATH"

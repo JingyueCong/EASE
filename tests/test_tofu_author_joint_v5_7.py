@@ -2,6 +2,7 @@ import copy
 import importlib.util
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -250,9 +251,98 @@ class AuthorJointV57Test(unittest.TestCase):
         self.assertTrue(canonical[policy_id]["target_fact_changed"])
         self.assertIn("question_premise_profile_consistent", failures[policy_id])
 
+    def test_block_judge_batches_require_and_merge_exact_coverage(self):
+        rows = [
+            {"source_id": source["source_id"]}
+            for source in self.blocks[1]["sources"]
+        ]
+        calls = []
+
+        def fake_payload(_block, _plan):
+            return {"author_profile": {"replacement_entity": "R"}, "rows": rows}
+
+        def fake_request(_client, _args, _prompt, payload, _label):
+            calls.append([row["source_id"] for row in payload["rows"]])
+            return {
+                "verdicts": [
+                    {
+                        "source_id": row["source_id"],
+                        **{field: True for field in generator.JUDGE_FIELDS},
+                        "reason": "matched",
+                    }
+                    for row in payload["rows"]
+                ]
+            }
+
+        args = SimpleNamespace(
+            judge_batch_size=5,
+            model="offline",
+            judge_model="offline",
+            temperature=1.0,
+            judge_temperature=1.0,
+            request_retries=1,
+        )
+        old_payload = generator.v53.judge_payload
+        old_request = generator.v52.v2.request_json
+        generator.v53.judge_payload = fake_payload
+        generator.v52.v2.request_json = fake_request
+        try:
+            judgement, provenance = generator.judge_plan_in_batches(
+                None, args, self.blocks[1], {}, 1
+            )
+        finally:
+            generator.v53.judge_payload = old_payload
+            generator.v52.v2.request_json = old_request
+        self.assertEqual([len(batch) for batch in calls], [5, 5, 5, 5])
+        self.assertEqual(len(judgement["verdicts"]), 20)
+        self.assertEqual(len(provenance), 4)
+
+    def test_block_judge_rejects_missing_verdict_inside_a_batch(self):
+        rows = [
+            {"source_id": source["source_id"]}
+            for source in self.blocks[1]["sources"]
+        ]
+
+        def fake_payload(_block, _plan):
+            return {"rows": rows}
+
+        def incomplete_request(_client, _args, _prompt, payload, _label):
+            return {
+                "verdicts": [
+                    {
+                        "source_id": row["source_id"],
+                        **{field: True for field in generator.JUDGE_FIELDS},
+                        "reason": "matched",
+                    }
+                    for row in payload["rows"][1:]
+                ]
+            }
+
+        args = SimpleNamespace(
+            judge_batch_size=5,
+            model="offline",
+            judge_model="offline",
+            temperature=1.0,
+            judge_temperature=1.0,
+            request_retries=1,
+        )
+        old_payload = generator.v53.judge_payload
+        old_request = generator.v52.v2.request_json
+        generator.v53.judge_payload = fake_payload
+        generator.v52.v2.request_json = incomplete_request
+        try:
+            with self.assertRaisesRegex(ValueError, "coverage mismatch"):
+                generator.judge_plan_in_batches(
+                    None, args, self.blocks[1], {}, 1
+                )
+        finally:
+            generator.v53.judge_payload = old_payload
+            generator.v52.v2.request_json = old_request
+
     def test_configure_installs_joint_renderer_without_changing_v56_files(self):
         generator.configure_shared_modules()
         self.assertIs(generator.v55.generate_row, generator.generate_row)
+        self.assertIs(generator.v55.generate_block, generator.generate_block)
         self.assertIs(generator.v55.validate_row_candidate, generator.validate_row_candidate)
         self.assertIn("question and answer jointly", generator.JOINT_PROMPT)
         self.assertEqual(
