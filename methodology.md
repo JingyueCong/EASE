@@ -1101,3 +1101,29 @@ response-mode family，同时联合替换 question 中所有 target-specific pre
 对于显式 identity/unavailable policy row，只允许覆盖 `target_fact_changed`；以上两项以及
 relation match、profile consistency 和 natural surface 仍必须通过。先运行 blocks 1/4 的 40-row
 smoke，完成 deterministic hard gate 与人工风险/随机审计；未获人工批准前不得启动 dual assistant。
+
+## 30. TOFU author semantic-contrast V5.8：最小生成接口与代码所有的 provenance
+
+V5.7 的困难 block smoke 表明，完整 C01 question/answer 可以逐行生成，但要求模型同时返回
+`source_id`、ledger key、逐字 `question_anchor_rewrites` 与 rationale，会把语义生成错误和字符串
+补丁协议错误混在一起。语义正确的候选可能仅因模型报告的 `source_text` 不是 C11 的精确子串而被
+拒绝；这种 rejection 不提供新的 causal evidence，也不适合迁移到 MUSE 长文本。
+
+V5.8 保持 V5.7 的 estimand 与必要不变量不变：C11 byte-frozen、V5.6-style replacement core-fact
+ledger、C01 same-relation joint question/answer intervention、冻结 professional C10/C00 placebo、
+`(C11-C01)-(C10-C00)`、逐行 targeted repair，以及六字段独立 block judge。改变的只是生成器接口：
+
+1. row generator 只返回完整 `c01_question` 与 `replacement_answer` 两个内容字段；
+2. `source_id`、relation、fact key、replacement fact、design 和 digest 全部由代码注入，模型返回的
+   同名额外字段被忽略；
+3. question rewrite provenance 使用确定性的 character `SequenceMatcher` 在生成完成后计算，记录
+   source/replacement spans 与 operation，并明确标注为 `audit_only`，不再作为 acceptance gate；
+4. deterministic gate 仍负责 schema、目标作者泄漏、response-mode family、replacement ledger
+   evidence 与 identity-only no-op；same relation、question premise consistency、Q/A entailment、fact
+   change、block profile coherence 和 natural surface 仍由分批独立 semantic judge 审核；
+5. preflight 输出写入独立日志，主运行日志不再混入测试 fixture 的 `block_ready` 文本。
+
+由于 generator contract、provenance schema 和 acceptance boundary 均发生变化，V5.8 使用新的
+design、state、JSONL、profile 与 audit 路径，不迁移 V5.7 row/block checkpoint。FullAnswer 与
+V1--V5.7 代码及 artifact 均保留。仍先运行 block 1/4 的 40-row smoke；hard gate 和人工 random/risk
+audit 通过之前，不允许扩展为 dual-assistant 训练。

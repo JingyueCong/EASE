@@ -769,6 +769,35 @@ semantic estimand changed. The wrapper refuses smoke training and requires an
 explicit human audit approval before a complete 200-row run can train dual
 assistants.
 
+#### Author semantic-contrast V5.8 (minimal generator contract)
+
+V5.8 preserves V5.7's joint C01 semantics but removes model-authored patch
+metadata. The generator returns only `c01_question` and
+`replacement_answer`; code injects frozen identifiers and ledger fields, then
+derives an audit-only character diff. Exact `source_text` reporting is no
+longer an acceptance condition. The independent batched judge still enforces
+same relation, factual change, replacement-profile consistency, matched Q/A,
+and natural surface.
+
+Run the separate two-block smoke before any full generation or training:
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V58_BLOCK_IDS="1,4" \
+  CF_BLOCK_CONCURRENCY=2 \
+  CF_ROW_CONCURRENCY=5 \
+  CF_JUDGE_BATCH_SIZE=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_semantic_v5_8.sh \
+  > logs/f2d_author_semantic_v5_8_smoke.log 2>&1 &
+```
+
+V5.8 uses independent JSONL, profile, state, preflight, and audit paths. It
+does not migrate V5.7 row or block checkpoints. FullAnswer and V1--V5.7 remain
+untouched, and the wrapper refuses assistant training for a smoke subset.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 
