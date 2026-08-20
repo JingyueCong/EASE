@@ -124,6 +124,7 @@ class CIRUDataTest(unittest.TestCase):
             "tofu-author-ledger-rowlocal-v5.3",
             "tofu-author-ledger-slots-v5.4",
             "tofu-author-ledger-answer-v5.5",
+            "tofu-author-direct-contrast-v5.6",
         ):
             unit = valid_unit()
             unit.update({
@@ -140,6 +141,28 @@ class CIRUDataTest(unittest.TestCase):
                 },
             })
             self.assertEqual(ciru.validate_ciru_unit(unit), [], design)
+
+    def test_direct_v56_allows_implicit_author_identity_binding(self):
+        unit = valid_unit()
+        unit.update({
+            "design_version": "tofu-author-direct-contrast-v5.6",
+            "block_id": 0,
+            "query_index": 0,
+            "profile_id": "fixture:direct-v5.6",
+            "canonical_target_entity": unit["target_entity"],
+            "identity_binding": {
+                "C11": unit["target_entity"],
+                "C01": unit["replacement_entity"],
+                "C10": unit["target_entity"],
+                "C00": unit["replacement_entity"],
+            },
+        })
+        unit["source_question"] = "Which award did the author win?"
+        unit["cells"]["C11"]["question"] = unit["source_question"]
+        unit["cells"]["C01"]["question"] = unit["source_question"]
+        unit["cells"]["C10"]["question"] = "Which city does the author live in?"
+        unit["cells"]["C00"]["question"] = unit["cells"]["C10"]["question"]
+        self.assertEqual(ciru.validate_ciru_unit(unit), [])
 
 
 if __name__ == "__main__":

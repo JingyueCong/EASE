@@ -230,7 +230,9 @@ def validate_profile(
     raw_entries = v52.v4.exact_rows(
         generated.get("fact_ledger"), list(source_by_id), "fact_ledger"
     )
-    ledger, shared = [], {}
+    ledger = []
+    shared_variants: Dict[str, Dict[tuple[str, str], str]] = {}
+    fact_key_repairs: Dict[str, Dict[str, list[str]]] = {}
     for source_id, source in source_by_id.items():
         raw = raw_entries[source_id]
         required = v52.source_fact_change_required(source, block["target_entity"])
@@ -295,9 +297,17 @@ def validate_profile(
             abstain_reason = ""
 
         shared_payload = (_normalise(replacement_core), status)
-        if fact_key in shared and shared[fact_key] != shared_payload:
-            raise ValueError(f"fact_key {fact_key!r} has conflicting core facts")
-        shared[fact_key] = shared_payload
+        variants = shared_variants.setdefault(fact_key, {})
+        resolved_key = variants.get(shared_payload)
+        if resolved_key is None:
+            resolved_key = (
+                fact_key if not variants else f"{fact_key}::v{len(variants) + 1}"
+            )
+            variants[shared_payload] = resolved_key
+        fact_key_repairs.setdefault(fact_key, {}).setdefault(
+            resolved_key, []
+        ).append(source_id)
+        fact_key = resolved_key
         ledger.append({
             "source_id": source_id,
             "fact_key": fact_key,
@@ -318,6 +328,10 @@ def validate_profile(
         "fact_ledger": ledger,
         "fact_ledger_by_source": {item["source_id"]: item for item in ledger},
         "ledger_digest": ledger_digest,
+        "fact_key_repairs": {
+            key: variants for key, variants in fact_key_repairs.items()
+            if len(variants) > 1
+        },
     }
     result["profile_digest"] = v52.digest_json({
         "target_entity": result["target_entity"],
@@ -725,6 +739,7 @@ def main() -> None:
                     "replacement_pronouns", "anchor_catalog_digest",
                     "ledger_digest", "fact_ledger", "author_plan",
                     "placebo_plan", "reconciliation_conflicts",
+                    "fact_key_repairs",
                     "profile_semantic_judge", "profile_attempt", "judge_round",
                     "contrast_schema_version",
                 )

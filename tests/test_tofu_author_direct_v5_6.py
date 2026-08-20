@@ -86,6 +86,19 @@ class AuthorDirectV56Test(unittest.TestCase):
             generator.CONTRAST_SCHEMA_VERSION,
         )
 
+    def test_conflicting_fact_key_values_are_split_before_semantic_judge(self):
+        raw = self.raw_profile()
+        first = raw["fact_ledger"][1]
+        second = raw["fact_ledger"][2]
+        second["fact_key"] = first["fact_key"]
+        second["replacement_core_fact"] = "a distinct replacement core fact"
+        second["replacement_fact"] = second["replacement_core_fact"]
+        profile = generator.validate_profile(self.blocks[1], raw, self.authors)
+        first_entry = profile["fact_ledger_by_source"][first["source_id"]]
+        second_entry = profile["fact_ledger_by_source"][second["source_id"]]
+        self.assertNotEqual(first_entry["fact_key"], second_entry["fact_key"])
+        self.assertIn(first["fact_key"], profile["fact_key_repairs"])
+
     def test_textually_unchanged_core_is_rejected_before_judge(self):
         raw = self.raw_profile()
         entry = next(
