@@ -26,11 +26,11 @@ PROFILE_READY = re.compile(
     r"block=(?P<block>\d+)"
 )
 ROW_REJECT = re.compile(
-    r"row_reject block=(?P<block>\d+) source=(?P<source>\S+) "
+    r"(?:agent_)?row_reject block=(?P<block>\d+) source=(?P<source>\S+) "
     r"attempt=(?P<attempt>\d+)/(?P<limit>\d+) error=(?P<error>.*)$"
 )
 ROW_READY = re.compile(
-    r"(?:row_ready|reuse_row|migrate_row) "
+    r"(?:(?:agent_)?row_ready|reuse_row|migrate_row) "
     r"block=(?P<block>\d+) source=(?P<source>\S+)"
 )
 JUDGE_REJECT = re.compile(
@@ -43,6 +43,7 @@ GENERATION_MARKERS = (
     "[1/3] Generate frozen-ledger row-local causal units",
     "[1/3] Generate frozen-ledger local-slot causal units",
     "[1/3] Generate frozen-ledger complete-answer causal units",
+    "[1/3] Run context-preserving semantic agents",
 )
 
 
@@ -70,7 +71,10 @@ def category(message: str) -> str:
             "polarity scaffold", "hyphen", "capitalization",
             "response contract",
         )),
-        ("semantic_quality", ("profile_consistent", "ungrammatical", "semantic judge", "implausible")),
+        ("semantic_quality", (
+            "profile_consistent", "ungrammatical", "semantic judge",
+            "semantic critic", "failed checks", "implausible",
+        )),
         ("coverage", ("missing source", "duplicate", "coverage", "exact rows")),
     )
     for name, needles in patterns:

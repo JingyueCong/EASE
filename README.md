@@ -798,6 +798,40 @@ V5.8 uses independent JSONL, profile, state, preflight, and audit paths. It
 does not migrate V5.7 row or block checkpoints. FullAnswer and V1--V5.7 remain
 untouched, and the wrapper refuses assistant training for a smoke subset.
 
+#### Author semantic Agent V5.9 (context + plan + critic + repair)
+
+V5.9 moves semantic acceptance out of keyword/format classifiers. Every row
+receives an explicit, digest-addressed context packet containing immutable
+C11, the frozen before/after core fact, replacement-author profile, complete
+20-row ledger, causal estimand, and hard boundaries. A planner first produces
+a cached semantic brief; a generator then returns only C01 question and
+answer; an independent critic checks the relation, premises, answerability,
+fact change, response mode, and fluency. A rejected row is repaired with the
+critic's evidence while accepted rows remain frozen. Deterministic code owns
+only schema, coverage, C11 immutability, leakage, checkpoints, and provenance.
+
+Run the independent blocks 1/4 smoke before expanding to 200 rows:
+
+```bash
+nohup env \
+  ENV_FILE=/data/wk/kai/unlearn/EASE/.env \
+  HF_ENDPOINT=https://hf-mirror.com \
+  F2D_V59_BLOCK_IDS="1,4" \
+  CF_MODEL=gpt-5-mini \
+  JUDGE_MODEL=gpt-5-mini \
+  CF_BLOCK_CONCURRENCY=2 \
+  CF_ROW_CONCURRENCY=5 \
+  STOP_AFTER_AUDIT=true \
+  bash scripts/run_f2d_author_semantic_agent_v5_9.sh \
+  > logs/f2d_author_semantic_agent_v5_9_smoke.log 2>&1 &
+```
+
+V5.9 uses application-side agent orchestration so it remains compatible with
+the existing OpenAI-compatible Azure endpoint. Its JSONL, profiles, state,
+trace, preflight, and audit paths are separate; FullAnswer and V1--V5.8 are
+unchanged. Smoke subsets cannot train assistants, and a complete run still
+requires explicit human audit approval.
+
 After the four training cells finish, optimize the best 48-step full-coverage
 assistant pair without retraining:
 

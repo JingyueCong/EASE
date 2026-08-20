@@ -1127,3 +1127,29 @@ ledger、C01 same-relation joint question/answer intervention、冻结 professio
 design、state、JSONL、profile 与 audit 路径，不迁移 V5.7 row/block checkpoint。FullAnswer 与
 V1--V5.7 代码及 artifact 均保留。仍先运行 block 1/4 的 40-row smoke；hard gate 和人工 random/risk
 audit 通过之前，不允许扩展为 dual-assistant 训练。
+
+## 31. TOFU author semantic Agent V5.9：显式上下文与独立逐行 critic
+
+V5.8 修复了由生成问题中的标题触发的部分表面误判，但单次 Q/A 生成加确定性语义分类仍无法复现
+具有完整实验上下文的 Agent 判断。V5.9 因此改变 acceptance boundary，并分配新的 design、schema、
+state、JSONL、profile、trace 与 audit 路径；V5.8 及此前所有 FullAnswer/V1--V5.7 artifact 保持不变。
+
+每条 row-local intervention 按以下状态机执行：
+
+1. 代码构造 content-addressed context packet，包含 immutable C11、row before/after core fact、完整
+   20-row replacement ledger、replacement identity/profile、causal estimand 与 hard boundaries；
+2. semantic planner 只解释 relation、argument、answer object、cardinality、response mode、source/
+   replacement premises 和歧义，不生成 C01 文本；
+3. generator 读取同一 context packet 与缓存的 semantic brief，仅输出完整 C01 question/answer；
+4. 独立 critic 调用逐项判断 same relation、question premise、answerability、replacement fact、source
+   fact removal、response mode 与 natural surface；任一项失败时，把 evidence 和单条 repair instruction
+   反馈给 generator，只重新生成该 row；
+5. 所有 row critic 通过后，仍运行 V5.8 的独立六字段 block judge，再经过 deterministic audit 与人工
+   random/risk 审计。
+
+确定性代码只硬性负责 JSON/schema、完整覆盖、唯一 source ID、C11 byte freeze、target leakage、
+checkpoint/digest 和 provenance。基于关键词推断“问题类型”、ledger 的同义表达、relation equivalence
+与自然度仅作为 critic context，不能独立拒绝候选。因此书名 `When Bridges Sleep` 中的 `When` 不再被
+当成 temporal interrogative。V5.9 使用现有 OpenAI-compatible Azure Chat API 上的应用层 Agent 循环，
+不依赖服务端必须支持 Responses function calling；所有 planner/generator/critic 输入输出仍完整记录，
+便于复现实验和迁移到 MUSE 长文本。40-row smoke、hard gate 与人工审核通过前不得生成完整训练结论。
