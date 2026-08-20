@@ -576,11 +576,45 @@ def assemble_block(
     )
     assembled["profile_id"] = profile_id
     assembled["contrast_schema_version"] = CONTRAST_SCHEMA_VERSION
+    assembled["fact_key_repairs"] = plan.get("fact_key_repairs", {})
     for record in assembled["records"]:
         record["profile_id"] = profile_id
         record["contrast_schema_version"] = CONTRAST_SCHEMA_VERSION
         record["generation"]["contrast_schema_version"] = CONTRAST_SCHEMA_VERSION
     return assembled
+
+
+def recover_fact_key_repairs(block: Mapping) -> Dict[str, Dict[str, list[str]]]:
+    """Recover split-key provenance from a cached block written pre-fix."""
+    existing = block.get("fact_key_repairs")
+    if isinstance(existing, dict):
+        return existing
+    grouped: Dict[str, Dict[str, list[str]]] = {}
+    for entry in block.get("fact_ledger", []):
+        key = str(entry.get("fact_key", ""))
+        source_id = str(entry.get("source_id", ""))
+        base, marker, suffix = key.rpartition("::v")
+        base_key = base if marker and suffix.isdigit() else key
+        grouped.setdefault(base_key, {}).setdefault(key, []).append(source_id)
+    return {
+        key: variants for key, variants in grouped.items()
+        if len(variants) > 1
+    }
+
+
+def export_profile(block: Mapping) -> Dict:
+    fields = (
+        "block_id", "profile_id", "profile_digest",
+        "target_entity", "replacement_entity",
+        "replacement_pronouns", "anchor_catalog_digest",
+        "ledger_digest", "fact_ledger", "author_plan",
+        "placebo_plan", "reconciliation_conflicts",
+        "profile_semantic_judge", "profile_attempt", "judge_round",
+        "contrast_schema_version",
+    )
+    result = {key: block[key] for key in fields}
+    result["fact_key_repairs"] = recover_fact_key_repairs(block)
+    return result
 
 
 def configure_shared_modules() -> None:
@@ -730,22 +764,7 @@ def main() -> None:
         "manifest": str(args.manifest.resolve()),
         "generator_model": args.model,
         "judge_model": args.judge_model,
-        "profiles": [
-            {
-                key: block[key]
-                for key in (
-                    "block_id", "profile_id", "profile_digest",
-                    "target_entity", "replacement_entity",
-                    "replacement_pronouns", "anchor_catalog_digest",
-                    "ledger_digest", "fact_ledger", "author_plan",
-                    "placebo_plan", "reconciliation_conflicts",
-                    "fact_key_repairs",
-                    "profile_semantic_judge", "profile_attempt", "judge_round",
-                    "contrast_schema_version",
-                )
-            }
-            for block in ordered
-        ],
+        "profiles": [export_profile(block) for block in ordered],
     })
     print(
         f"design={DESIGN_VERSION} contrast={CONTRAST_SCHEMA_VERSION} "

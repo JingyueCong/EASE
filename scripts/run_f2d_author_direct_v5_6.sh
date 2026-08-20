@@ -87,7 +87,7 @@ echo "[0/3] Offline legacy and direct-contrast preflight"
 "$GEN_PY" "$EASE_ROOT/tests/test_tofu_author_direct_v5_6.py"
 
 echo "[1/3] Generate direct GPT core-fact interventions"
-if [ ! -s "$DATA_PATH" ]; then
+if [ ! -s "$DATA_PATH" ] || [ ! -s "$PROFILES_PATH" ]; then
     "$GEN_PY" "$EASE_ROOT/ULD/scripts/generate_tofu_author_direct_v5_6.py" \
         --split "$DATASET_SPLIT" \
         --manifest "$MANIFEST" \

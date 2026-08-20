@@ -210,6 +210,24 @@ class AuthorDirectV56Test(unittest.TestCase):
         self.assertEqual(generator.v55.ANSWER_PROMPT, generator.ANSWER_PROMPT)
         self.assertIn("required_mode_family", generator.ANSWER_PROMPT)
 
+    def test_cached_block_recovers_missing_fact_key_repair_provenance(self):
+        block = {
+            "fact_ledger": [
+                {"source_id": "row-a", "fact_key": "parents_background"},
+                {"source_id": "row-b", "fact_key": "parents_background::v2"},
+                {"source_id": "row-c", "fact_key": "standalone"},
+            ]
+        }
+        self.assertEqual(
+            generator.recover_fact_key_repairs(block),
+            {
+                "parents_background": {
+                    "parents_background": ["row-a"],
+                    "parents_background::v2": ["row-b"],
+                }
+            },
+        )
+
     def test_profile_cache_requires_independent_contrast_approval(self):
         raw = self.raw_profile()
         block = self.blocks[1]
