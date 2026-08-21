@@ -29,6 +29,19 @@ class ManualNineTest(unittest.TestCase):
         self.assertEqual(len(self.manual.MANUAL_BUDGETS), 8)
         self.assertEqual(len(self.manual.MANUAL_CANDIDATES), 3)
 
+    def test_all_nine_rows_receive_c01_checkpoints(self):
+        expected = set(self.manual.MANUAL_BUDGETS) | set(
+            self.manual.MANUAL_CANDIDATES
+        )
+        covered = set(self.manual.MANUAL_CANDIDATES) | set(
+            self.manual.INHERITED_CANDIDATE_SOURCES
+        )
+        self.assertEqual(covered, expected)
+        self.assertFalse(
+            set(self.manual.MANUAL_CANDIDATES)
+            & set(self.manual.INHERITED_CANDIDATE_SOURCES)
+        )
+
     def test_every_manual_budget_is_schema_valid(self):
         for source_id, raw in self.manual.MANUAL_BUDGETS.items():
             with self.subTest(source_id=source_id):

@@ -306,6 +306,19 @@ MANUAL_CANDIDATES = {
 }
 
 
+# These rows had no V5.12 row checkpoint only because their source-only budget
+# exhausted first. Their frozen V5.11 C01 is already the reviewed replacement
+# mapping, so install it byte-for-byte after supplying the corrected budget.
+INHERITED_CANDIDATE_SOURCES = {
+    "forget05_perturbed-00027",
+    "forget05_perturbed-00044",
+    "forget05_perturbed-00119",
+    "forget05_perturbed-00179",
+    "forget05_perturbed-00180",
+    "forget05_perturbed-00184",
+}
+
+
 def accepted_budget_audit(generator, source_id: str) -> dict:
     verdict = {field: True for field in generator.BUDGET_AUDIT_FIELDS}
     verdict.update(
@@ -403,7 +416,18 @@ def main() -> None:
         )
         print(f"manual_budget_applied source={source_id}")
 
-    for source_id, raw_candidate in MANUAL_CANDIDATES.items():
+    candidate_inputs = dict(MANUAL_CANDIDATES)
+    for source_id in INHERITED_CANDIDATE_SOURCES:
+        row = by_source[source_id]
+        candidate_inputs[source_id] = {
+            "c01_question": row["cells"]["C01"]["question"],
+            "replacement_answer": row["cells"]["C01"]["answer"],
+        }
+
+    if set(candidate_inputs) != expected:
+        raise RuntimeError("manual-nine C01 checkpoint coverage changed")
+
+    for source_id, raw_candidate in candidate_inputs.items():
         row = by_source[source_id]
         profile = profiles[int(row["block_id"])]
         candidate = generator.validate_candidate(row, profile, raw_candidate)
@@ -435,11 +459,20 @@ def main() -> None:
         checkpoint = json.loads(path.read_text(encoding="utf-8"))
         checkpoint["human_manual_repair"] = {
             "set": "v512-manual9-v1",
-            "kind": "complete-c01",
+            "kind": (
+                "inherited-v511-c01-after-budget-repair"
+                if source_id in INHERITED_CANDIDATE_SOURCES
+                else "complete-c01"
+            ),
             "candidate": candidate,
         }
         generator.write_json(path, checkpoint)
-        print(f"manual_c01_applied source={source_id}")
+        action = (
+            "manual_c01_inherited"
+            if source_id in INHERITED_CANDIDATE_SOURCES
+            else "manual_c01_applied"
+        )
+        print(f"{action} source={source_id}")
 
     budget_count = len(list((args.state_dir / "budgets").glob("*.json")))
     row_count = len(list((args.state_dir / "rows").glob("*.json")))
