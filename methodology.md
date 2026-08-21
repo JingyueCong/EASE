@@ -1,11 +1,110 @@
-# CIRU：基于因果交互残差的 Retain-Set-Free LLM Unlearning
+# EASE → F2R → F2D/CIRU：Retain-Set-Free LLM Unlearning 方法总览
 
-> **文档状态（2026-08-17）**：仓库已加入 CIRU-40 第一版可运行原型：固定 40 个
-> source 的四格联合生成、hard audit、teacher-forced DiD、raw-effect truncated SVD、
-> retain-free energy gate、hidden-state projection 和完整 Open-Unlearning 评估。它尚未
-> 产生经复现实验验证的论文结论；generalized eigenspace、语义 judge、paraphrase gate
-> 与多 seed 仍是待实现增强。`CIRU`（Causal Interaction Residual Unlearning）是暂定名，
-> 投稿前需再次检查重名。
+> **文档状态（2026-08-22）**：本文档同时记录理论主线、当前可运行的 dual-assistant
+> 实证路线和完整的数据构造演进。当前 TOFU 主开发数据为 full-200
+> `tofu-author-pairbudget-v5.12`：200/200 unique rows、0 deterministic errors、
+> C11/C10/C00 byte-frozen，81 条 C01 相对 V5.11 被选择性修改；最终 pair audit 中
+> 196 条由独立 critic 接受，4 条带显式人工复核 provenance。V5.12 的 12-config pilot
+> 已实现，最终指标尚未完成。当前已观察到的最好 TOFU FullAnswer Agg 为 0.553712；
+> V5.11 deep sweep 在 90/798 个 development evaluations 时的临时最好 Agg 为 0.489164，
+> 不能作为最终结论。所有按完整 retain-side Agg 选择的训练或推理点均明确标记
+> `selection_retain_access=true`。CIRU hidden-state projection 仍是独立研究路线，不能与
+> 当前 F2D dual-assistant 结果混写成同一个 estimator。`CIRU` 是暂定名，投稿前仍需检查
+> 重名。
+
+## 0. 一页式方法总结
+
+### 0.1 研究问题
+
+给定冻结基础模型和待遗忘集合，训练阶段不读取真实 retain examples，而是从 forget 数据
+构造可审计的替换事实与 placebo controls。目标不是让模型拒答或生成乱码，而是在降低原事实
+可恢复性的同时保留通用能力、关系结构和非目标知识。
+
+这里必须区分三种数据可见性：
+
+1. **训练 retain-free**：assistant、counterfactual、gate 或 subspace 的训练不读取真实 retain；
+2. **开发选择 retain-aware**：若用最终 Mem/Util/Agg 选 checkpoint 或权重，必须标注
+   `selection_retain_access=true`；
+3. **冻结最终评估**：方法和超参冻结后，标准 evaluator 可以读取 retain、real-authors、
+   world-facts 和 retain-only reference。
+
+### 0.2 当前主实证方法：author-level F2D-DiD
+
+每个 forget source 构造四格：
+
+
+| cell | 作者/事实身份 | 问题关系 | 训练角色 |
+|---|---|---|---|
+| C11 | 原作者、原事实 | target relation | A1 remember/CE |
+| C01 | replacement author/fact | 同一 target relation | A1 uniform |
+| C10 | 原作者 | matched placebo relation | A2 remember/CE |
+| C00 | replacement author | 同一 placebo relation | A2 uniform |
+
+A1 和 A2 均为从基础模型截取并以 LoRA 微调的小助手。推理时使用
+
+\[
+z_{u}=z_{base}+w_1\,\mathrm{filter}(z_{A1})
+                 +w_2\,\mathrm{filter}(z_{A2}),
+\qquad w_1<0,\;w_2>0.
+\]
+
+因此其方向近似
+
+\[
+-[(C_{11}-C_{01})-(C_{10}-C_{00})].
+\]
+
+它是非线性双助手对 DiD interaction 的近似，不是四次 base-model logit 前向的严格代数
+DiD。理论 CIRU-H 则显式从四格 hidden states 估计交互子空间并投影，两者必须分开报告。
+
+### 0.3 当前数据构造原则
+
+TOFU forget05 的 200 条 QA 按 10 位作者组织为 10 个 block，每个 block 20 条。当前最终
+构造遵循：
+
+1. C11 永远等于 benchmark 原始 QA；
+2. 每个 block 只有一个 coherent replacement author/profile；
+3. C01 保持 relation 与 argument roles，但把作者特异事实前提映射到 replacement ledger；
+4. C10/C00 使用冻结、同域且与 target relation 正交的 professional placebo；
+5. C11/C10/C00、profile 和 fact ledger 冻结，后续版本只允许选择性修复 C01；
+6. C11 决定 relation、scope、显式 cardinality 与 information budget；replacement ledger
+   决定 C01 的事实真值和 evidence status；
+7. 自动字符串/格式分类器只做确定性安全检查或 triage，不能推翻完整语义 pair audit；
+8. API 生成、独立 critic、final batched critic、人工修复和 SHA-256 provenance 全部落盘。
+
+### 0.4 方法演进及每一步解决的问题
+
+| 阶段 | 关键变化 | 结论/作用 |
+|---|---|---|
+| ULD | 单助手记忆 forget，推理时相减 | 简单，但容易误伤相邻 retain |
+| EASE/Dual-ULD | 用真实相邻 retain 训练 A2 补偿 | 强 retain-aware oracle |
+| F2R | 用 forget-derived matched counterfactual 替代真实 retain | 实现训练 retain-free |
+| CIRU-40 | 四格 hidden-state DiD、SVD/subspace 与 gate | 理论因果交互路线 |
+| F2D FullAnswer | 四格数据接入双助手，完整 C01 answer | 当前观察到的最高 Agg 基线 |
+| U-F2D hierarchy | claim/evidence span + outside-span KL | 提高 Util，但 Mem 明显不足 |
+| Author V2–V4 | block profile、contract、typed exact edits | 暴露全文生成和固定 slot 两端的局限 |
+| Anchor V5.1–V5.4 | frozen anchors、row-local mapping、ledger、slots | 减少 coordination error，但描述性 QA 无法稳定落入槽位 |
+| V5.5 | frozen ledger + complete answer renderer | 支持描述性与长文本式回答 |
+| V5.6–V5.9 | direct core fact、joint Q/A、最小接口、Agent critic | 从词面规则转向显式上下文的语义干预 |
+| V5.10 | 对已有 C01 做 pair audit，只修 rejected rows | 避免全量重生成 |
+| V5.11 | 明确 source→replacement premise mapping precedence | 解决“保持原前提”和“替换事实”之间的冲突 |
+| V5.12 | 从 C11 派生 semantic information budget | 以 relation/scope 为约束，以 ledger 为 replacement truth authority |
+
+### 0.5 当前可复现主流程
+
+```text
+immutable TOFU C11 (200 rows, 10 author blocks)
+  -> frozen replacement author profile + fact ledger
+  -> C11-derived pair budget
+  -> inherit and independently audit existing C01
+  -> selectively repair rejected C01 only
+  -> second batched pair audit + explicit human provenance
+  -> deterministic full-200 hard gate and SHA-256 freeze
+  -> train A1 on CE(C11)+Uniform(C01)
+  -> train A2 on CE(C10)+Uniform(C00)
+  -> frozen inference sweep over w1, w2, top_filter
+  -> LLM-Beliefs Mem/Util/Agg + complete Open-Unlearning diagnostics
+```
 
 ## 1. 方法定位
 
@@ -22,9 +121,12 @@
 2. 尽可能保持非目标知识、通用语言能力和与 forget 样本共享的关系/风格结构；
 3. 不把拒答、随机错误或乱码本身等同于“真正删除知识”。
 
-这里的 **retain-set-free** 仅指训练和超参数选择阶段不读取真实 retain 数据。冻结方法与
-超参数之后，标准 TOFU evaluator 仍会读取 retain、real-authors、world-facts 以及
-retain-only reference logs。这些数据只用于最终评估。
+这里的 **训练 retain-set-free** 指 assistant、counterfactual、gate 或 subspace 的训练不读取
+真实 retain examples。若还要声称 **selection retain-free**，超参数与 operating point 也必须只用
+forget 和 synthetic controls 冻结。当前部分 development sweeps 直接按完整 Mem/Util/Agg 排序，
+因此明确标记 `selection_retain_access=true`，不能作为 selection-retain-free 证据。方法和超参
+冻结后的标准 TOFU evaluator 仍会读取 retain、real-authors、world-facts 以及 retain-only
+reference logs；这属于最终评估访问。
 
 ### 1.1 与已有代码的关系
 
@@ -33,13 +135,15 @@ retain-only reference logs。这些数据只用于最终评估。
   的局部 retain 知识。
 - **F2R**：用 matched counterfactual 替代真实 \(R_{sub}\)，但仍采用
   `base - A1 + A2` 的双助手 logit composition。
-- **CIRU（本文主方法）**：counterfactual 不再只是第二助手的替代训练数据，而被组织成
+- **F2D（当前主实证路线）**：把 counterfactual 组织成 C11/C01/C10/C00 四格，并以
+  `CE + Uniform` 的两个助手近似负 DiD interaction，仍采用 dual-assistant logit composition。
+- **CIRU-H（理论主路线）**：counterfactual 不再只是第二助手的替代训练数据，而被组织成
   一个 \(2\times2\) 析因干预，用 difference-in-differences（DiD）估计目标事实的
   因果交互残差；随后直接在基础模型隐藏状态中移除该残差子空间。
 
-因此，F2R 应作为 CIRU 的直接前驱和强消融，而不能将二者混为同一方法。CIRU 的核心
-输出不是两个 assistant logits，而是因果残差子空间 \(U_\ell\)、门控器 \(g_\phi\) 和
-干预强度 \(\alpha\)。
+因此，F2R、F2D 和 CIRU-H 构成方法阶梯，不能混为同一个 estimator。F2D 的输出是两个
+assistant logits 的加权残差；CIRU-H 的核心输出则是因果残差子空间 \(U_\ell\)、门控器
+\(g_\phi\) 和干预强度 \(\alpha\)。
 
 ## 2. 为什么需要因果构造
 
@@ -264,10 +368,11 @@ P_\ell(H_t^\ell-\mu_\ell).
 与 EASE/F2R 的三次模型前向不同，CIRU 理论上只需基础模型一次前向、低秩投影和一个小
 gate。但是否真正更快必须以 wall-clock、tokens/s 和峰值显存实测。
 
-## 9. Retain-free 超参数选择
+## 9. 确认性 retain-free 选择与 diagnostic retain-aware 搜索
 
-不能使用最终 retain utility 选择 \(k,\alpha,\lambda,\mathcal L\) 或 gate threshold。
-定义仅依赖 forget 与生成 controls 的选择目标：
+若目标是给出 selection-retain-free 的确认性结果，不能使用最终 retain utility 选择
+\(k,\alpha,\lambda,\mathcal L\)、gate threshold、assistant checkpoint 或推理权重。此时定义
+仅依赖 forget 与生成 controls 的选择目标：
 
 \[
 \mathcal J
@@ -278,8 +383,10 @@ D_{KL}(p_{\theta_0}\|p_{\theta_u})}_{\text{control distortion}}
 -\rho\,\mathrm{FPR}_{\mathrm{gate}}.
 \]
 
-在预先固定的网格上选择最大 \(\mathcal J\) 的配置。最终论文同时报告完整
-forget–utility Pareto curve，避免只展示用测试 retain 指标反向挑出的单点。
+在预先固定的网格上选择最大 \(\mathcal J\) 的配置。当前 TOFU assistant/inference sweeps 为了
+诊断 Pareto frontier 会使用完整 retain-side Agg；这些实验一律标记
+`selection_retain_access=true`，其胜出点只能在新 seed/split 上作为预先冻结配置确认。最终论文
+同时报告完整 forget–utility Pareto curve，避免只展示用测试 retain 指标反向挑出的单点。
 
 ### 9.1 固定的论文评估聚合
 
@@ -669,14 +776,17 @@ tests/
 
 ## 17. 当前执行顺序
 
-1. 完成 F2R 的三个 1B full split，作为 feasibility baseline；
-2. 冻结主表、数据可见性和超参数选择规则；
-3. 运行并审计已实现的 CIRU-40 四单元生成；
-4. 运行 DiD/SVD 多层原型与完整评估；
-5. 对比无 gate、energy gate 与 F2R；
-6. 只有 CIRU 在至少两个 split 上表现出稳定机制信号后，再扩展 generalized
-   eigenspace、3B、MUSE 和多 seed；
-7. 最终用 `scripts/build_tofu_main_row.py` 从三个完整 JSON 自动生成论文行。
+1. 冻结并保留 FullAnswer、V5.11 与全部旧构造 artifacts，禁止用 V5.12 覆盖；
+2. 完成 V5.12 full-200 deterministic/random/risk audit，固定数据与 SHA-256；
+3. 运行 12-config V5.12 pilot，并只对前两名做 frozen-inference fine sweep；
+4. 与 FullAnswer 及已保存的 V5.11 development frontier 比较 Mem/Util components，而不只看 Agg；
+5. 若 V5.12 pilot 没有超过 V5.11，则停止扩展训练网格并报告 causal-validity/performance
+   trade-off；若超过，再用独立 seed 或 split 确认冻结配置；
+6. 在 TOFU 机制与数据质量稳定后，将同一 pair-budget/ledger/critic IR 迁移到 MUSE segment、
+   claim 和 evidence spans；
+7. CIRU-H 继续作为独立 hidden-state estimator 消融，只有在至少两个 split 上显示稳定机制信号
+   后再扩展 generalized eigenspace、3B 和多 seed；
+8. 最终用 `scripts/build_tofu_main_row.py` 从冻结原始 JSON 自动生成论文行。
 
 ## 18. 已实现的 F2R-AG 过渡实验
 
@@ -1153,3 +1263,225 @@ checkpoint/digest 和 provenance。基于关键词推断“问题类型”、led
 当成 temporal interrogative。V5.9 使用现有 OpenAI-compatible Azure Chat API 上的应用层 Agent 循环，
 不依赖服务端必须支持 Responses function calling；所有 planner/generator/critic 输入输出仍完整记录，
 便于复现实验和迁移到 MUSE 长文本。40-row smoke、hard gate 与人工审核通过前不得生成完整训练结论。
+
+## 32. TOFU author pair-repair V5.10：冻结三格的选择性 C01 修复
+
+V5.9 的 40-row smoke 达到完整覆盖和 hard gate 后，人工 pair audit 仍发现：某些 C01
+虽然单独看起来像合理的 replacement-author QA，但与对应 C11 配对后会丢失 named-book
+scope、改变信息粒度、引入 source comparison，或没有真正回答改写后的问题。V5.10 不再重做
+profile、ledger 或全部四格，而是把“pair 是否成立”设为唯一修复边界：
+
+1. 冻结 V5.9 的 profile、ledger、semantic brief、C11、C10 和 C00；
+2. 对每条 inherited C01 运行独立 pair critic，检查 same relation、question scope、premise
+   update、Q/A entailment、replacement fact、source fact removal、evidence status、information
+   granularity、response mode 与 natural surface；
+3. 接受的 C01 byte-for-byte 复用，只有 rejected rows 进入 context-plan-generate-critic loop；
+4. 人工指定的 repair rows 具有高于自动 critic 的显式 provenance，但修复后的文本仍必须再次
+   通过独立 critic；
+5. 最终 hard gate 证明仅 C01 可变，冻结三格和 author-level profile 不得发生漂移。
+
+困难 blocks 1/4 的实验中，27/40 条旧 C01 直接复用，13/40 条进入选择性修复；critic 在人工
+清单之外额外发现 `forget05_perturbed-00028`。这说明人工抽样和独立 critic 是互补关系，也
+证明“自动 deterministic errors=0”不能替代成对语义审核。
+
+V5.10 解决的是 selective repair 和 pair-level acceptance，不改变 F2D estimator。其设计名为
+`tofu-author-pairrepair-v5.10`，完整旧 artifact 保留，因而可以直接统计继承率、修复率和人工/
+自动发现的交集。
+
+## 33. TOFU author premise-map V5.11：关系不变、事实前提映射
+
+V5.10 暴露了更深的规范冲突：旧 semantic brief 有时要求 C01 保持 C11 的书名、地点、奖项
+域或描述性限定词，而 replacement ledger 又要求换成另一位作者的事实。若把这些 source-side
+literal 同时当作 invariant，生成器只能得到“问题仍问原事实、答案却答替代事实”的错误 pair。
+
+V5.11 引入单一 precedence policy：
+
+1. **保留** target relation、argument roles、问题意图、显式 cardinality 和大致回答形式；
+2. **替换** 作者身份、书名、奖项、机构、地点、日期、数字、身份描述和其他 author-specific
+   factual premises；
+3. C01 question 必须对 replacement profile 为真，C01 answer 必须直接回答实际 C01 question；
+4. replacement row ledger 对事实内容、answerability 与 evidence status 具有最高权威；旧
+   semantic brief 只提供 nuisance-matching 建议，不能覆盖 ledger；
+5. 当 ledger 与 C11 的事实极性不同，允许 C01 使用 replacement truth，而不是机械复制 source
+   polarity；
+6. 只修 missing/rejected C01，profile、ledger、C11/C10/C00 全部冻结。
+
+完整 forget05 数据由已批准的 V5.10 blocks 1/4（40 rows）与 V5.11 生成的其余 8 blocks
+（160 rows）合并。Block 2 的三个耗尽行采用显式人工 manifest 修复，仍经过独立 critic：
+`00045`（开始写作年龄）、`00055`（非虚构作品）和 `00059`（购书渠道）。最终 hard gate 为
+200 rows、200 unique source IDs、10 author blocks，且冻结三格不变。
+
+V5.11 是第一个用于 full-200 dual-assistant 训练的 premise-aware 数据版本。它的初始 12-config
+训练搜索最好为：
+
+
+| 结果 | Agg | Mem | Util | 备注 |
+|---|---:|---:|---:|---|
+| V5.11 初始 sweep | 0.454751 | 0.578582 | 0.374581 | 48/48 steps，utility collapse |
+| V5.11 deep 临时最好 | 0.489164 | 0.447124 | 0.539930 | 90/798 evaluations，尚未完成 |
+
+临时 deep 最好点是 `24/24 steps, lr=8e-4, w1=-1.8, w2=1.8,
+filter=1e-4`。相对初始搜索，它主要恢复 Util，但 Mem 又成为瓶颈。由于仅完成 5/36 个 coarse
+training configurations 且 fine sweep 尚未开始，该值只能作为 development progress，不能写入
+最终主表。
+
+## 34. TOFU author pair-budget V5.12：C11 语义预算与 replacement-ledger 权威
+
+V5.11 虽解决 premise mapping，独立 audit 仍可能把 C11 中偶然出现的细节数量、source polarity
+或完整答案长度误当作 C01 必须逐字复制的约束。V5.12 将每个 pair 的 acceptance contract
+显式拆为两部分：
+
+- **C11-derived pair budget**：只定义 relation、argument slots、answer object、显式 scope、
+  问题真正要求的 cardinality、information granularity 和 replaceable source premises；
+- **replacement ledger authority**：定义 C01 的 replacement identity、事实值、answerability、
+  evidence status 和可用支持范围。
+
+其映射语义固定为 `relation-roles-replacement-values-v1`：C11 提供关系角色，source-specific
+value 是 intervention variable，必须映射到 replacement counterpart；不能因为 C11 使用肯定句
+就强迫一个 ledger 标记 unavailable 的 C01 编造肯定事实，也不能因为 ledger 包含更多资料就把
+一个 atomic C11 扩写成 profile dump。
+
+V5.12 的流水线为：
+
+1. 从 immutable C11 生成 pair budget；
+2. 使用独立 budget critic 审核 budget 是否只描述 C11、是否把 incidental details 错写成 hard
+   constraints；
+3. 在 budget 与 frozen ledger 下审核 inherited V5.11 C01；
+4. 通过者原样复用，拒绝者只修完整 C01 question/answer；
+5. 对 200 条 accepted pairs 再做 batched independent final audit；
+6. 对极少数明确 residuals 采用显式人工修复/接受，并记录 source IDs、修复集合和版本；
+7. 组装前运行 CIRU schema、三格冻结、profile/ledger digest、版本、覆盖率和 provenance hard gate；
+8. 输出 JSONL、profiles、audit sheets 和 SHA-256 后冻结数据。
+
+当前 V5.12 full-200 artifact 为：
+
+
+| 属性 | 值 |
+|---|---|
+| 数据 | `forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl` |
+| 记录/唯一 ID | 200 / 200 |
+| deterministic errors | 0 |
+| missing/unexpected indices | 0 / 0 |
+| C11/C10/C00 changes | 0 |
+| 相对 V5.11 修改的 C01 | 81 |
+| final audit | 196 independent accepted + 4 human reviewed |
+| human reviewed IDs | `00000`, `00012`, `00027`, `00100` |
+| mapping semantics | `relation-roles-replacement-values-v1` |
+| SHA-256 | `90a5e52b040258cd177d46dfa32f07edc92c35748f7617252c09e19ad0e1caba` |
+
+V5.12 的 deterministic triage 相对 V5.11 全面下降：semantic-risk rows 从 134 降至 123，
+target answer format/length/fact-count/question-template/response-mode mismatch 分别从
+105/27/42/35/34 降至 90/16/32/33/31。上述 flags 是启发式风险信号，不是 semantic truth；
+下降支持“pair 更接近”，但不能证明 Agg 必然提高。
+
+TOFU benchmark 本身会在问题中合法使用 `fictional/fictitious`。控制状态检查只拒绝 C01 新引入
+的 marker；若 immutable C11 已包含同义 marker，V5.12 允许继承。这一例子说明 deterministic
+validator 必须区分 benchmark content 与生成器泄漏，不能通过删除合法问题语义来满足 hard gate。
+
+Artifact 的 `human_review_status=pending` 是发布门禁而不是旧版本标志。当前 V5.12 pilot 属于
+development experiment；在完整 random/risk 人工审核和新 seed/split 确认前，不应把其结果作为
+无偏最终主表数字。
+
+## 35. Dual-assistant 训练与参数搜索协议
+
+### 35.1 固定结构
+
+除明确标注的结构消融外，TOFU F2D 使用相同基础模型、A1/A2 层数、LoRA rank/alpha、batch
+和 optimizer。每个训练 tag 具有独立模型目录、manifest、报告和 config signature；改变数据、
+steps、LR、uniform weight 或 seed 后不得复用不匹配 checkpoint。
+
+训练数据映射为：
+
+\[
+\mathcal L_{A1}=\mathrm{CE}(C_{11})
++\lambda_1\mathrm{Uniform}(C_{01}),
+\]
+
+\[
+\mathcal L_{A2}=\mathrm{CE}(C_{10})
++\lambda_2\mathrm{Uniform}(C_{00}).
+\]
+
+推理阶段冻结 base/A1/A2，只扫描 `weight_a1 < 0`、`weight_a2 > 0` 和 relative top-logit
+filter。训练与推理搜索必须分开记录，以区分 assistant representation quality 与 operating-point
+选择。
+
+### 35.2 V5.12 pilot
+
+直接复制 V5.11 的 798-evaluation deep sweep 成本过高，因此预先采用两阶段 pilot：
+
+1. 训练 `steps={24,32,40,48} × lr={6e-4,8e-4,1e-3}` 共 12 个对称 A1/A2
+   configurations，并统一在 `(-1.8,1.8,1e-4)` 评估；
+2. 只选择前两名，各运行
+   `w1={-2.2,-2.0,-1.8,-1.6,-1.4}`、
+   `w2={1.4,1.6,1.8,2.0,2.2}`、
+   `filter={5e-5,1e-4,2e-4}` 的 75 点 frozen-inference sweep；
+3. 总预算为 12 个 screen evaluations + 150 个 fine evaluations；
+4. 该选择读取完整 Mem/Util/Agg，因此全部结果标记 `selection_retain_access=true`；
+5. 若最好 training config 落在 steps 或 LR 边界，才预注册下一轮扩展；否则不追加后验网格。
+
+运行入口为 `scripts/sweep_f2d_v512_pilot.sh`。V5.11 deep artifacts 保留且支持 resume；暂停
+V5.11、优先验证 V5.12 不构成删除或覆盖旧实验。
+
+### 35.3 当前结果应如何解释
+
+当前最好 FullAnswer 与 V5.11 临时最好为：
+
+
+| 方法 | Agg | Mem | Util | 状态 |
+|---|---:|---:|---:|---|
+| FullAnswer | 0.553712 | 0.555443 | 0.551991 | 当前最好观察值 |
+| V5.11 deep | 0.489164 | 0.447124 | 0.539930 | 90/798，临时值 |
+| reported BS-S reference | 0.580000 | — | — | 外部目标线 |
+
+V5.11 与 FullAnswer 的主要差距来自 Mem（-0.108319），而非 Util（-0.012061）。这支持一个
+重要的负结果：更严格、局部、causal-pair-faithful 的 C01 可能保留更多共享语言与外围事实，
+却给 assistant 更窄的 token-level deletion signal；FullAnswer 的广泛文本差异虽较不精细，
+反而更直接优化当前 TOFU memorization metrics。数据因果质量提高和 benchmark Agg 提高不是
+同一命题，必须分别报告。
+
+## 36. 向 MUSE 长文本迁移的统一方法
+
+最终统一方法不是给 TOFU 枚举固定八类答案或为每个关系手写 slot，而是使用同一个层级语义
+contract：
+
+\[
+\text{document}\rightarrow\text{segment/event}
+\rightarrow\text{claim}\rightarrow\text{evidence spans}.
+\]
+
+TOFU 一条 QA 等价于一个短 segment；author block 等价于共享 entity/profile 的 document-level
+cluster。V5.12 pair budget 可直接推广为 MUSE 的 claim budget：
+
+1. immutable source segment 决定 relation、argument roles、scope 与 information budget；
+2. replacement ledger 或 counterfactual event graph 决定替换事实和 evidence status；
+3. C01 只改 target claims 及依赖它们的 premises，非目标上下文保持不变；
+4. C10/C00 使用同文体、同长度和相近论证结构的 placebo event/relation；
+5. exact evidence spans 只用于 provenance 与 loss masking，不负责独立判断语义等价；
+6. claim/evidence token 使用 F2D supervision，外围 token 可加入冻结 base KL；
+7. 长文本 critic 分 segment 审核，再在 document level 检查时间线、实体与跨段一致性。
+
+因此，V5.5 以后采用“frozen semantic ledger + complete local rendering + independent critic”的
+路线比固定 slot 更适合 MUSE。TOFU 和 MUSE 可以共享 causal IR、pair budget、audit fields、
+checkpoint/digest 与 F2D estimator，但使用各自的数据 renderer；统一方法不等于统一句面模板。
+
+## 37. 复现、报告与停止规则
+
+每个可报告实验必须保存：
+
+- git commit、完整命令、环境文件路径（不保存密钥）和 dependency lock；
+- input JSONL/profile/audit SHA-256；
+- generator、planner、critic/judge model 与 endpoint family；
+- 每个 source 的 attempts、reject reasons、human-repair manifest 与最终 provenance；
+- A1/A2 training config、checkpoint step、model directory 与 manifest；
+- inference weights/filter、`selection_retain_access` 和完整 report path；
+- 原始 evaluator JSON、逐指标 components、聚合公式和 seed。
+
+以下情况必须停止自动重试并进入人工审查或方法修复：同一 general error class 连续耗尽 retry、
+validator 与语义 critic 的权威规则冲突、修复要求恢复 source fact、冻结三格或 ledger 发生变化、
+以及只靠增加 prompt 例外才能通过某条数据。单条明确且可解释的 residual 可以人工修复，但必须
+写入 manifest/digest，并重新运行 independent critic 与 full hard gate。
+
+最终论文至少报告 FullAnswer、V5.11、V5.12、F2R 和 CIRU-H；不得只报告最好一点而隐藏失败
+构造版本。若 V5.12 的 Agg 仍低于 FullAnswer，应将结论表述为“改善 causal-pair validity 与
+审计风险，但未改善当前 TOFU Agg”，而不是继续后验修改数据直到超过基线。
