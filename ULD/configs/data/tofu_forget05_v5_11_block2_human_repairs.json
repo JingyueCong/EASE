@@ -1,0 +1,24 @@
+{
+  "design_version": "tofu-author-premisefix-v5.11",
+  "purpose": "Auditable explicit repair of the three Block 2 rows rejected after four V5.11 block-judge rounds.",
+  "repair_rows": {
+    "forget05_perturbed-00045": {
+      "category": "unavailable_fact_policy",
+      "reason": "The frozen ledger marks writing-start age as unavailable; remove the unsupported age 24 while preserving the relation.",
+      "c01_question": "At what age did Eitan Bar-Lev begin writing?",
+      "replacement_answer": "The exact age at which Eitan Bar-Lev began writing is not publicly available."
+    },
+    "forget05_perturbed-00055": {
+      "category": "unavailable_fact_policy",
+      "reason": "The frozen ledger marks non-fiction authorship as unavailable; remove the unsupported title Port Essays while preserving the relation.",
+      "c01_question": "Has Eitan Bar-Lev written any non-fiction books?",
+      "replacement_answer": "There is no publicly available information confirming whether Eitan Bar-Lev has written any non-fiction books."
+    },
+    "forget05_perturbed-00059": {
+      "category": "ledger_fact_completion",
+      "reason": "Restore the omitted online-retailers channel so the answer expresses the complete frozen replacement fact.",
+      "c01_question": "Where can readers find Eitan Bar-Lev's books?",
+      "replacement_answer": "Eitan Bar-Lev's books can be found at local Israeli bookstores, university libraries, and online retailers."
+    }
+  }
+}

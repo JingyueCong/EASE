@@ -199,6 +199,111 @@ class AuthorPremiseFixV511Test(unittest.TestCase):
             generator.PREMISE_POLICY_VERSION,
         )
 
+    def test_explicit_human_repair_is_audited_by_independent_critic(self):
+        profile = self.profile()
+        source = self.source(29)
+        candidate = self.helper.when_candidate(profile)
+        directive = {
+            "c01_question": candidate["c01_question"],
+            "replacement_answer": candidate["replacement_answer"],
+            "category": "test_general_repair",
+            "reason": "Exercise the manifest-driven repair path.",
+        }
+        calls = []
+
+        def fake_load(*_args):
+            packet = generator.build_context_packet(
+                self.blocks[1], source, profile
+            )
+            return packet, fixture.semantic_brief(), 0
+
+        def fake_critic(*args):
+            calls.append(args)
+            return premise_verdict()
+
+        old_load = generator.load_or_create_semantic_brief
+        old_critic = generator.v59.request_critic_verdict
+        old_path = generator.HUMAN_REPAIR_MANIFEST_PATH
+        old_digest = generator.HUMAN_REPAIR_MANIFEST_DIGEST
+        generator.load_or_create_semantic_brief = fake_load
+        generator.v59.request_critic_verdict = fake_critic
+        generator.HUMAN_REPAIR_MANIFEST_PATH = Path("repairs.json")
+        generator.HUMAN_REPAIR_MANIFEST_DIGEST = "repair-digest"
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                result = generator.apply_human_candidate(
+                    object(), object(), self.args(), self.blocks[1], source,
+                    profile, state, directive,
+                )
+                checkpoint = json.loads(
+                    generator.v52.row_path(
+                        state, 1, source["source_id"]
+                    ).read_text()
+                )
+        finally:
+            generator.load_or_create_semantic_brief = old_load
+            generator.v59.request_critic_verdict = old_critic
+            generator.HUMAN_REPAIR_MANIFEST_PATH = old_path
+            generator.HUMAN_REPAIR_MANIFEST_DIGEST = old_digest
+
+        self.assertEqual(len(calls), 1)
+        trace = result["semantic_agent_trace"]
+        self.assertEqual(trace["generator_model"], "explicit-human-repair")
+        self.assertTrue(trace["critic_independent_call"])
+        self.assertEqual(
+            trace["human_manual_repair"]["manifest_digest"],
+            "repair-digest",
+        )
+        self.assertEqual(
+            checkpoint["semantic_agent_trace"]["human_manual_repair"][
+                "category"
+            ],
+            "test_general_repair",
+        )
+
+    def test_rejected_human_repair_is_not_written_as_an_accepted_row(self):
+        profile = self.profile()
+        source = self.source(29)
+        candidate = self.helper.when_candidate(profile)
+        directive = {
+            "c01_question": candidate["c01_question"],
+            "replacement_answer": candidate["replacement_answer"],
+            "category": "test_rejection",
+            "reason": "Ensure a critic rejection cannot be bypassed.",
+        }
+
+        def fake_load(*_args):
+            packet = generator.build_context_packet(
+                self.blocks[1], source, profile
+            )
+            return packet, fixture.semantic_brief(), 0
+
+        old_load = generator.load_or_create_semantic_brief
+        old_critic = generator.v59.request_critic_verdict
+        generator.load_or_create_semantic_brief = fake_load
+        generator.v59.request_critic_verdict = lambda *_args: premise_verdict(
+            accepted=False, failed_field="question_premises_updated"
+        )
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                with self.assertRaisesRegex(
+                    ValueError, "failed independent critic"
+                ):
+                    generator.apply_human_candidate(
+                        object(), object(), self.args(), self.blocks[1],
+                        source, profile, state, directive,
+                    )
+                self.assertFalse(
+                    generator.v52.row_path(
+                        state, 1, source["source_id"]
+                    ).is_file()
+                )
+        finally:
+            generator.load_or_create_semantic_brief = old_load
+            generator.v59.request_critic_verdict = old_critic
+
     def test_v511_is_versioned_and_legacy_generators_remain(self):
         self.assertEqual(
             generator.DESIGN_VERSION, "tofu-author-premisefix-v5.11"

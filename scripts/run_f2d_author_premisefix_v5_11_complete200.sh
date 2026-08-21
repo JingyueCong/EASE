@@ -19,6 +19,7 @@ BLOCK_IDS="${F2D_V511_BLOCK_IDS:-0,2,3,5,6,7,8,9}"
 RUN_TAG="blocks${BLOCK_IDS//,/_}"
 GEN_PY="${GEN_PY:-${HOME}/miniconda3/envs/ease-f2r-train/bin/python}"
 MANIFEST="${F2D_V511_MANIFEST:-${EASE_ROOT}/ULD/configs/data/tofu_forget05_author_blocks.json}"
+HUMAN_REPAIR_MANIFEST="${F2D_V511_HUMAN_REPAIR_MANIFEST:-${EASE_ROOT}/ULD/configs/data/tofu_forget05_v5_11_block2_human_repairs.json}"
 
 "$GEN_PY" - "$BLOCK_IDS" <<'PY'
 import sys
@@ -67,7 +68,8 @@ JUDGE_TEMPERATURE="${JUDGE_TEMPERATURE:-1.0}"
 CF_MAX_COMPLETION_TOKENS="${CF_MAX_COMPLETION_TOKENS:-18000}"
 
 for required in "$BASE_V59_STATE" "$APPROVED40_DATA" \
-    "$APPROVED40_PROFILES" "$APPROVED40_HASH_FILE" "$MANIFEST"
+    "$APPROVED40_PROFILES" "$APPROVED40_HASH_FILE" "$MANIFEST" \
+    "$HUMAN_REPAIR_MANIFEST"
 do
     if [ ! -e "$required" ]; then
         echo "Missing frozen prerequisite: $required" >&2
@@ -99,6 +101,7 @@ echo "  approved/frozen   : V5.10 blocks 1,4 (40 rows)"
 echo "  re-audit now      : V5.9-state blocks $BLOCK_IDS (160 rows)"
 echo "  premise policy    : preserve relation; replace author-specific facts"
 echo "  selective repair  : generate only missing/rejected C01 rows"
+echo "  explicit repairs  : $HUMAN_REPAIR_MANIFEST"
 echo "  base state        : $BASE_V59_STATE"
 echo "  full output       : $FULL_DATA"
 echo "  training          : disabled pending full human audit"
@@ -128,6 +131,7 @@ echo "[1/4] Re-audit inherited V5.9 rows under premise-map V5.11"
 if [ ! -s "$REMAINDER_DATA" ] || [ ! -s "$REMAINDER_PROFILES" ]; then
     "$GEN_PY" "$EASE_ROOT/ULD/scripts/generate_tofu_author_premisefix_v5_11.py" \
         --base-state-dir "$BASE_V59_STATE" \
+        --human-repair-manifest "$HUMAN_REPAIR_MANIFEST" \
         --split "${SPLIT}_perturbed" \
         --manifest "$MANIFEST" \
         --output "$REMAINDER_DATA" \
@@ -164,12 +168,17 @@ fi
     --seed "$SEED" \
     --fail-on-deterministic-errors
 
-"$GEN_PY" - "$REMAINDER_DATA" "$REMAINDER_PROFILES" <<'PY'
+"$GEN_PY" - "$REMAINDER_DATA" "$REMAINDER_PROFILES" \
+    "$HUMAN_REPAIR_MANIFEST" <<'PY'
 import json
+import hashlib
 import sys
 
 rows = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 profiles = json.load(open(sys.argv[2]))
+repair_manifest = json.load(open(sys.argv[3]))
+expected_repairs = set(repair_manifest["repair_rows"])
+expected_repair_digest = hashlib.sha256(open(sys.argv[3], "rb").read()).hexdigest()
 expected_blocks = {0, 2, 3, 5, 6, 7, 8, 9}
 critic_fields = (
     "same_target_relation", "question_scope_matched",
@@ -208,13 +217,30 @@ for row in rows:
         errors.append(f"pair critic incomplete {source_id}")
     if any(judge.get(field) is not True for field in judge_fields):
         errors.append(f"block judge incomplete {source_id}")
+    manual = trace.get("human_manual_repair")
+    if source_id in expected_repairs:
+        if trace.get("generator_model") != "explicit-human-repair":
+            errors.append(f"manual generator provenance {source_id}")
+        if not isinstance(manual, dict):
+            errors.append(f"manual repair provenance {source_id}")
+        elif manual.get("manifest_digest") != expected_repair_digest:
+            errors.append(f"manual repair digest {source_id}")
+    elif manual is not None:
+        errors.append(f"unexpected manual repair provenance {source_id}")
 if profiles.get("design_version") != "tofu-author-premisefix-v5.11":
     errors.append("profile design")
 if profiles.get("selected_block_ids") != sorted(expected_blocks):
     errors.append("profile block coverage")
+if set(profiles.get("human_repair_rows", [])) != expected_repairs:
+    errors.append("profile human repair coverage")
+if profiles.get("human_repair_manifest_digest") != expected_repair_digest:
+    errors.append("profile human repair digest")
 if errors:
     raise SystemExit("V5.11 remainder hard gate failed: " + "; ".join(errors[:20]))
-print("V5.11 remainder hard gate OK: rows=160 blocks=8 premise_policy=approved")
+print(
+    "V5.11 remainder hard gate OK: rows=160 blocks=8 "
+    f"premise_policy=approved human_repairs={len(expected_repairs)}"
+)
 PY
 
 echo "[2/4] Merge approved V5.10 40 + V5.11 160 without editing cells"

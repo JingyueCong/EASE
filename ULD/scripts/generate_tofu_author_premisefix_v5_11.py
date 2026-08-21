@@ -71,6 +71,9 @@ BASE_V59_ASSEMBLE_BLOCK = v510.BASE_V59_ASSEMBLE_BLOCK
 BASE_STATE_DIR: Path | None = None
 BASE_STATE_DIGEST = ""
 BASE_BLOCK_RECORDS: Dict[str, Dict] = {}
+HUMAN_REPAIR_MANIFEST_PATH: Path | None = None
+HUMAN_REPAIR_MANIFEST_DIGEST = ""
+HUMAN_REPAIRS: Dict[str, Dict] = {}
 
 CRITIC_FIELDS = v510.CRITIC_FIELDS
 GENERATOR_OUTPUT_FIELDS = v510.GENERATOR_OUTPUT_FIELDS
@@ -211,6 +214,26 @@ def _pop_path_argument(name: str) -> Path:
     return value
 
 
+def _pop_optional_path_argument(name: str) -> Path | None:
+    if name not in sys.argv:
+        return None
+    index = sys.argv.index(name)
+    try:
+        value = Path(sys.argv[index + 1]).resolve()
+    except IndexError as exc:
+        raise SystemExit(f"{name} requires a path") from exc
+    del sys.argv[index:index + 2]
+    return value
+
+
+def file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def state_digest(path: Path) -> str:
     """Digest frozen semantic inputs without depending on directory mtimes."""
     digest = hashlib.sha256()
@@ -342,6 +365,101 @@ def _audit_path(state_dir: Path, block_id: int, source_id: str) -> Path:
     )
 
 
+def _validate_human_candidate(directive: Mapping) -> Dict[str, str]:
+    if not isinstance(directive, Mapping):
+        raise ValueError("human repair directive must be an object")
+    result = {}
+    for field in ("c01_question", "replacement_answer", "category", "reason"):
+        value = directive.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"human repair directive {field} must be non-empty")
+        result[field] = " ".join(value.split())
+    return result
+
+
+def apply_human_candidate(
+    generation_client,
+    critic_client,
+    args,
+    block: Mapping,
+    source: Mapping,
+    profile: Mapping,
+    state_dir: Path,
+    directive: Mapping,
+) -> Dict:
+    """Validate, independently criticise, and checkpoint an explicit repair."""
+    block_id = int(block["block_id"])
+    source_id = source["source_id"]
+    manual = _validate_human_candidate(directive)
+    packet, brief, planner_attempt = load_or_create_semantic_brief(
+        generation_client, args, block, source, profile, state_dir
+    )
+    validated = v510.validate_structural_candidate(
+        block,
+        source,
+        profile,
+        {
+            "c01_question": manual["c01_question"],
+            "replacement_answer": manual["replacement_answer"],
+        },
+    )
+    verdict = v59.request_critic_verdict(
+        critic_client,
+        args,
+        packet,
+        brief,
+        validated,
+        block_id,
+        source_id,
+        0,
+    )
+    v52.write_json(_audit_path(state_dir, block_id, source_id), {
+        "design_version": DESIGN_VERSION,
+        "premise_policy_version": PREMISE_POLICY_VERSION,
+        "human_repair_manifest": str(HUMAN_REPAIR_MANIFEST_PATH),
+        "human_repair_manifest_digest": HUMAN_REPAIR_MANIFEST_DIGEST,
+        "candidate": v59.candidate_for_prompt(validated),
+        "human_directive": manual,
+        "critic_verdict": verdict,
+    })
+    if not verdict["accepted"]:
+        raise ValueError(
+            "explicit human candidate failed independent critic: "
+            + v59.critic_feedback(verdict)
+        )
+    trace = {
+        "agent_protocol_version": AGENT_PROTOCOL_VERSION,
+        "semantic_brief_schema_version": SEMANTIC_BRIEF_SCHEMA_VERSION,
+        "premise_policy_version": PREMISE_POLICY_VERSION,
+        "pair_contract_version": PAIR_CONTRACT_VERSION,
+        "context_digest": v59.context_digest(packet),
+        "planner_attempt": planner_attempt,
+        "generator_attempt": 0,
+        "generator_model": "explicit-human-repair",
+        "critic_model": args.judge_model,
+        "critic_independent_call": True,
+        "critic_verdict": verdict,
+        "deterministic_observations": validated["deterministic_observations"],
+        "human_manual_repair": {
+            "category": manual["category"],
+            "reason": manual["reason"],
+            "manifest": str(HUMAN_REPAIR_MANIFEST_PATH),
+            "manifest_digest": HUMAN_REPAIR_MANIFEST_DIGEST,
+        },
+        "base_state_digest": BASE_STATE_DIGEST,
+    }
+    validated["semantic_agent_trace"] = trace
+    validated["mapping_attempt"] = 0
+    validated["repair_generation"] = 1
+    path = v52.row_path(state_dir, block_id, source_id)
+    v59.write_agent_row_checkpoint(path, profile, validated, 0, 1)
+    print(
+        f"premise_human_row_applied block={block_id} source={source_id}",
+        flush=True,
+    )
+    return validated
+
+
 def generate_row(
     generation_client,
     critic_client,
@@ -357,7 +475,24 @@ def generate_row(
     block_id = int(block["block_id"])
     source_id = source["source_id"]
     path = v52.row_path(state_dir, block_id, source_id)
+    directive = HUMAN_REPAIRS.get(source_id)
+    if force and directive is not None:
+        raise RuntimeError(
+            f"explicit human repair {source_id} was rejected by the final "
+            "block judge; refusing to replace it with an unapproved model row"
+        )
     if not force:
+        if directive is not None:
+            return apply_human_candidate(
+                generation_client,
+                critic_client,
+                args,
+                block,
+                source,
+                profile,
+                state_dir,
+                directive,
+            )
         current = v59.load_cached_agent_row(path, block, source, profile)
         if current is not None:
             print(
@@ -546,6 +681,11 @@ def assemble_block(
             "inherited_rows_reaudited": True,
             "selective_c01_repair": True,
         })
+        manual = record.get("semantic_agent_trace", {}).get(
+            "human_manual_repair"
+        )
+        if manual is not None:
+            record["generation"]["human_manual_repair"] = manual
         failures = ciru.validate_ciru_unit(record)
         if failures:
             raise ValueError(f"{source_id}: " + "; ".join(failures))
@@ -588,8 +728,16 @@ def configure_shared_modules() -> None:
 
 def main() -> None:
     global BASE_STATE_DIR, BASE_STATE_DIGEST, BASE_BLOCK_RECORDS
+    global HUMAN_REPAIR_MANIFEST_PATH, HUMAN_REPAIR_MANIFEST_DIGEST
+    global HUMAN_REPAIRS
 
     BASE_STATE_DIR = _pop_path_argument("--base-state-dir")
+    HUMAN_REPAIR_MANIFEST_PATH = _pop_optional_path_argument(
+        "--human-repair-manifest"
+    )
+    HUMAN_REPAIR_MANIFEST_DIGEST = ""
+    HUMAN_REPAIRS = {}
+    BASE_BLOCK_RECORDS = {}
     if not BASE_STATE_DIR.is_dir():
         raise SystemExit(f"missing frozen V5.9 state directory: {BASE_STATE_DIR}")
     BASE_STATE_DIGEST = state_digest(BASE_STATE_DIR)
@@ -598,6 +746,29 @@ def main() -> None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         for record in payload.get("records", []):
             BASE_BLOCK_RECORDS[record["source_id"]] = record
+    if HUMAN_REPAIR_MANIFEST_PATH is not None:
+        if not HUMAN_REPAIR_MANIFEST_PATH.is_file():
+            raise SystemExit(
+                f"missing human repair manifest: {HUMAN_REPAIR_MANIFEST_PATH}"
+            )
+        payload = json.loads(
+            HUMAN_REPAIR_MANIFEST_PATH.read_text(encoding="utf-8")
+        )
+        if payload.get("design_version") != DESIGN_VERSION:
+            raise SystemExit("human repair manifest has wrong design_version")
+        raw_repairs = payload.get("repair_rows")
+        if not isinstance(raw_repairs, Mapping) or not raw_repairs:
+            raise SystemExit("human repair manifest repair_rows must be non-empty")
+        try:
+            HUMAN_REPAIRS = {
+                str(source_id): _validate_human_candidate(directive)
+                for source_id, directive in raw_repairs.items()
+            }
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        HUMAN_REPAIR_MANIFEST_DIGEST = file_digest(
+            HUMAN_REPAIR_MANIFEST_PATH
+        )
 
     configure_shared_modules()
     original = v59.configure_shared_modules
@@ -624,6 +795,12 @@ def main() -> None:
             "frozen_profile_and_ledger_reused": True,
             "inherited_rows_reaudited": True,
             "selective_c01_repair": True,
+            "human_repair_manifest": (
+                str(HUMAN_REPAIR_MANIFEST_PATH)
+                if HUMAN_REPAIR_MANIFEST_PATH is not None else None
+            ),
+            "human_repair_manifest_digest": HUMAN_REPAIR_MANIFEST_DIGEST,
+            "human_repair_rows": sorted(HUMAN_REPAIRS),
         })
         v52.write_json(profiles_path, profiles)
 
