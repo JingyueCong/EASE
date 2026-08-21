@@ -547,6 +547,24 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
                 {"verdicts": payload["verdicts"][:1]}, ids
             )
 
+    def test_rejected_pair_without_instruction_is_repairable(self):
+        raw = verdict(failed_field="information_budget_matched")
+        raw["repair_instruction"] = ""
+        parsed = generator.parse_audit_verdict(raw)
+        self.assertFalse(parsed["accepted"])
+        self.assertTrue(parsed["repair_instruction_synthesized"])
+        self.assertIn(
+            "information_budget_matched", parsed["repair_instruction"]
+        )
+
+    def test_rejected_budget_without_instruction_is_repairable(self):
+        raw = budget_verdict(failed_field="relation_faithful")
+        raw["repair_instruction"] = ""
+        parsed = generator.parse_budget_audit(raw)
+        self.assertFalse(parsed["accepted"])
+        self.assertTrue(parsed["repair_instruction_synthesized"])
+        self.assertIn("relation_faithful", parsed["repair_instruction"])
+
     def test_final_audit_falls_back_to_singletons_on_missing_coverage(self):
         profile, first = self.profile_and_row()
         second = copy.deepcopy(first)

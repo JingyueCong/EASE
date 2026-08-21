@@ -458,7 +458,17 @@ def parse_budget_audit(generated: Mapping) -> dict:
             raise ValueError(f"budget audit {field} must be a string")
         result[field] = normalise(value)
     if not result["accepted"] and not result["repair_instruction"]:
-        raise ValueError("rejected budget audit needs repair_instruction")
+        failed = [
+            field for field in BUDGET_AUDIT_FIELDS
+            if result.get(field) is not True
+        ]
+        result["repair_instruction"] = (
+            "Revise the C11 budget so these failed checks pass: "
+            + ", ".join(failed)
+            + ". Use only immutable C11 evidence; do not add C01 or replacement "
+            "profile assumptions."
+        )
+        result["repair_instruction_synthesized"] = True
     return result
 
 
@@ -488,7 +498,17 @@ def parse_audit_verdict(generated: Mapping) -> dict:
             raise ValueError(f"pair audit {field} must be a string")
         result[field] = normalise(value)
     if not result["accepted"] and not result["repair_instruction"]:
-        raise ValueError("rejected pair audit needs repair_instruction")
+        failed = [
+            field for field in AUDIT_FIELDS
+            if result.get(field) is not True
+        ]
+        result["repair_instruction"] = (
+            "Revise only the C01 question and answer so these failed checks "
+            "pass: " + ", ".join(failed) + ". Preserve frozen C11/C10/C00, "
+            "the replacement identity, profile, ledger, and C11 information "
+            "budget."
+        )
+        result["repair_instruction_synthesized"] = True
     return result
 
 
