@@ -55,6 +55,19 @@ def verdict(*, failed_field=None):
     return result
 
 
+def budget_verdict(*, failed_field=None):
+    result = {
+        "accepted": failed_field is None,
+        **{field: True for field in generator.BUDGET_AUDIT_FIELDS},
+        "reason": "The budget faithfully describes immutable C11 only.",
+        "repair_instruction": "",
+    }
+    if failed_field:
+        result[failed_field] = False
+        result["repair_instruction"] = "Remove the C01 assumption."
+    return result
+
+
 class AuthorPairBudgetV512Test(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -116,9 +129,11 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
                 "pair_budget_version": (
                     version or generator.PAIR_BUDGET_VERSION
                 ),
+                "budget_audit_version": generator.BUDGET_AUDIT_VERSION,
                 "pair_policy_version": generator.PAIR_POLICY_VERSION,
                 "base_data_digest": "base-digest",
                 "pair_budget": budget(),
+                "budget_audit": budget_verdict(),
             },
         )
 
@@ -170,6 +185,11 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         self.assertTrue(
             policy["incidental_item_count_is_not_a_hard_constraint"]
         )
+        self.assertEqual(len(packet["replacement_support_catalog"]), 20)
+        self.assertTrue(all(
+            "source_core_fact" not in item
+            for item in packet["replacement_support_catalog"]
+        ))
 
     def test_loads_real_v511_hybrid_row_provenance(self):
         rows = []
@@ -238,23 +258,34 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
 
         def fake_request(_client, _args, prompt, payload, _label):
             calls.append((prompt, payload))
-            return budget()
+            if prompt == generator.BUDGET_PROMPT:
+                return budget()
+            if prompt == generator.BUDGET_AUDIT_PROMPT:
+                return budget_verdict()
+            raise AssertionError(f"unexpected prompt {prompt[:30]}")
 
         old_request = generator.request_json
         generator.request_json = fake_request
         try:
             with tempfile.TemporaryDirectory() as directory:
                 result = generator.load_or_create_budget(
-                    object(), self.args(), row, Path(directory), "base-digest"
+                    object(), object(), self.args(), row, Path(directory),
+                    "base-digest",
                 )
         finally:
             generator.request_json = old_request
 
-        self.assertEqual(result["version"], generator.PAIR_BUDGET_VERSION)
-        payload = calls[0][1]
+        self.assertEqual(
+            result["pair_budget"]["version"], generator.PAIR_BUDGET_VERSION
+        )
+        self.assertTrue(result["budget_audit"]["accepted"])
+        payload = next(
+            payload for prompt, payload in calls
+            if prompt == generator.BUDGET_PROMPT
+        )
         self.assertEqual(set(payload), {
             "source_id", "immutable_c11", "declared_target_relation",
-            "important_boundary",
+            "important_boundary", "validation_feedback",
         })
         self.assertNotIn("proposed_c01", payload)
         self.assertNotIn("cells", payload)
@@ -266,7 +297,11 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
 
         def fake_request(_client, _args, prompt, _payload, _label):
             calls.append(prompt)
-            return budget()
+            if prompt == generator.BUDGET_PROMPT:
+                return budget()
+            if prompt == generator.BUDGET_AUDIT_PROMPT:
+                return budget_verdict()
+            raise AssertionError(f"unexpected prompt {prompt[:30]}")
 
         old_request = generator.request_json
         generator.request_json = fake_request
@@ -278,7 +313,7 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
                     version="c11-semantic-information-budget-v1",
                 )
                 result = generator.load_or_create_budget(
-                    object(), self.args(), row, state, "base-digest"
+                    object(), object(), self.args(), row, state, "base-digest"
                 )
                 cached = json.loads(
                     generator.budget_path(state, row["source_id"]).read_text()
@@ -286,11 +321,56 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         finally:
             generator.request_json = old_request
 
-        self.assertEqual(calls, [generator.BUDGET_PROMPT])
-        self.assertEqual(result["version"], generator.PAIR_BUDGET_VERSION)
+        self.assertEqual(
+            calls, [generator.BUDGET_PROMPT, generator.BUDGET_AUDIT_PROMPT]
+        )
+        self.assertEqual(
+            result["pair_budget"]["version"], generator.PAIR_BUDGET_VERSION
+        )
         self.assertEqual(
             cached["pair_budget_version"], generator.PAIR_BUDGET_VERSION
         )
+
+    def test_rejected_budget_is_repaired_before_any_c01_audit(self):
+        _, row = self.profile_and_row()
+        calls = []
+        audit_count = 0
+
+        def fake_request(_client, _args, prompt, payload, _label):
+            nonlocal audit_count
+            calls.append((prompt, payload))
+            if prompt == generator.BUDGET_PROMPT:
+                return budget()
+            if prompt == generator.BUDGET_AUDIT_PROMPT:
+                audit_count += 1
+                if audit_count == 1:
+                    return budget_verdict(
+                        failed_field="no_c01_or_replacement_assumptions"
+                    )
+                return budget_verdict()
+            raise AssertionError("C01 prompt must not run in budget stage")
+
+        old_request = generator.request_json
+        generator.request_json = fake_request
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                result = generator.load_or_create_budget(
+                    object(), object(), self.args(), row, Path(directory),
+                    "base-digest",
+                )
+        finally:
+            generator.request_json = old_request
+
+        budget_payloads = [
+            payload for prompt, payload in calls
+            if prompt == generator.BUDGET_PROMPT
+        ]
+        self.assertEqual(len(budget_payloads), 2)
+        self.assertIn(
+            "no_c01_or_replacement_assumptions",
+            budget_payloads[1]["validation_feedback"],
+        )
+        self.assertTrue(result["budget_audit"]["accepted"])
 
     def test_audit_acceptance_is_computed_from_all_checks(self):
         accepted = generator.parse_audit_verdict(verdict())
@@ -318,6 +398,7 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
                     "replacement_answer": row["cells"]["C01"]["answer"],
                 },
                 budget=parsed_budget,
+                budget_audit=generator.parse_budget_audit(budget_verdict()),
                 verdict=parsed_verdict,
                 base_digest="base-digest",
                 profiles_digest="profiles-digest",
@@ -422,6 +503,9 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
                     "replacement_answer": "One concise replacement fact.",
                 },
                 "pair_budget": parsed_budget,
+                "budget_audit": generator.parse_budget_audit(
+                    budget_verdict()
+                ),
                 "pair_audit": parsed_verdict,
                 "final_pair_audit": parsed_verdict,
                 "repair_generation": 1,

@@ -212,12 +212,25 @@ for source_id in sorted(base):
         errors.append(f"profile not frozen {source_id}")
     if trace.get("frozen_cells") != ["C11", "C10", "C00"]:
         errors.append(f"frozen-cell trace {source_id}")
-    if trace.get("pair_budget_version") != "c11-semantic-information-budget-v2":
+    if trace.get("pair_budget_version") != "c11-semantic-information-budget-v3":
         errors.append(f"stale pair budget {source_id}")
-    if trace.get("audit_version") != "independent-pair-budget-audit-v2":
+    if trace.get("budget_audit_version") != "independent-c11-budget-audit-v1":
+        errors.append(f"stale budget audit {source_id}")
+    if trace.get("audit_version") != "independent-pair-budget-audit-v3":
         errors.append(f"stale pair audit {source_id}")
-    if trace.get("pair_policy_version") != "replacement-identity-ledger-authority-v2":
+    if trace.get("pair_policy_version") != "replacement-identity-ledger-authority-v3":
         errors.append(f"stale pair policy {source_id}")
+    budget_audit = trace.get("budget_audit", {})
+    if budget_audit.get("accepted") is not True or any(
+        budget_audit.get(field) is not True
+        for field in (
+            "relation_faithful", "argument_slots_faithful",
+            "answerability_faithful", "polarity_faithful",
+            "explicit_cardinality_only", "no_c01_or_replacement_assumptions",
+            "no_incidental_detail_hard_constraints",
+        )
+    ):
+        errors.append(f"incomplete budget audit {source_id}")
     for stage in ("row_pair_audit", "final_pair_audit"):
         verdict = trace.get(stage, {})
         if verdict.get("accepted") is not True or any(
@@ -228,11 +241,13 @@ for source_id in sorted(base):
 revision = profiles.get("pairbudget_revision", {})
 if profiles.get("design_version") != "tofu-author-pairbudget-v5.12":
     errors.append("profile design")
-if profiles.get("pair_budget_version") != "c11-semantic-information-budget-v2":
+if profiles.get("pair_budget_version") != "c11-semantic-information-budget-v3":
     errors.append("profile pair-budget version")
-if profiles.get("audit_version") != "independent-pair-budget-audit-v2":
+if profiles.get("budget_audit_version") != "independent-c11-budget-audit-v1":
+    errors.append("profile budget-audit version")
+if profiles.get("audit_version") != "independent-pair-budget-audit-v3":
     errors.append("profile audit version")
-if profiles.get("pair_policy_version") != "replacement-identity-ledger-authority-v2":
+if profiles.get("pair_policy_version") != "replacement-identity-ledger-authority-v3":
     errors.append("profile pair-policy version")
 if profiles.get("profiles") != base_profiles.get("profiles"):
     errors.append("replacement profiles or ledgers changed")

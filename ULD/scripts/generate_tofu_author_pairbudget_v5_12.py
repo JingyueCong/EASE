@@ -40,9 +40,10 @@ BASE_ROW_DESIGNS = {
     "tofu-author-premisefix-v5.11",
 }
 DESIGN_VERSION = "tofu-author-pairbudget-v5.12"
-PAIR_BUDGET_VERSION = "c11-semantic-information-budget-v2"
-AUDIT_VERSION = "independent-pair-budget-audit-v2"
-PAIR_POLICY_VERSION = "replacement-identity-ledger-authority-v2"
+PAIR_BUDGET_VERSION = "c11-semantic-information-budget-v3"
+BUDGET_AUDIT_VERSION = "independent-c11-budget-audit-v1"
+AUDIT_VERSION = "independent-pair-budget-audit-v3"
+PAIR_POLICY_VERSION = "replacement-identity-ledger-authority-v3"
 SURFACE_RENDERER = "selective-complete-c01-pairbudget-v5.12"
 MAPPING_SCOPE = "full200-frozen-profile-selective-c01-only"
 
@@ -71,6 +72,15 @@ AUDIT_FIELDS = (
     "source_fact_removed",
     "no_extraneous_profile_dump",
     "natural_surface",
+)
+BUDGET_AUDIT_FIELDS = (
+    "relation_faithful",
+    "argument_slots_faithful",
+    "answerability_faithful",
+    "polarity_faithful",
+    "explicit_cardinality_only",
+    "no_c01_or_replacement_assumptions",
+    "no_incidental_detail_hard_constraints",
 )
 ANSWERABILITY = {"available", "unavailable", "qualified"}
 POLARITY = {"affirmative", "negative", "qualified", "unavailable"}
@@ -112,6 +122,10 @@ promote optional explanation, rhetorical strength, or supporting examples
 into mandatory semantic propositions unless the question explicitly requests
 them.
 
+When validation_feedback is supplied, repair the budget itself. Never refer
+to C01, a replacement author, a replacement ledger, or facts not present in
+immutable C11; those are deliberately unavailable at this stage.
+
 Return JSON only with exactly:
 {"relation_definition":"relation and argument roles",
  "answer_object_type":"name/title/date/reason/list/explanation/etc",
@@ -123,6 +137,29 @@ Return JSON only with exactly:
  "scope_constraints":["argument/scope that C01 must map"],
  "nuisance_constraints":["response properties to match approximately"],
  "replaceable_source_premises":["source-specific values C01 must replace"]}
+"""
+
+
+BUDGET_AUDIT_PROMPT = """Independently audit a semantic pair budget against
+the supplied immutable C11 question and answer. This stage knows nothing about
+C01 or any replacement author. Reject a budget that refers to C01,
+replacement facts, or unsupported assumptions; misstates the relation,
+argument slots, answerability, or polarity; treats incidental answer details
+as question-mandated propositions; or infers an exact count from examples,
+institutions, themes, clauses, audiences, or list items when the C11 QUESTION
+does not explicitly request that count.
+
+Return JSON only. accepted may be true only when every check is true:
+{"accepted":true,
+ "relation_faithful":true,
+ "argument_slots_faithful":true,
+ "answerability_faithful":true,
+ "polarity_faithful":true,
+ "explicit_cardinality_only":true,
+ "no_c01_or_replacement_assumptions":true,
+ "no_incidental_detail_hard_constraints":true,
+ "reason":"specific comparison to immutable C11",
+ "repair_instruction":"empty when accepted; otherwise repair the budget"}
 """
 
 
@@ -146,6 +183,10 @@ Authority and compression rules:
 - frozen_row_ledger and replacement_profile define which replacement facts are
   supported, but they are a SUPPORT CEILING, not a requirement to reproduce
   the complete replacement_fact or profile.
+- replacement_support_catalog exposes the same frozen author's other row facts
+  only so mapped question premises (such as birthplace, occupation, titles,
+  dates, or institutions) can be verified across the profile. It is read-only
+  support and never a checklist of content to include in this answer.
 - Identity intervention is non-negotiable: C01 must describe the declared
   replacement_entity. The replacement author is not an alias of the C11
   target author. Never recommend restoring the target author or target fact.
@@ -199,6 +240,10 @@ frozen row ledger is authoritative for replacement-specific factual content,
 but is a support pool rather than text that must all be repeated. Select only
 the smallest supported replacement-fact subset needed to answer the rewritten
 question at approximately C11's semantic budget.
+
+The replacement_support_catalog may be consulted only to support coherent
+question-scope mappings across the same frozen author profile. Do not copy its
+unrelated facts into the answer.
 
 The C01 subject is always replacement_entity. Never restore the target author,
 never treat replacement_entity as an alias of target_entity, and never retain
@@ -399,6 +444,36 @@ def validate_budget(generated: Mapping) -> dict:
     return result
 
 
+def parse_budget_audit(generated: Mapping) -> dict:
+    if not isinstance(generated, Mapping):
+        raise ValueError("budget audit verdict must be an object")
+    result = {
+        field: generated.get(field) is True
+        for field in BUDGET_AUDIT_FIELDS
+    }
+    result["accepted"] = all(result.values())
+    for field in ("reason", "repair_instruction"):
+        value = generated.get(field, "")
+        if not isinstance(value, str):
+            raise ValueError(f"budget audit {field} must be a string")
+        result[field] = normalise(value)
+    if not result["accepted"] and not result["repair_instruction"]:
+        raise ValueError("rejected budget audit needs repair_instruction")
+    return result
+
+
+def budget_audit_feedback(verdict: Mapping) -> str:
+    failed = [
+        field for field in BUDGET_AUDIT_FIELDS
+        if verdict.get(field) is not True
+    ]
+    return (
+        "Failed immutable-C11 budget checks: " + ", ".join(failed)
+        + f". Evidence: {verdict.get('reason', '')}. "
+        + f"Required budget repair: {verdict.get('repair_instruction', '')}"
+    )
+
+
 def parse_audit_verdict(generated: Mapping) -> dict:
     if not isinstance(generated, Mapping):
         raise ValueError("pair audit verdict must be an object")
@@ -441,6 +516,18 @@ def context_packet(row: Mapping, profile: Mapping, budget: Mapping) -> dict:
         "target_entity": target,
         "replacement_entity": replacement,
         "replacement_profile_summary": profile.get("profile_summary", ""),
+        "replacement_support_catalog": [
+            {
+                key: ledger_row.get(key)
+                for key in (
+                    "source_id", "fact_key", "target_relation",
+                    "replacement_core_fact", "replacement_fact",
+                    "intervention_policy", "contrast_status",
+                )
+                if key in ledger_row
+            }
+            for ledger_row in profile.get("fact_ledger", [])
+        ],
         "frozen_row_ledger": {
             key: entry.get(key)
             for key in (
@@ -458,6 +545,10 @@ def context_packet(row: Mapping, profile: Mapping, budget: Mapping) -> dict:
                 "immutable C11 pair_budget"
             ),
             "replacement_fact_support": "frozen row ledger and profile",
+            "cross_row_scope_support": (
+                "replacement_support_catalog is read-only support, not an "
+                "answer-content checklist"
+            ),
             "ledger_is_support_ceiling_not_required_transcript": True,
             "replacement_identity_is_mandatory": replacement,
             "target_identity_is_forbidden_in_c01": target,
@@ -516,8 +607,8 @@ def attempt_path(state_dir: Path, source_id: str, attempt: int) -> Path:
     return state_dir / "row_attempts" / f"{source_id}.attempt_{attempt:02d}.json"
 
 
-def load_or_create_budget(client, args, row: Mapping, state_dir: Path,
-                          base_digest: str) -> dict:
+def load_or_create_budget(generation_client, judge_client, args, row: Mapping,
+                          state_dir: Path, base_digest: str) -> dict:
     source_id = row["source_id"]
     path = budget_path(state_dir, source_id)
     if path.is_file():
@@ -525,34 +616,60 @@ def load_or_create_budget(client, args, row: Mapping, state_dir: Path,
         if (
             cached.get("design_version") == DESIGN_VERSION
             and cached.get("pair_budget_version") == PAIR_BUDGET_VERSION
+            and cached.get("budget_audit_version") == BUDGET_AUDIT_VERSION
             and cached.get("pair_policy_version") == PAIR_POLICY_VERSION
             and cached.get("base_data_digest") == base_digest
         ):
-            return validate_budget(cached["pair_budget"])
+            budget = validate_budget(cached["pair_budget"])
+            budget_audit = parse_budget_audit(cached["budget_audit"])
+            if budget_audit["accepted"]:
+                return {"pair_budget": budget, "budget_audit": budget_audit}
     last_error = None
+    validation_feedback = ""
     for attempt in range(1, args.budget_retries + 1):
         try:
             generated = request_json(
-                client, request_args(args, judge=False), BUDGET_PROMPT,
+                generation_client, request_args(args, judge=False),
+                BUDGET_PROMPT,
                 {
                     "source_id": source_id,
                     "immutable_c11": row["cells"]["C11"],
                     "declared_target_relation": row.get("target_relation", ""),
                     "important_boundary": "No C01 or replacement profile is supplied.",
+                    "validation_feedback": validation_feedback,
                 },
                 f"V5.12 pair budget {source_id} attempt {attempt}",
             )
             budget = validate_budget(generated)
+            audited = request_json(
+                judge_client, request_args(args, judge=True),
+                BUDGET_AUDIT_PROMPT,
+                {
+                    "source_id": source_id,
+                    "immutable_c11": row["cells"]["C11"],
+                    "pair_budget": budget,
+                    "important_boundary": (
+                        "No C01 or replacement profile is available."
+                    ),
+                },
+                f"V5.12 pair budget audit {source_id} attempt {attempt}",
+            )
+            budget_audit = parse_budget_audit(audited)
+            if not budget_audit["accepted"]:
+                validation_feedback = budget_audit_feedback(budget_audit)
+                raise ValueError(validation_feedback)
             write_json(path, {
                 "design_version": DESIGN_VERSION,
                 "pair_budget_version": PAIR_BUDGET_VERSION,
+                "budget_audit_version": BUDGET_AUDIT_VERSION,
                 "pair_policy_version": PAIR_POLICY_VERSION,
                 "base_data_digest": base_digest,
                 "budget_attempt": attempt,
                 "pair_budget": budget,
+                "budget_audit": budget_audit,
             })
             print(f"pair_budget_ready source={source_id} attempt={attempt}", flush=True)
-            return budget
+            return {"pair_budget": budget, "budget_audit": budget_audit}
         except Exception as exc:
             last_error = exc
             print(
@@ -598,6 +715,7 @@ def load_cached_row(path: Path, row: Mapping, profile: Mapping,
         if (
             cached.get("design_version") != DESIGN_VERSION
             or cached.get("pair_budget_version") != PAIR_BUDGET_VERSION
+            or cached.get("budget_audit_version") != BUDGET_AUDIT_VERSION
             or cached.get("audit_version") != AUDIT_VERSION
             or cached.get("pair_policy_version") != PAIR_POLICY_VERSION
             or cached.get("base_data_digest") != base_digest
@@ -606,12 +724,14 @@ def load_cached_row(path: Path, row: Mapping, profile: Mapping,
             return None
         candidate = validate_candidate(row, profile, cached["candidate"])
         verdict = parse_audit_verdict(cached["pair_audit"])
-        if not verdict["accepted"]:
+        budget_audit = parse_budget_audit(cached["budget_audit"])
+        if not verdict["accepted"] or not budget_audit["accepted"]:
             return None
         return {
             "candidate": candidate,
             "pair_audit": verdict,
             "pair_budget": validate_budget(cached["pair_budget"]),
+            "budget_audit": budget_audit,
             "repair_generation": int(cached.get("repair_generation", 0)),
             "generator_attempt": int(cached.get("generator_attempt", 0)),
         }
@@ -620,13 +740,15 @@ def load_cached_row(path: Path, row: Mapping, profile: Mapping,
 
 
 def write_row_checkpoint(path: Path, *, source_id: str, candidate: Mapping,
-                         budget: Mapping, verdict: Mapping,
+                         budget: Mapping, budget_audit: Mapping,
+                         verdict: Mapping,
                          base_digest: str, profiles_digest: str,
                          generator_attempt: int,
                          repair_generation: int) -> None:
     write_json(path, {
         "design_version": DESIGN_VERSION,
         "pair_budget_version": PAIR_BUDGET_VERSION,
+        "budget_audit_version": BUDGET_AUDIT_VERSION,
         "audit_version": AUDIT_VERSION,
         "pair_policy_version": PAIR_POLICY_VERSION,
         "source_id": source_id,
@@ -636,6 +758,7 @@ def write_row_checkpoint(path: Path, *, source_id: str, candidate: Mapping,
         "repair_generation": repair_generation,
         "candidate": dict(candidate),
         "pair_budget": dict(budget),
+        "budget_audit": dict(budget_audit),
         "pair_audit": dict(verdict),
     })
 
@@ -646,9 +769,11 @@ def process_row(generation_client, judge_client, args, row: Mapping,
                 feedback: str = "", previous: Mapping | None = None) -> dict:
     source_id = row["source_id"]
     path = row_path(state_dir, source_id)
-    budget = load_or_create_budget(
-        generation_client, args, row, state_dir, base_digest
+    budget_bundle = load_or_create_budget(
+        generation_client, judge_client, args, row, state_dir, base_digest
     )
+    budget = budget_bundle["pair_budget"]
+    budget_audit = budget_bundle["budget_audit"]
     if not force:
         cached = load_cached_row(
             path, row, profile, base_digest, profiles_digest
@@ -670,12 +795,13 @@ def process_row(generation_client, judge_client, args, row: Mapping,
                 "candidate": inherited,
                 "pair_audit": verdict,
                 "pair_budget": budget,
+                "budget_audit": budget_audit,
                 "repair_generation": 0,
                 "generator_attempt": 0,
             }
             write_row_checkpoint(
                 path, source_id=source_id, candidate=inherited,
-                budget=budget, verdict=verdict,
+                budget=budget, budget_audit=budget_audit, verdict=verdict,
                 base_digest=base_digest, profiles_digest=profiles_digest,
                 generator_attempt=0, repair_generation=0,
             )
@@ -718,12 +844,13 @@ def process_row(generation_client, judge_client, args, row: Mapping,
                 "candidate": candidate,
                 "pair_audit": verdict,
                 "pair_budget": budget,
+                "budget_audit": budget_audit,
                 "repair_generation": 1,
                 "generator_attempt": attempt,
             }
             write_row_checkpoint(
                 path, source_id=source_id, candidate=candidate,
-                budget=budget, verdict=verdict,
+                budget=budget, budget_audit=budget_audit, verdict=verdict,
                 base_digest=base_digest, profiles_digest=profiles_digest,
                 generator_attempt=attempt, repair_generation=1,
             )
@@ -952,6 +1079,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
         record["pair_budget"] = result["pair_budget"]
         record["pair_budget_trace"] = {
             "pair_budget_version": PAIR_BUDGET_VERSION,
+            "budget_audit_version": BUDGET_AUDIT_VERSION,
             "audit_version": AUDIT_VERSION,
             "pair_policy_version": PAIR_POLICY_VERSION,
             "base_data_digest": base_digest,
@@ -959,6 +1087,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
             "c01_inherited_byte_exact": result["repair_generation"] == 0,
             "repair_generation": result["repair_generation"],
             "generator_attempt": result["generator_attempt"],
+            "budget_audit": result["budget_audit"],
             "row_pair_audit": result["pair_audit"],
             "final_pair_audit": result["final_pair_audit"],
             "frozen_cells": ["C11", "C10", "C00"],
@@ -969,6 +1098,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
             "surface_renderer": SURFACE_RENDERER,
             "mapping_scope": MAPPING_SCOPE,
             "pair_budget_version": PAIR_BUDGET_VERSION,
+            "budget_audit_version": BUDGET_AUDIT_VERSION,
             "audit_version": AUDIT_VERSION,
             "pair_policy_version": PAIR_POLICY_VERSION,
             "base_data_digest": base_digest,
@@ -993,6 +1123,7 @@ def output_profiles(base_profiles: Mapping, *, base_data: Path,
     payload.update({
         "design_version": DESIGN_VERSION,
         "pair_budget_version": PAIR_BUDGET_VERSION,
+        "budget_audit_version": BUDGET_AUDIT_VERSION,
         "audit_version": AUDIT_VERSION,
         "pair_policy_version": PAIR_POLICY_VERSION,
         "pairbudget_revision": {
