@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Finalize V5.12 from 198 accepted round-3 verdicts plus two reviewed repairs."""
+"""Finalize V5.12 from an accepted round-3 audit plus reviewed residuals."""
 
 from __future__ import annotations
 
@@ -13,9 +13,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATOR_PATH = ROOT / "ULD/scripts/generate_tofu_author_pairbudget_v5_12.py"
-MANUAL_IDS = {
+LAST2_IDS = {
     "forget05_perturbed-00095",
     "forget05_perturbed-00158",
+}
+CURRENT4_IDS = {
+    "forget05_perturbed-00000",
+    "forget05_perturbed-00012",
+    "forget05_perturbed-00027",
+    "forget05_perturbed-00100",
 }
 
 
@@ -60,7 +66,7 @@ MANUAL_00095_BUDGET = {
 }
 
 
-MANUAL_CANDIDATES = {
+LAST2_CANDIDATES = {
     "forget05_perturbed-00095": {
         "c01_question": (
             "Has Kenji Morimoto ever commented on what motivates him to write?"
@@ -78,6 +84,32 @@ MANUAL_CANDIDATES = {
             "Cormac Liam Donnelly's style is lyrical and spare, rich in "
             "maritime detail and understated humor, blending local color with "
             "restrained emotion."
+        ),
+    },
+}
+
+
+CURRENT4_CANDIDATES = {
+    "forget05_perturbed-00012": {
+        "c01_question": (
+            "Which institutions did Nadia Farooq attend for her university "
+            "education?"
+        ),
+        "replacement_answer": (
+            "Nadia Farooq earned her undergraduate degree at NED University, "
+            "her master's degree at UC Berkeley, and her doctorate at Oxford."
+        ),
+    },
+    "forget05_perturbed-00027": {
+        "c01_question": (
+            "How did emigrating from Beijing as a child shape Ashby Noor "
+            "Chen's writing?"
+        ),
+        "replacement_answer": (
+            "Ashby Noor Chen's childhood emigration from Beijing shaped "
+            "fiction centered on diasporic memory, North American small-town "
+            "experience, intergenerational ties, and belonging, expressed "
+            "through spare, sensory prose."
         ),
     },
 }
@@ -162,47 +194,58 @@ def main() -> None:
         for source_id, verdict in raw_verdicts.items()
         if not generator.parse_audit_verdict(verdict)["accepted"]
     }
-    if rejected != MANUAL_IDS:
+    if rejected == LAST2_IDS:
+        human_final_ids = LAST2_IDS
+        candidate_updates = LAST2_CANDIDATES
+        recovery_version = "v512-final2-v1"
+    elif rejected == CURRENT4_IDS:
+        human_final_ids = CURRENT4_IDS
+        candidate_updates = CURRENT4_CANDIDATES
+        recovery_version = "v512-final4-v1"
+    else:
         raise SystemExit(
-            "Refusing recovery: expected only the reviewed final two rejects; "
+            "Refusing recovery: round-3 rejects do not match a reviewed set; "
             f"found {sorted(rejected)}"
         )
 
-    manual_budget = generator.validate_budget(MANUAL_00095_BUDGET)
-    budget_audit = accepted_budget_audit(
-        generator, "forget05_perturbed-00095"
-    )
-    budget_path = generator.budget_path(
-        args.state_dir, "forget05_perturbed-00095"
-    )
-    backup_once(budget_path)
-    generator.write_json(
-        budget_path,
-        {
-            "design_version": generator.DESIGN_VERSION,
-            "pair_budget_version": generator.PAIR_BUDGET_VERSION,
-            "budget_audit_version": generator.BUDGET_AUDIT_VERSION,
-            "pair_policy_version": generator.PAIR_POLICY_VERSION,
-            "base_data_digest": base_digest,
-            "budget_attempt": 0,
-            "pair_budget": manual_budget,
-            "budget_audit": budget_audit,
-            "human_manual_repair": {
-                "set": "v512-final2-v1",
-                "kind": "incidental-cardinality-budget",
+    manual_budget = None
+    budget_audit = None
+    if rejected == LAST2_IDS:
+        manual_budget = generator.validate_budget(MANUAL_00095_BUDGET)
+        budget_audit = accepted_budget_audit(
+            generator, "forget05_perturbed-00095"
+        )
+        budget_path = generator.budget_path(
+            args.state_dir, "forget05_perturbed-00095"
+        )
+        backup_once(budget_path)
+        generator.write_json(
+            budget_path,
+            {
+                "design_version": generator.DESIGN_VERSION,
+                "pair_budget_version": generator.PAIR_BUDGET_VERSION,
+                "budget_audit_version": generator.BUDGET_AUDIT_VERSION,
+                "pair_policy_version": generator.PAIR_POLICY_VERSION,
+                "base_data_digest": base_digest,
+                "budget_attempt": 0,
+                "pair_budget": manual_budget,
+                "budget_audit": budget_audit,
+                "human_manual_repair": {
+                    "set": recovery_version,
+                    "kind": "incidental-cardinality-budget",
+                },
             },
-        },
-    )
+        )
 
-    for source_id in sorted(MANUAL_IDS):
+    for source_id in sorted(candidate_updates):
         row = by_source[source_id]
         profile = profiles[int(row["block_id"])]
         candidate = generator.validate_candidate(
-            row, profile, MANUAL_CANDIDATES[source_id]
+            row, profile, candidate_updates[source_id]
         )
         row_path = generator.row_path(args.state_dir, source_id)
         old_checkpoint = json.loads(row_path.read_text(encoding="utf-8"))
-        if source_id == "forget05_perturbed-00095":
+        if source_id == "forget05_perturbed-00095" and manual_budget is not None:
             current_budget = manual_budget
             current_budget_audit = budget_audit
         else:
@@ -228,7 +271,7 @@ def main() -> None:
         )
         checkpoint = json.loads(row_path.read_text(encoding="utf-8"))
         checkpoint["human_manual_repair"] = {
-            "set": "v512-final2-v1",
+            "set": recovery_version,
             "candidate": candidate,
         }
         generator.write_json(row_path, checkpoint)
@@ -247,7 +290,7 @@ def main() -> None:
         )
         if result is None:
             raise SystemExit(f"Invalid row checkpoint after recovery: {source_id}")
-        if source_id in MANUAL_IDS:
+        if source_id in human_final_ids:
             final_verdict = accepted_pair_audit(generator, source_id)
         else:
             final_verdict = generator.parse_audit_verdict(
@@ -274,10 +317,10 @@ def main() -> None:
         results=results,
     )
     output_profiles["pairbudget_revision"]["final_recovery"] = {
-        "version": "v512-final2-v1",
+        "version": recovery_version,
         "source_round": str(audit_path.resolve()),
-        "independent_accepted_verdicts": 198,
-        "human_reviewed_repairs": sorted(MANUAL_IDS),
+        "independent_accepted_verdicts": 200 - len(human_final_ids),
+        "human_reviewed_repairs": sorted(human_final_ids),
     }
     generator.write_json(args.profiles_output, output_profiles)
     generator.write_json(
@@ -286,13 +329,14 @@ def main() -> None:
             "design_version": generator.DESIGN_VERSION,
             "mapping_semantics_version": generator.MAPPING_SEMANTICS_VERSION,
             "round": 3,
-            "recovery": "v512-final2-v1",
+            "recovery": recovery_version,
             "verdicts": final_verdicts,
         },
     )
     print(
-        "V5.12 final-two recovery complete: rows=200 "
-        f"independent=198 human_repaired=2 output={args.output}"
+        "V5.12 reviewed residual recovery complete: rows=200 "
+        f"independent={200-len(human_final_ids)} "
+        f"human_repaired={len(human_final_ids)} output={args.output}"
     )
 
 
