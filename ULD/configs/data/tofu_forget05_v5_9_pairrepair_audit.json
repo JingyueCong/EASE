@@ -1,0 +1,62 @@
+{
+  "schema_version": "tofu-human-pair-audit-repair-v1",
+  "base_design": "tofu-author-semantic-agent-v5.9",
+  "target_design": "tofu-author-pairrepair-v5.10",
+  "audit_scope": "blocks 1 and 4; union of random and risk reports",
+  "human_judgment_authoritative": true,
+  "repair_rows": {
+    "forget05_perturbed-00021": {
+      "category": "PAIR_MISMATCH",
+      "reason": "C11 scopes genre through a named work while C01 drops the named-work constraint and changes specificity."
+    },
+    "forget05_perturbed-00027": {
+      "category": "PAIR_MISMATCH",
+      "reason": "A concise C11 causal explanation expands into a numbered multi-paragraph C01 with many independent claims."
+    },
+    "forget05_perturbed-00030": {
+      "category": "PAIR_MISMATCH",
+      "reason": "C01 imports the C11 plot through comparative source-fact language about a loss-and-rebirth arc."
+    },
+    "forget05_perturbed-00031": {
+      "category": "PAIR_MISMATCH",
+      "reason": "General critical acclaim in C11 becomes four independently named prizes in C01."
+    },
+    "forget05_perturbed-00082": {
+      "category": "PAIR_MISMATCH",
+      "reason": "A developed genre explanation in C11 becomes an atomic three-word genre label in C01."
+    },
+    "forget05_perturbed-00085": {
+      "category": "PAIR_MISMATCH",
+      "reason": "One compact cultural-influence explanation expands into a numbered answer with several independent motifs."
+    },
+    "forget05_perturbed-00088": {
+      "category": "PAIR_MISMATCH",
+      "reason": "One-sentence upbringing evidence expands into four numbered paragraphs and additional stylistic claims."
+    },
+    "forget05_perturbed-00089": {
+      "category": "PAIR_MISMATCH",
+      "reason": "C01 doubles the style-detail granularity and changes a compact answer into a numbered catalogue."
+    },
+    "forget05_perturbed-00091": {
+      "category": "PAIR_MISMATCH",
+      "reason": "C11 is unconfirmed reader inference whereas C01 changes the evidence status to an explicit author admission."
+    },
+    "forget05_perturbed-00092": {
+      "category": "PAIR_MISMATCH",
+      "reason": "A concise societal-critique answer expands into a multi-part numbered analysis."
+    },
+    "forget05_perturbed-00096": {
+      "category": "PAIR_MISMATCH",
+      "reason": "Two compact comparative points expand into a denser numbered answer with several additional style claims."
+    },
+    "forget05_perturbed-00098": {
+      "category": "POLARITY_MISMATCH",
+      "reason": "C01 begins with No but then asserts publications outside the main genre, creating an ambiguous or contradictory answer direction."
+    }
+  },
+  "borderline_reaudit_only": [
+    "forget05_perturbed-00028",
+    "forget05_perturbed-00037",
+    "forget05_perturbed-00080"
+  ]
+}
