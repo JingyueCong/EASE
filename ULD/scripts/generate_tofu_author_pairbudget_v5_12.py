@@ -35,6 +35,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 V511_PATH = SCRIPT_DIR / "generate_tofu_author_premisefix_v5_11.py"
 
 BASE_DESIGN = "tofu-author-premisefix-v5.11-full-hybrid"
+BASE_ROW_DESIGNS = {
+    "tofu-author-pairrepair-v5.10",
+    "tofu-author-premisefix-v5.11",
+}
 DESIGN_VERSION = "tofu-author-pairbudget-v5.12"
 PAIR_BUDGET_VERSION = "c11-semantic-information-budget-v1"
 AUDIT_VERSION = "independent-pair-budget-audit-v1"
@@ -257,8 +261,21 @@ def load_jsonl(path: Path) -> list[dict]:
     ]
     if len(rows) != 200 or len({row.get("source_id") for row in rows}) != 200:
         raise ValueError("base data must contain 200 unique rows")
-    if any(row.get("design_version") != BASE_DESIGN for row in rows):
-        raise ValueError(f"base rows must use {BASE_DESIGN}")
+    errors = []
+    for row in rows:
+        source_id = row.get("source_id", "<missing-source-id>")
+        row_design = row.get("design_version")
+        assembly = row.get("generation", {}).get("full200_assembly", {})
+        if row_design not in BASE_ROW_DESIGNS:
+            errors.append(f"{source_id}: unsupported source design {row_design!r}")
+        if assembly.get("full_design") != BASE_DESIGN:
+            errors.append(f"{source_id}: missing {BASE_DESIGN} assembly provenance")
+        if assembly.get("source_design") != row_design:
+            errors.append(f"{source_id}: assembly/source design mismatch")
+        if assembly.get("causal_cells_edited_by_merge") is not False:
+            errors.append(f"{source_id}: merge did not preserve causal cells")
+    if errors:
+        raise ValueError("invalid frozen hybrid base: " + "; ".join(errors[:20]))
     return rows
 
 

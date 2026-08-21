@@ -115,6 +115,67 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         self.assertNotIn("response_contract", parsed)
         self.assertNotIn("format_class", parsed)
 
+    def test_loads_real_v511_hybrid_row_provenance(self):
+        rows = []
+        for index in range(200):
+            row_design = (
+                "tofu-author-pairrepair-v5.10"
+                if index // 20 in {1, 4}
+                else "tofu-author-premisefix-v5.11"
+            )
+            rows.append({
+                "source_id": f"forget05_perturbed-{index:05d}",
+                "design_version": row_design,
+                "generation": {
+                    "full200_assembly": {
+                        "full_design": generator.BASE_DESIGN,
+                        "source_design": row_design,
+                        "causal_cells_edited_by_merge": False,
+                    }
+                },
+            })
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hybrid.jsonl"
+            path.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            loaded = generator.load_jsonl(path)
+        self.assertEqual(len(loaded), 200)
+        self.assertEqual(
+            {row["design_version"] for row in loaded},
+            generator.BASE_ROW_DESIGNS,
+        )
+
+    def test_rejects_hybrid_row_without_matching_assembly_provenance(self):
+        rows = []
+        for index in range(200):
+            row_design = "tofu-author-premisefix-v5.11"
+            rows.append({
+                "source_id": f"forget05_perturbed-{index:05d}",
+                "design_version": row_design,
+                "generation": {
+                    "full200_assembly": {
+                        "full_design": generator.BASE_DESIGN,
+                        "source_design": row_design,
+                        "causal_cells_edited_by_merge": False,
+                    }
+                },
+            })
+        rows[0]["generation"]["full200_assembly"]["source_design"] = (
+            "tofu-author-pairrepair-v5.10"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad-hybrid.jsonl"
+            path.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ValueError, "assembly/source design mismatch"
+            ):
+                generator.load_jsonl(path)
+
     def test_budget_request_never_receives_c01_or_replacement_profile(self):
         _, row = self.profile_and_row()
         calls = []
