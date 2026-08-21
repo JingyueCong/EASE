@@ -95,12 +95,31 @@ class AuthorPremiseFixV511Test(unittest.TestCase):
             "source-specific factual premises required to make C01 coherent",
             packet["pair_contract"]["change_only"],
         )
+        authority = packet["evidence_authority_policy"]
+        self.assertEqual(
+            authority["version"], "frozen-ledger-authority-v1"
+        )
+        self.assertTrue(
+            authority["highest_to_lowest"][0].startswith(
+                "frozen_row_ledger"
+            )
+        )
+        self.assertIn("semantic_brief", authority["conflict_rule"])
+        self.assertIn("frozen row ledger", authority["conflict_rule"])
 
     def test_prompts_forbid_literal_source_premise_preservation(self):
         self.assertIn("Do not preserve a literal", generator.SEMANTIC_PLANNER_PROMPT)
         self.assertIn("question must be true", generator.PREMISE_GENERATOR_PROMPT)
         self.assertIn("must replace it", generator.PREMISE_CRITIC_PROMPT)
         self.assertIn("polarity", generator.PREMISE_CRITIC_PROMPT)
+        self.assertIn(
+            "semantic_brief is advisory only",
+            generator.PREMISE_CRITIC_PROMPT,
+        )
+        self.assertIn(
+            "Never reject a candidate for obeying the frozen row ledger",
+            generator.PREMISE_CRITIC_PROMPT,
+        )
 
     def test_legacy_brief_is_migrated_but_policy_overrides_must_preserve(self):
         profile = self.profile()

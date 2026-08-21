@@ -104,6 +104,21 @@ PREMISE_MAPPING_POLICY = {
     ),
 }
 
+EVIDENCE_AUTHORITY_POLICY = {
+    "version": "frozen-ledger-authority-v1",
+    "highest_to_lowest": [
+        "frozen_row_ledger replacement_fact, intervention_policy, and contrast_status",
+        "complete_replacement_ledger and replacement-author profile",
+        "immutable C11 for the target relation and argument roles",
+        "semantic_brief for advisory nuisance matching only",
+    ],
+    "conflict_rule": (
+        "When semantic_brief content, evidence status, polarity, cardinality, "
+        "or granularity conflicts with the frozen row ledger, follow the "
+        "frozen row ledger and do not count that conflict as a candidate error."
+    ),
+}
+
 
 SEMANTIC_PLANNER_PROMPT = """Act as the semantic planner for one TOFU causal
 intervention. Read the immutable C11 question/answer, frozen source and
@@ -173,6 +188,13 @@ number, or identity descriptor conflicts with the replacement profile, C01
 must replace it with the coherent replacement-profile premise.
 
 Apply these precedence rules:
+- Evidence authority is strict: frozen_row_ledger is authoritative for the
+  replacement fact, intervention policy, and availability status; the complete
+  replacement ledger is next; immutable C11 is authoritative for the relation;
+  semantic_brief is advisory only.
+- If semantic_brief disagrees with frozen_row_ledger about answer content,
+  evidence status, polarity, item count, or granularity, ignore that portion of
+  semantic_brief. Never reject a candidate for obeying the frozen row ledger.
 - The C01 question must be true of the replacement profile.
 - The C01 answer must directly satisfy its actual rewritten question.
 - Do not demand literal source qualifiers through must_preserve; the explicit
@@ -256,6 +278,7 @@ def build_context_packet(
     packet = v510.BASE_V59_BUILD_CONTEXT(block, source, profile)
     packet["agent_protocol_version"] = AGENT_PROTOCOL_VERSION
     packet["premise_mapping_policy"] = dict(PREMISE_MAPPING_POLICY)
+    packet["evidence_authority_policy"] = dict(EVIDENCE_AUTHORITY_POLICY)
     packet["pair_contract"] = {
         "version": PAIR_CONTRACT_VERSION,
         "change_only": [
