@@ -108,12 +108,68 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
             judge_batch_size=2,
         )
 
+    def write_budget_cache(self, state, source_id, *, version=None):
+        generator.write_json(
+            generator.budget_path(state, source_id),
+            {
+                "design_version": generator.DESIGN_VERSION,
+                "pair_budget_version": (
+                    version or generator.PAIR_BUDGET_VERSION
+                ),
+                "pair_policy_version": generator.PAIR_POLICY_VERSION,
+                "base_data_digest": "base-digest",
+                "pair_budget": budget(),
+            },
+        )
+
     def test_pair_budget_schema_is_semantic_not_surface_taxonomy(self):
         parsed = generator.validate_budget(budget())
         self.assertEqual(parsed["information_budget"], "atomic")
         self.assertEqual(len(parsed["semantic_propositions"]), 1)
         self.assertNotIn("response_contract", parsed)
         self.assertNotIn("format_class", parsed)
+
+    def test_policy_makes_identity_and_approximate_cardinality_authoritative(self):
+        self.assertIn(
+            "replacement author is not an alias",
+            generator.PAIR_AUDIT_PROMPT,
+        )
+        self.assertIn(
+            "Never recommend restoring the target author",
+            generator.PAIR_AUDIT_PROMPT,
+        )
+        self.assertIn(
+            "merely because C11 and C01 contain different counts",
+            generator.PAIR_AUDIT_PROMPT,
+        )
+        self.assertIn(
+            "Never restore the target author",
+            generator.PAIR_GENERATOR_PROMPT,
+        )
+        self.assertIn(
+            "unless the C11 QUESTION",
+            generator.FINAL_AUDIT_PROMPT,
+        )
+
+    def test_context_packet_exposes_non_overridable_authority_policy(self):
+        profile, row = self.profile_and_row()
+        packet = generator.context_packet(
+            row, profile, generator.validate_budget(budget())
+        )
+        policy = packet["authority_policy"]
+        self.assertEqual(policy["version"], generator.PAIR_POLICY_VERSION)
+        self.assertEqual(
+            policy["replacement_identity_is_mandatory"],
+            row["replacement_entity"],
+        )
+        self.assertEqual(
+            policy["target_identity_is_forbidden_in_c01"],
+            row["target_entity"],
+        )
+        self.assertTrue(policy["replacement_is_not_target_alias"])
+        self.assertTrue(
+            policy["incidental_item_count_is_not_a_hard_constraint"]
+        )
 
     def test_loads_real_v511_hybrid_row_provenance(self):
         rows = []
@@ -204,6 +260,38 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         self.assertNotIn("cells", payload)
         self.assertNotIn(row["replacement_entity"], json.dumps(payload))
 
+    def test_stale_budget_policy_cache_is_regenerated(self):
+        _, row = self.profile_and_row()
+        calls = []
+
+        def fake_request(_client, _args, prompt, _payload, _label):
+            calls.append(prompt)
+            return budget()
+
+        old_request = generator.request_json
+        generator.request_json = fake_request
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                self.write_budget_cache(
+                    state, row["source_id"],
+                    version="c11-semantic-information-budget-v1",
+                )
+                result = generator.load_or_create_budget(
+                    object(), self.args(), row, state, "base-digest"
+                )
+                cached = json.loads(
+                    generator.budget_path(state, row["source_id"]).read_text()
+                )
+        finally:
+            generator.request_json = old_request
+
+        self.assertEqual(calls, [generator.BUDGET_PROMPT])
+        self.assertEqual(result["version"], generator.PAIR_BUDGET_VERSION)
+        self.assertEqual(
+            cached["pair_budget_version"], generator.PAIR_BUDGET_VERSION
+        )
+
     def test_audit_acceptance_is_computed_from_all_checks(self):
         accepted = generator.parse_audit_verdict(verdict())
         self.assertTrue(accepted["accepted"])
@@ -215,6 +303,34 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
             "information_budget_matched",
             generator.audit_feedback(rejected),
         )
+
+    def test_stale_row_audit_cache_is_not_reused(self):
+        profile, row = self.profile_and_row()
+        parsed_budget = generator.validate_budget(budget())
+        parsed_verdict = generator.parse_audit_verdict(verdict())
+        with tempfile.TemporaryDirectory() as directory:
+            path = generator.row_path(Path(directory), row["source_id"])
+            generator.write_row_checkpoint(
+                path,
+                source_id=row["source_id"],
+                candidate={
+                    "c01_question": row["cells"]["C01"]["question"],
+                    "replacement_answer": row["cells"]["C01"]["answer"],
+                },
+                budget=parsed_budget,
+                verdict=parsed_verdict,
+                base_digest="base-digest",
+                profiles_digest="profiles-digest",
+                generator_attempt=0,
+                repair_generation=0,
+            )
+            stale = json.loads(path.read_text())
+            stale["audit_version"] = "independent-pair-budget-audit-v1"
+            generator.write_json(path, stale)
+            cached = generator.load_cached_row(
+                path, row, profile, "base-digest", "profiles-digest"
+            )
+        self.assertIsNone(cached)
 
     def test_passing_inherited_c01_is_reused_byte_for_byte(self):
         profile, row = self.profile_and_row()
@@ -231,13 +347,7 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as directory:
                 state = Path(directory)
-                generator.write_json(
-                    generator.budget_path(state, row["source_id"]),
-                    {
-                        "base_data_digest": "base-digest",
-                        "pair_budget": budget(),
-                    },
-                )
+                self.write_budget_cache(state, row["source_id"])
                 result = generator.process_row(
                     object(), object(), self.args(), row, profile, state,
                     "base-digest", "profiles-digest",
@@ -287,13 +397,7 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as directory:
                 state = Path(directory)
-                generator.write_json(
-                    generator.budget_path(state, row["source_id"]),
-                    {
-                        "base_data_digest": "base-digest",
-                        "pair_budget": budget(),
-                    },
-                )
+                self.write_budget_cache(state, row["source_id"])
                 result = generator.process_row(
                     object(), object(), self.args(), row, profile, state,
                     "base-digest", "profiles-digest",

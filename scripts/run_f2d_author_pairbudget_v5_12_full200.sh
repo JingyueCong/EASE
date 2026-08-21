@@ -212,6 +212,12 @@ for source_id in sorted(base):
         errors.append(f"profile not frozen {source_id}")
     if trace.get("frozen_cells") != ["C11", "C10", "C00"]:
         errors.append(f"frozen-cell trace {source_id}")
+    if trace.get("pair_budget_version") != "c11-semantic-information-budget-v2":
+        errors.append(f"stale pair budget {source_id}")
+    if trace.get("audit_version") != "independent-pair-budget-audit-v2":
+        errors.append(f"stale pair audit {source_id}")
+    if trace.get("pair_policy_version") != "replacement-identity-ledger-authority-v2":
+        errors.append(f"stale pair policy {source_id}")
     for stage in ("row_pair_audit", "final_pair_audit"):
         verdict = trace.get(stage, {})
         if verdict.get("accepted") is not True or any(
@@ -222,6 +228,12 @@ for source_id in sorted(base):
 revision = profiles.get("pairbudget_revision", {})
 if profiles.get("design_version") != "tofu-author-pairbudget-v5.12":
     errors.append("profile design")
+if profiles.get("pair_budget_version") != "c11-semantic-information-budget-v2":
+    errors.append("profile pair-budget version")
+if profiles.get("audit_version") != "independent-pair-budget-audit-v2":
+    errors.append("profile audit version")
+if profiles.get("pair_policy_version") != "replacement-identity-ledger-authority-v2":
+    errors.append("profile pair-policy version")
 if profiles.get("profiles") != base_profiles.get("profiles"):
     errors.append("replacement profiles or ledgers changed")
 if revision.get("base_data_sha256") != sha256(base_path):

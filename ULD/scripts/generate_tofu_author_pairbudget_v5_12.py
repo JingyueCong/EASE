@@ -40,8 +40,9 @@ BASE_ROW_DESIGNS = {
     "tofu-author-premisefix-v5.11",
 }
 DESIGN_VERSION = "tofu-author-pairbudget-v5.12"
-PAIR_BUDGET_VERSION = "c11-semantic-information-budget-v1"
-AUDIT_VERSION = "independent-pair-budget-audit-v1"
+PAIR_BUDGET_VERSION = "c11-semantic-information-budget-v2"
+AUDIT_VERSION = "independent-pair-budget-audit-v2"
+PAIR_POLICY_VERSION = "replacement-identity-ledger-authority-v2"
 SURFACE_RENDERER = "selective-complete-c01-pairbudget-v5.12"
 MAPPING_SCOPE = "full200-frozen-profile-selective-c01-only"
 
@@ -102,6 +103,15 @@ closely related examples can still be one answer unit. Preserve named-book,
 date, place, field, and other argument slots as scope constraints, while
 marking their source-specific values as replaceable premises.
 
+Cardinality means a quantity explicitly requested by the QUESTION (for
+example, "name two", one date, or a yes/no decision). Do not infer a hard
+cardinality constraint from the incidental number of examples, institutions,
+themes, adjectives, clauses, audiences, or supporting details in the C11
+answer. For an open "what/which/how" question, normally use "open". Do not
+promote optional explanation, rhetorical strength, or supporting examples
+into mandatory semantic propositions unless the question explicitly requests
+them.
+
 Return JSON only with exactly:
 {"relation_definition":"relation and argument roles",
  "answer_object_type":"name/title/date/reason/list/explanation/etc",
@@ -131,12 +141,27 @@ schema-valid but semantically incorrect budget is a rejection; do not bend
 C11 to fit the budget.
 
 Authority and compression rules:
-- C11 and pair_budget define the relation and information budget.
+- C11 and pair_budget define the relation, requested argument slots, evidence
+  family, and COARSE information budget.
 - frozen_row_ledger and replacement_profile define which replacement facts are
   supported, but they are a SUPPORT CEILING, not a requirement to reproduce
   the complete replacement_fact or profile.
+- Identity intervention is non-negotiable: C01 must describe the declared
+  replacement_entity. The replacement author is not an alias of the C11
+  target author. Never recommend restoring the target author or target fact.
+- The frozen row ledger is authoritative for replacement-specific content.
+  Never demand a fact, institution, title, audience, causal effect, claim
+  strength, or other detail that the ledger does not support.
 - A concise C01 may select the smallest supported subset that directly answers
   its question and matches C11's semantic budget.
+- Information-budget matching is approximate nuisance matching. Do not reject
+  merely because C11 and C01 contain different counts of examples,
+  institutions, themes, adjectives, clauses, or list items. Fail this check
+  only for a clear scale change such as an atomic answer becoming a biography,
+  several unrelated claims, or multiple paragraphs.
+- A question may map a named C11 book, place, date, award, institution, field,
+  or identity descriptor to a coherent replacement-profile counterpart. That
+  mapping is required, not a scope failure.
 - Reject an answer that dumps peripheral profile facts, changes known versus
   speculative/unavailable evidence, reverses semantic polarity, drops a named
   argument without a coherent replacement, retains source facts, or expands a
@@ -169,10 +194,23 @@ PAIR_GENERATOR_PROMPT = """Repair one TOFU C01 question and answer. Return only
 the complete replacement question and answer.
 
 The immutable C11 and pair_budget define the relation, argument slots,
-answerability, polarity family, and maximum useful information. The frozen row
-ledger is a support pool, not text that must all be repeated. Select only the
-smallest supported replacement-fact subset needed to answer the rewritten
+answerability, polarity family, and coarse maximum useful information. The
+frozen row ledger is authoritative for replacement-specific factual content,
+but is a support pool rather than text that must all be repeated. Select only
+the smallest supported replacement-fact subset needed to answer the rewritten
 question at approximately C11's semantic budget.
+
+The C01 subject is always replacement_entity. Never restore the target author,
+never treat replacement_entity as an alias of target_entity, and never retain
+the target fact merely to imitate C11. Map source-specific names, books,
+places, dates, institutions, fields, awards, and descriptors to coherent
+ledger-supported replacement counterparts.
+
+Approximate information matching does not require equal counts of examples,
+institutions, themes, adjectives, clauses, or list items. Preserve a number
+only when the C11 QUESTION explicitly asks for that number. Do not invent
+unsupported details just to reproduce C11's incidental explanation, audience,
+rhetorical strength, or surface length.
 
 Do not add a profile summary, biography, awards, dates, books, explanations,
 or numbered lists merely because they appear elsewhere in the replacement
@@ -182,8 +220,11 @@ replacement author name in the question whenever C11 explicitly names the
 source author. Keep unavailable/qualified evidence unavailable/qualified
 unless the pair budget and frozen row policy jointly justify otherwise.
 
-Follow validation_feedback and change only the rejected property. Return JSON
-only with exactly:
+Follow validation_feedback only when it is consistent with these authority
+rules. Ignore any feedback that asks you to restore target_entity, retain the
+target fact, treat the two authors as aliases, alter the frozen ledger, or
+enforce incidental item-count equality. Change only the valid rejected
+property. Return JSON only with exactly:
 {"c01_question":"complete question","replacement_answer":"complete answer"}
 """
 
@@ -195,6 +236,12 @@ whether the budget faithfully describes C11, then judge semantic relation,
 scope, answerability, polarity, information budget,
 replacement support, source-fact removal, concision, and naturalness. Return
 exactly one verdict for every supplied source_id and no extras.
+
+Apply the same authority rules as the row audit: C01 must use
+replacement_entity, the frozen ledger controls replacement-specific facts,
+and information/cardinality matching is approximate unless the C11 QUESTION
+explicitly requests an exact number. Never reject because incidental example,
+institution, theme, adjective, clause, or list-item counts differ.
 
 Return JSON only:
 {"verdicts":[{"source_id":"exact id","accepted":true,
@@ -406,9 +453,17 @@ def context_packet(row: Mapping, profile: Mapping, budget: Mapping) -> dict:
         },
         "pair_budget": copy.deepcopy(budget),
         "authority_policy": {
-            "relation_and_information_budget": "immutable C11 pair_budget",
+            "version": PAIR_POLICY_VERSION,
+            "relation_and_coarse_information_budget": (
+                "immutable C11 pair_budget"
+            ),
             "replacement_fact_support": "frozen row ledger and profile",
             "ledger_is_support_ceiling_not_required_transcript": True,
+            "replacement_identity_is_mandatory": replacement,
+            "target_identity_is_forbidden_in_c01": target,
+            "replacement_is_not_target_alias": True,
+            "incidental_item_count_is_not_a_hard_constraint": True,
+            "exact_cardinality_only_when_question_explicitly_requests_it": True,
         },
     }
 
@@ -467,7 +522,12 @@ def load_or_create_budget(client, args, row: Mapping, state_dir: Path,
     path = budget_path(state_dir, source_id)
     if path.is_file():
         cached = json.loads(path.read_text(encoding="utf-8"))
-        if cached.get("base_data_digest") == base_digest:
+        if (
+            cached.get("design_version") == DESIGN_VERSION
+            and cached.get("pair_budget_version") == PAIR_BUDGET_VERSION
+            and cached.get("pair_policy_version") == PAIR_POLICY_VERSION
+            and cached.get("base_data_digest") == base_digest
+        ):
             return validate_budget(cached["pair_budget"])
     last_error = None
     for attempt in range(1, args.budget_retries + 1):
@@ -485,6 +545,8 @@ def load_or_create_budget(client, args, row: Mapping, state_dir: Path,
             budget = validate_budget(generated)
             write_json(path, {
                 "design_version": DESIGN_VERSION,
+                "pair_budget_version": PAIR_BUDGET_VERSION,
+                "pair_policy_version": PAIR_POLICY_VERSION,
                 "base_data_digest": base_digest,
                 "budget_attempt": attempt,
                 "pair_budget": budget,
@@ -518,6 +580,9 @@ def audit_candidate(client, args, packet: Mapping, candidate: Mapping,
 def audit_feedback(verdict: Mapping) -> str:
     failed = [field for field in AUDIT_FIELDS if verdict.get(field) is not True]
     return (
+        "Non-overridable repair policy: keep replacement_entity, never restore "
+        "target_entity or the target fact, keep the frozen ledger unchanged, "
+        "and do not enforce incidental item-count equality. "
         "Failed semantic pair-budget checks: " + ", ".join(failed)
         + f". Evidence: {verdict.get('reason', '')}. "
         + f"Required repair: {verdict.get('repair_instruction', '')}"
@@ -532,6 +597,9 @@ def load_cached_row(path: Path, row: Mapping, profile: Mapping,
         cached = json.loads(path.read_text(encoding="utf-8"))
         if (
             cached.get("design_version") != DESIGN_VERSION
+            or cached.get("pair_budget_version") != PAIR_BUDGET_VERSION
+            or cached.get("audit_version") != AUDIT_VERSION
+            or cached.get("pair_policy_version") != PAIR_POLICY_VERSION
             or cached.get("base_data_digest") != base_digest
             or cached.get("base_profiles_digest") != profiles_digest
         ):
@@ -560,6 +628,7 @@ def write_row_checkpoint(path: Path, *, source_id: str, candidate: Mapping,
         "design_version": DESIGN_VERSION,
         "pair_budget_version": PAIR_BUDGET_VERSION,
         "audit_version": AUDIT_VERSION,
+        "pair_policy_version": PAIR_POLICY_VERSION,
         "source_id": source_id,
         "base_data_digest": base_digest,
         "base_profiles_digest": profiles_digest,
@@ -884,6 +953,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
         record["pair_budget_trace"] = {
             "pair_budget_version": PAIR_BUDGET_VERSION,
             "audit_version": AUDIT_VERSION,
+            "pair_policy_version": PAIR_POLICY_VERSION,
             "base_data_digest": base_digest,
             "base_profiles_digest": profiles_digest,
             "c01_inherited_byte_exact": result["repair_generation"] == 0,
@@ -900,6 +970,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
             "mapping_scope": MAPPING_SCOPE,
             "pair_budget_version": PAIR_BUDGET_VERSION,
             "audit_version": AUDIT_VERSION,
+            "pair_policy_version": PAIR_POLICY_VERSION,
             "base_data_digest": base_digest,
             "base_profiles_digest": profiles_digest,
             "c01_only_revision": True,
@@ -923,6 +994,7 @@ def output_profiles(base_profiles: Mapping, *, base_data: Path,
         "design_version": DESIGN_VERSION,
         "pair_budget_version": PAIR_BUDGET_VERSION,
         "audit_version": AUDIT_VERSION,
+        "pair_policy_version": PAIR_POLICY_VERSION,
         "pairbudget_revision": {
             "base_data": str(base_data.resolve()),
             "base_data_sha256": base_digest,
