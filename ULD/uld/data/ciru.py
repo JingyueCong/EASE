@@ -25,6 +25,7 @@ AUTHOR_SEMANTIC_V58_DESIGN = "tofu-author-semantic-contrast-v5.8"
 AUTHOR_SEMANTIC_AGENT_V59_DESIGN = "tofu-author-semantic-agent-v5.9"
 AUTHOR_PAIRREPAIR_V510_DESIGN = "tofu-author-pairrepair-v5.10"
 AUTHOR_PREMISEFIX_V511_DESIGN = "tofu-author-premisefix-v5.11"
+AUTHOR_PAIRBUDGET_V512_DESIGN = "tofu-author-pairbudget-v5.12"
 AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_PROFILE_DESIGN,
     AUTHOR_CONTRACT_DESIGN,
@@ -43,6 +44,7 @@ AUTHOR_LEVEL_DESIGNS = {
     AUTHOR_SEMANTIC_AGENT_V59_DESIGN,
     AUTHOR_PAIRREPAIR_V510_DESIGN,
     AUTHOR_PREMISEFIX_V511_DESIGN,
+    AUTHOR_PAIRBUDGET_V512_DESIGN,
 }
 MAX_LENGTH_RATIO = 2.0
 CONTROL_STATUS_MARKERS = (
@@ -137,6 +139,8 @@ def validate_ciru_unit(record: Dict) -> List[str]:
         AUTHOR_SEMANTIC_V58_DESIGN,
         AUTHOR_SEMANTIC_AGENT_V59_DESIGN,
         AUTHOR_PAIRREPAIR_V510_DESIGN,
+        AUTHOR_PREMISEFIX_V511_DESIGN,
+        AUTHOR_PAIRBUDGET_V512_DESIGN,
     }
     if author_profile_design:
         for field in ("block_id", "query_index", "profile_id"):

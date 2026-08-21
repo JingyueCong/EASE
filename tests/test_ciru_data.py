@@ -94,6 +94,47 @@ class CIRUDataTest(unittest.TestCase):
         )
         self.assertEqual(ciru.validate_ciru_unit(unit), [])
 
+    def test_pairbudget_inherits_benchmark_fictional_word(self):
+        unit = valid_unit()
+        unit.update({
+            "design_version": "tofu-author-pairbudget-v5.12",
+            "block_id": 1,
+            "query_index": 4,
+            "profile_id": "fixture:pairbudget-v5.12",
+            "canonical_target_entity": unit["target_entity"],
+            "identity_binding": {
+                "C11": unit["target_entity"],
+                "C01": unit["replacement_entity"],
+                "C10": unit["target_entity"],
+                "C00": unit["replacement_entity"],
+            },
+        })
+        unit["source_question"] = "Which fictional book did Basil Hart write?"
+        unit["cells"]["C11"]["question"] = unit["source_question"]
+        unit["cells"]["C01"]["question"] = (
+            "Which fictional book did Elian Mercer write?"
+        )
+        self.assertEqual(ciru.validate_ciru_unit(unit), [])
+
+    def test_pairbudget_still_rejects_new_control_marker(self):
+        unit = valid_unit()
+        unit.update({
+            "design_version": "tofu-author-pairbudget-v5.12",
+            "block_id": 1,
+            "query_index": 4,
+            "profile_id": "fixture:pairbudget-v5.12",
+            "canonical_target_entity": unit["target_entity"],
+            "identity_binding": {
+                "C11": unit["target_entity"],
+                "C01": unit["replacement_entity"],
+                "C10": unit["target_entity"],
+                "C00": unit["replacement_entity"],
+            },
+        })
+        unit["cells"]["C01"]["answer"] += " This is a fictional profile."
+        errors = ciru.validate_ciru_unit(unit)
+        self.assertTrue(any("control status" in error for error in errors))
+
     def test_large_length_mismatch_is_rejected(self):
         unit = valid_unit()
         unit["cells"]["C10"]["question"] = (
