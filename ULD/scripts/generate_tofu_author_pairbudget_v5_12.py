@@ -44,6 +44,7 @@ PAIR_BUDGET_VERSION = "c11-semantic-information-budget-v3"
 BUDGET_AUDIT_VERSION = "independent-c11-budget-audit-v1"
 AUDIT_VERSION = "independent-pair-budget-audit-v3"
 PAIR_POLICY_VERSION = "replacement-identity-ledger-authority-v3"
+MAPPING_SEMANTICS_VERSION = "relation-roles-replacement-values-v1"
 SURFACE_RENDERER = "selective-complete-c01-pairbudget-v5.12"
 MAPPING_SCOPE = "full200-frozen-profile-selective-c01-only"
 
@@ -168,8 +169,9 @@ immutable C11 and proposed C01 using the C11-derived pair_budget and frozen
 replacement ledger.
 
 The causal intervention changes author identity and target factual content,
-but must preserve the semantic relation, argument slots, answerability,
-polarity family, and approximate information budget. Surface formatting,
+while preserving the semantic RELATION and ARGUMENT-ROLE SCHEMA plus an
+approximate information budget. It does not preserve source-bound argument
+VALUES or the truth value of the source proposition. Surface formatting,
 punctuation, an optional leading 'Yes', and heuristic list/date/prose labels
 are not semantic failures.
 
@@ -178,8 +180,25 @@ schema-valid but semantically incorrect budget is a rejection; do not bend
 C11 to fit the budget.
 
 Authority and compression rules:
+- Preserve relation roles, not literal source values. Names, books, places,
+  dates, fields, awards, institutions, professions, genders, genres,
+  communities, motivations, descriptors, evidence states, and other values
+  listed in replaceable_source_premises are intervention variables. Map them
+  to ledger-supported replacement counterparts; never require their C11
+  values to remain in C01.
+- C11 answerability_family and polarity_family describe the SOURCE answer.
+  They are not immutable truth constraints on C01. Evaluate answerability and
+  polarity after mapping: C01 question and answer must be mutually coherent
+  and faithful to the replacement ledger. A source yes may validly become no,
+  available may become unavailable, or qualified may become definitive when
+  the frozen replacement facts require it. Preserve the broad response form
+  when practical, not an unsupported source truth value.
+- pair_budget_faithful_to_c11 judges only whether pair_budget accurately
+  summarizes immutable C11. Do not mark it false merely because C01 correctly
+  uses different replacement values.
 - C11 and pair_budget define the relation, requested argument slots, evidence
-  family, and COARSE information budget.
+  shape, and COARSE information budget. Argument slots are typed roles, not
+  commands to retain the source-side values filling those roles.
 - frozen_row_ledger and replacement_profile define which replacement facts are
   supported, but they are a SUPPORT CEILING, not a requirement to reproduce
   the complete replacement_fact or profile.
@@ -203,10 +222,12 @@ Authority and compression rules:
 - A question may map a named C11 book, place, date, award, institution, field,
   or identity descriptor to a coherent replacement-profile counterpart. That
   mapping is required, not a scope failure.
-- Reject an answer that dumps peripheral profile facts, changes known versus
-  speculative/unavailable evidence, reverses semantic polarity, drops a named
-  argument without a coherent replacement, retains source facts, or expands a
-  brief answer into several independent claims or numbered paragraphs.
+- Reject an answer that dumps peripheral profile facts, is internally
+  inconsistent with its mapped question or replacement evidence, drops a
+  named argument without a coherent replacement, retains source facts, or
+  expands a brief answer into several independent claims or numbered
+  paragraphs. Do not reject a ledger-required change in evidence status or
+  polarity merely because it differs from C11.
 - When the ledger lacks enough information to reproduce a peripheral C11
   detail, a concise truthful answer at the nearest supported granularity is
   preferable to invention. Explain this as a ledger-limited approximation.
@@ -235,7 +256,10 @@ PAIR_GENERATOR_PROMPT = """Repair one TOFU C01 question and answer. Return only
 the complete replacement question and answer.
 
 The immutable C11 and pair_budget define the relation, argument slots,
-answerability, polarity family, and coarse maximum useful information. The
+question intent, and coarse maximum useful information. Argument slots are
+typed roles whose source-side values must be replaced, not literal values to
+copy. Source answerability and polarity describe C11 and may change when the
+replacement ledger requires a different truth or evidence status. The
 frozen row ledger is authoritative for replacement-specific factual content,
 but is a support pool rather than text that must all be repeated. Select only
 the smallest supported replacement-fact subset needed to answer the rewritten
@@ -250,6 +274,13 @@ never treat replacement_entity as an alias of target_entity, and never retain
 the target fact merely to imitate C11. Map source-specific names, books,
 places, dates, institutions, fields, awards, and descriptors to coherent
 ledger-supported replacement counterparts.
+
+If a C11 slot has no supported replacement value, omit or naturally reframe
+that peripheral slot at the nearest supported scope instead of copying the
+source value or inventing a replacement. Make the rewritten question fit the
+replacement answer. A source yes/no, available/unavailable status, or hedge
+may change when necessary to express the frozen replacement fact; preserve
+response shape where practical, not an unsupported source truth value.
 
 Approximate information matching does not require equal counts of examples,
 institutions, themes, adjectives, clauses, or list items. Preserve a number
@@ -268,8 +299,9 @@ unless the pair budget and frozen row policy jointly justify otherwise.
 Follow validation_feedback only when it is consistent with these authority
 rules. Ignore any feedback that asks you to restore target_entity, retain the
 target fact, treat the two authors as aliases, alter the frozen ledger, or
-enforce incidental item-count equality. Change only the valid rejected
-property. Return JSON only with exactly:
+enforce incidental item-count equality, source-side slot values, or source
+truth polarity when the replacement ledger differs. Change only the valid
+rejected property. Return JSON only with exactly:
 {"c01_question":"complete question","replacement_answer":"complete answer"}
 """
 
@@ -287,6 +319,19 @@ replacement_entity, the frozen ledger controls replacement-specific facts,
 and information/cardinality matching is approximate unless the C11 QUESTION
 explicitly requests an exact number. Never reject because incidental example,
 institution, theme, adjective, clause, or list-item counts differ.
+
+CRITICAL MAPPING SEMANTICS: preserve the relation predicate and typed argument
+roles, but replace source-bound values. Names, books, places, dates, fields,
+awards, institutions, professions, genders, genres, communities, motivations,
+descriptors, and evidence states may all change to their ledger-supported
+replacement counterparts. replaceable_source_premises are values to replace,
+not constraints to retain. C11 polarity and answerability describe the source
+answer; judge C01 polarity and answerability for internal coherence with the
+mapped C01 question and replacement ledger, not equality to C11 truth. Thus a
+ledger-required yes-to-no, available-to-unavailable, qualified-to-definitive,
+or domain/value change is a valid causal intervention, not a mismatch.
+pair_budget_faithful_to_c11 evaluates pair_budget versus C11 only and must not
+be failed merely because C01 contains correct replacement values.
 
 Return JSON only:
 {"verdicts":[{"source_id":"exact id","accepted":true,
@@ -561,6 +606,7 @@ def context_packet(row: Mapping, profile: Mapping, budget: Mapping) -> dict:
         "pair_budget": copy.deepcopy(budget),
         "authority_policy": {
             "version": PAIR_POLICY_VERSION,
+            "mapping_semantics_version": MAPPING_SEMANTICS_VERSION,
             "relation_and_coarse_information_budget": (
                 "immutable C11 pair_budget"
             ),
@@ -575,6 +621,9 @@ def context_packet(row: Mapping, profile: Mapping, budget: Mapping) -> dict:
             "replacement_is_not_target_alias": True,
             "incidental_item_count_is_not_a_hard_constraint": True,
             "exact_cardinality_only_when_question_explicitly_requests_it": True,
+            "preserve_relation_roles_not_source_values": True,
+            "replacement_ledger_controls_truth_and_evidence_status": True,
+            "source_polarity_and_answerability_are_not_c01_truth_constraints": True,
         },
     }
 
@@ -719,7 +768,8 @@ def audit_feedback(verdict: Mapping) -> str:
     return (
         "Non-overridable repair policy: keep replacement_entity, never restore "
         "target_entity or the target fact, keep the frozen ledger unchanged, "
-        "and do not enforce incidental item-count equality. "
+        "and do not enforce incidental item-count equality, source-side slot "
+        "values, or source truth polarity when the replacement ledger differs. "
         "Failed semantic pair-budget checks: " + ", ".join(failed)
         + f". Evidence: {verdict.get('reason', '')}. "
         + f"Required repair: {verdict.get('repair_instruction', '')}"
@@ -1102,6 +1152,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
             "budget_audit_version": BUDGET_AUDIT_VERSION,
             "audit_version": AUDIT_VERSION,
             "pair_policy_version": PAIR_POLICY_VERSION,
+            "mapping_semantics_version": MAPPING_SEMANTICS_VERSION,
             "base_data_digest": base_digest,
             "base_profiles_digest": profiles_digest,
             "c01_inherited_byte_exact": result["repair_generation"] == 0,
@@ -1121,6 +1172,7 @@ def assemble_records(rows: Sequence[Mapping], results: Mapping[str, Mapping],
             "budget_audit_version": BUDGET_AUDIT_VERSION,
             "audit_version": AUDIT_VERSION,
             "pair_policy_version": PAIR_POLICY_VERSION,
+            "mapping_semantics_version": MAPPING_SEMANTICS_VERSION,
             "base_data_digest": base_digest,
             "base_profiles_digest": profiles_digest,
             "c01_only_revision": True,
@@ -1146,6 +1198,7 @@ def output_profiles(base_profiles: Mapping, *, base_data: Path,
         "budget_audit_version": BUDGET_AUDIT_VERSION,
         "audit_version": AUDIT_VERSION,
         "pair_policy_version": PAIR_POLICY_VERSION,
+        "mapping_semantics_version": MAPPING_SEMANTICS_VERSION,
         "pairbudget_revision": {
             "base_data": str(base_data.resolve()),
             "base_data_sha256": base_digest,

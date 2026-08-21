@@ -220,6 +220,8 @@ for source_id in sorted(base):
         errors.append(f"stale pair audit {source_id}")
     if trace.get("pair_policy_version") != "replacement-identity-ledger-authority-v3":
         errors.append(f"stale pair policy {source_id}")
+    if trace.get("mapping_semantics_version") != "relation-roles-replacement-values-v1":
+        errors.append(f"stale mapping semantics {source_id}")
     budget_audit = trace.get("budget_audit", {})
     if budget_audit.get("accepted") is not True or any(
         budget_audit.get(field) is not True
@@ -249,6 +251,8 @@ if profiles.get("audit_version") != "independent-pair-budget-audit-v3":
     errors.append("profile audit version")
 if profiles.get("pair_policy_version") != "replacement-identity-ledger-authority-v3":
     errors.append("profile pair-policy version")
+if profiles.get("mapping_semantics_version") != "relation-roles-replacement-values-v1":
+    errors.append("profile mapping-semantics version")
 if profiles.get("profiles") != base_profiles.get("profiles"):
     errors.append("replacement profiles or ledgers changed")
 if revision.get("base_data_sha256") != sha256(base_path):

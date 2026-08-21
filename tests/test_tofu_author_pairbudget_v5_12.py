@@ -565,6 +565,26 @@ class AuthorPairBudgetV512Test(unittest.TestCase):
         self.assertTrue(parsed["repair_instruction_synthesized"])
         self.assertIn("relation_faithful", parsed["repair_instruction"])
 
+    def test_mapping_semantics_make_source_values_intervention_variables(self):
+        prompt = generator.FINAL_AUDIT_PROMPT
+        self.assertIn("replaceable_source_premises are values to replace", prompt)
+        self.assertIn("yes-to-no", prompt)
+        self.assertIn("available-to-unavailable", prompt)
+        self.assertIn("not equality to C11 truth", prompt)
+
+    def test_context_packet_declares_mapping_authority(self):
+        profile, row = self.profile_and_row()
+        packet = generator.context_packet(row, profile, budget())
+        policy = packet["authority_policy"]
+        self.assertEqual(
+            policy["mapping_semantics_version"],
+            generator.MAPPING_SEMANTICS_VERSION,
+        )
+        self.assertTrue(policy["preserve_relation_roles_not_source_values"])
+        self.assertTrue(
+            policy["replacement_ledger_controls_truth_and_evidence_status"]
+        )
+
     def test_final_audit_falls_back_to_singletons_on_missing_coverage(self):
         profile, first = self.profile_and_row()
         second = copy.deepcopy(first)
