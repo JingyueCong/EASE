@@ -5,6 +5,13 @@ set -euo pipefail
 
 EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${ENV_FILE:-${EASE_ROOT}/.env}"
+# Preserve launch-specific settings before sourcing a generic project .env.
+LAUNCH_GPUS="${GPUS:-0 1 2 3}"
+LAUNCH_EVAL_BS="${EVAL_BS:-4}"
+LAUNCH_RESUME="${RESUME:-true}"
+LAUNCH_DATA="${F2D_V512_DATA_PATH:-}"
+LAUNCH_FULL_MANIFEST="${FULLANSWER_MANIFEST:-}"
+LAUNCH_V512_ROOT="${F2D_V512_ASYM_ROOT:-}"
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
     set -a
@@ -21,16 +28,16 @@ absolute_from_root() {
 }
 
 EVAL_PY="${EVAL_PY:-${HOME}/miniconda3/envs/ease-f2r-eval/bin/python}"
-DATA="$(absolute_from_root "${F2D_V512_DATA_PATH:-ULD/data/ciru/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl}")"
-FULL_MANIFEST="$(absolute_from_root "${FULLANSWER_MANIFEST:-open-unlearning/saves/sweeps/forget05_f2d_did200_asym_steps_seed42/manifest.csv}")"
+DATA="$(absolute_from_root "${LAUNCH_DATA:-ULD/data/ciru/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl}")"
+FULL_MANIFEST="$(absolute_from_root "${LAUNCH_FULL_MANIFEST:-open-unlearning/saves/sweeps/forget05_f2d_did200_asym_steps_seed42/manifest.csv}")"
 FULL_TAG="${FULLANSWER_TAG:-a72_a72}"
 FULL_STEP="${FULLANSWER_STEP:-72}"
-V512_ROOT="$(absolute_from_root "${F2D_V512_ASYM_ROOT:-ULD/outputs_trained_models/f2d_did_1b_forget05_f2d_v512_asym6_train_seed42/v512_asym_a84_a60}")"
+V512_ROOT="$(absolute_from_root "${LAUNCH_V512_ROOT:-ULD/outputs_trained_models/f2d_did_1b_forget05_f2d_v512_asym6_train_seed42/v512_asym_a84_a60}")"
 V512_A1_STEP="${F2D_V512_A1_STEP:-84}"
 V512_A2_STEP="${F2D_V512_A2_STEP:-60}"
-REQUESTED_GPUS="${GPUS:-0 1 2 3}"
-REQUESTED_EVAL_BS="${EVAL_BS:-4}"
-REQUESTED_RESUME="${RESUME:-true}"
+REQUESTED_GPUS="$LAUNCH_GPUS"
+REQUESTED_EVAL_BS="$LAUNCH_EVAL_BS"
+REQUESTED_RESUME="$LAUNCH_RESUME"
 SUMMARY_ROOT="${EASE_ROOT}/open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair"
 
 for required in "$DATA" "$FULL_MANIFEST"; do
