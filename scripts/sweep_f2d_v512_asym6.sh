@@ -13,9 +13,19 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 PY="${PY:-${HOME}/miniconda3/envs/ease-f2r-eval/bin/python}"
-DATA="${F2D_V512_DATA_PATH:-${EASE_ROOT}/ULD/data/ciru/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl}"
-PROFILES="${F2D_V512_PROFILES_PATH:-${DATA}.profiles.json}"
-AUDIT_SUMMARY="${F2D_V512_AUDIT_SUMMARY:-${EASE_ROOT}/audits/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full/SUMMARY.json}"
+
+absolute_from_root() {
+    case "$1" in
+        /*) printf '%s\n' "$1" ;;
+        *) printf '%s/%s\n' "$EASE_ROOT" "$1" ;;
+    esac
+}
+
+# Training is launched from a nested project directory.  Canonicalize caller-
+# supplied relative paths before forwarding them through Hydra.
+DATA="$(absolute_from_root "${F2D_V512_DATA_PATH:-ULD/data/ciru/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl}")"
+PROFILES="$(absolute_from_root "${F2D_V512_PROFILES_PATH:-${DATA}.profiles.json}")"
+AUDIT_SUMMARY="$(absolute_from_root "${F2D_V512_AUDIT_SUMMARY:-audits/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full/SUMMARY.json}")"
 TRAIN_SWEEP="${F2D_V512_ASYM_TRAIN_SWEEP:-f2d_v512_asym6_train_seed42}"
 TRAIN_RESULTS="${EASE_ROOT}/open-unlearning/saves/sweeps/forget05_${TRAIN_SWEEP}"
 MODELS_ROOT="${EASE_ROOT}/ULD/outputs_trained_models/f2d_did_1b_forget05_${TRAIN_SWEEP}"
