@@ -397,6 +397,12 @@ def main() -> None:
     parser.add_argument("--calibration-path", default="null")
     parser.add_argument("--alignment-enabled", choices=("true", "false"), default="false")
     parser.add_argument("--gate-enabled", choices=("true", "false"), default="false")
+    parser.add_argument(
+        "--composition-mode",
+        choices=("raw", "reference_delta"),
+        default="raw",
+    )
+    parser.add_argument("--reference-path", default="null")
     parser.add_argument("--views", type=int)
     parser.add_argument("--a1-num-layer", type=int)
     parser.add_argument("--a2-num-layer", type=int)
@@ -452,6 +458,8 @@ def main() -> None:
         "calibration_path": args.calibration_path,
         "alignment_enabled": args.alignment_enabled == "true",
         "gate_enabled": args.gate_enabled == "true",
+        "composition_mode": args.composition_mode,
+        "reference_path": args.reference_path,
         "views": args.views,
         "a1_num_layer": args.a1_num_layer,
         "a2_num_layer": args.a2_num_layer,

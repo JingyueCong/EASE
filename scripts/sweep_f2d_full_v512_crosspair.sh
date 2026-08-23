@@ -12,6 +12,7 @@ LAUNCH_RESUME="${RESUME:-true}"
 LAUNCH_DATA="${F2D_V512_DATA_PATH:-}"
 LAUNCH_FULL_MANIFEST="${FULLANSWER_MANIFEST:-}"
 LAUNCH_V512_ROOT="${F2D_V512_ASYM_ROOT:-}"
+LAUNCH_COMPOSITION_MODE="${DUAL_COMPOSITION_MODE:-raw}"
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
     set -a
@@ -38,7 +39,13 @@ V512_A2_STEP="${F2D_V512_A2_STEP:-60}"
 REQUESTED_GPUS="$LAUNCH_GPUS"
 REQUESTED_EVAL_BS="$LAUNCH_EVAL_BS"
 REQUESTED_RESUME="$LAUNCH_RESUME"
-SUMMARY_ROOT="${EASE_ROOT}/open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair"
+COMPOSITION_MODE="$LAUNCH_COMPOSITION_MODE"
+case "$COMPOSITION_MODE" in
+    raw) NAME_SUFFIX="" ;;
+    reference_delta) NAME_SUFFIX="_refdelta" ;;
+    *) echo "DUAL_COMPOSITION_MODE must be raw or reference_delta" >&2; exit 1 ;;
+esac
+SUMMARY_ROOT="${EASE_ROOT}/open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair${NAME_SUFFIX}"
 
 for required in "$DATA" "$FULL_MANIFEST"; do
     if [ ! -s "$required" ]; then
@@ -46,6 +53,7 @@ for required in "$DATA" "$FULL_MANIFEST"; do
         exit 1
     fi
 done
+
 if [ ! -x "$EVAL_PY" ]; then
     echo "Missing evaluation Python: $EVAL_PY" >&2
     exit 1
@@ -78,6 +86,54 @@ for checkpoint in "$FULL_A1" "$FULL_A2" "$V512_A1" "$V512_A2"; do
     fi
 done
 
+reference_for() {
+    local checkpoint="$1"
+    (cd "$checkpoint/../fullmodel" 2>/dev/null && pwd)
+}
+
+REFERENCE_PATH="null"
+if [ "$COMPOSITION_MODE" = "reference_delta" ]; then
+    FULL_A1_REF="$(reference_for "$FULL_A1")"
+    FULL_A2_REF="$(reference_for "$FULL_A2")"
+    V512_A1_REF="$(reference_for "$V512_A1")"
+    V512_A2_REF="$(reference_for "$V512_A2")"
+    "$EVAL_PY" - "$FULL_A1_REF" "$FULL_A2_REF" "$V512_A1_REF" "$V512_A2_REF" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+paths = [Path(value) for value in sys.argv[1:]]
+
+def fingerprint(path):
+    config = json.load(open(path / "config.json", encoding="utf-8"))
+    architecture = {
+        key: config.get(key)
+        for key in ("model_type", "vocab_size", "hidden_size", "num_hidden_layers")
+    }
+    files = sorted(path.glob("*.safetensors")) + sorted(path.glob("pytorch_model*.bin"))
+    if not files:
+        raise SystemExit(f"No reference weights found in {path}")
+    digest = hashlib.sha256()
+    for file in files:
+        with file.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return architecture, digest.hexdigest()
+
+fingerprints = [fingerprint(path) for path in paths]
+if any(value != fingerprints[0] for value in fingerprints[1:]):
+    for path, value in zip(paths, fingerprints):
+        print(path, value, file=sys.stderr)
+    raise SystemExit("Frozen assistant references are not identical")
+print(
+    "Reference compatibility OK:",
+    f"models={len(paths)} sha256={fingerprints[0][1]}",
+)
+PY
+    REFERENCE_PATH="$FULL_A1_REF"
+fi
+
 cat <<EOF
 ============================================================
 FullAnswer/V5.12 frozen cross-pair screen
@@ -89,12 +145,14 @@ FullAnswer/V5.12 frozen cross-pair screen
   pair 2        : V5.12 A1 + FullAnswer A2
   evaluations   : 18 + 18 = 36
   retraining    : none
+  composition   : $COMPOSITION_MODE
+  reference     : $REFERENCE_PATH
   GPUs          : $REQUESTED_GPUS
 ============================================================
 EOF
 
 if [ "${DRY_RUN:-false}" = "true" ]; then
-    echo "Dry run complete; all four frozen checkpoints resolved."
+    echo "Dry run OK; checkpoints and reference compatibility were validated."
     exit 0
 fi
 
@@ -102,7 +160,7 @@ mkdir -p "$SUMMARY_ROOT"
 
 run_combo() {
     local label="$1" a1="$2" a2="$3" a1_grid="$4" a2_grid="$5"
-    local sweep_name="f2d_full_v512_crosspair_${label}"
+    local sweep_name="f2d_full_v512_crosspair${NAME_SUFFIX}_${label}"
     local result_dir="${EASE_ROOT}/open-unlearning/saves/sweeps/forget05_${sweep_name}"
 
     echo "crosspair_start combo=$label"
@@ -110,6 +168,7 @@ run_combo() {
         EVAL_BS="$REQUESTED_EVAL_BS" RESUME="$REQUESTED_RESUME" \
         CF_PATH="$DATA" MODELS_ROOT="$SUMMARY_ROOT/frozen_${label}" \
         A1_CHECKPOINT_OVERRIDE="$a1" A2_CHECKPOINT_OVERRIDE="$a2" \
+        COMPOSITION_MODE="$COMPOSITION_MODE" REFERENCE_PATH="$REFERENCE_PATH" \
         SWEEP_NAME="$sweep_name" RESULTS_DIR="$result_dir" \
         WEIGHT_A1_GRID="$a1_grid" WEIGHT_A2_GRID="$a2_grid" \
         TOP_FILTERS="0.0002 0.0003" \
@@ -130,16 +189,18 @@ run_combo \
     "-1.2 -1.4 -1.6" "1.4 1.6 1.8"
 
 echo "[3/3] Consolidating 36 cross-pair reports"
-"$EVAL_PY" - "$EASE_ROOT" "$SUMMARY_ROOT" <<'PY'
+"$EVAL_PY" - "$EASE_ROOT" "$SUMMARY_ROOT" "$NAME_SUFFIX" "$COMPOSITION_MODE" <<'PY'
 import csv
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 output = Path(sys.argv[2])
+suffix = sys.argv[3]
+composition_mode = sys.argv[4]
 sources = {
-    "fulla1_v512a2": root / "open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair_fulla1_v512a2/F2R_SWEEP.csv",
-    "v512a1_fulla2": root / "open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair_v512a1_fulla2/F2R_SWEEP.csv",
+    "fulla1_v512a2": root / f"open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair{suffix}_fulla1_v512a2/F2R_SWEEP.csv",
+    "v512a1_fulla2": root / f"open-unlearning/saves/sweeps/forget05_f2d_full_v512_crosspair{suffix}_v512a1_fulla2/F2R_SWEEP.csv",
 }
 rows = []
 for combo, path in sources.items():
@@ -177,7 +238,7 @@ for index, row in enumerate(rows[:12], 1):
 
 best = rows[0]
 agg = float(best["aggregate_score"])
-print("\n===== FullAnswer/V5.12 cross-pair best =====")
+print(f"\n===== FullAnswer/V5.12 cross-pair best ({composition_mode}) =====")
 print("pair   =", best["cross_pair"])
 print("config =", best["tag"])
 print(f"Agg    = {agg:.6f}")

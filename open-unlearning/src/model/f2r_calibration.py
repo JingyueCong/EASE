@@ -25,6 +25,34 @@ FEATURE_NAMES = (
 )
 
 
+def assistant_components(
+    a1_logits: torch.Tensor,
+    a2_logits: torch.Tensor,
+    reference_logits: torch.Tensor | None = None,
+    *,
+    composition_mode: str = "raw",
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Return the two tensors that enter the weighted DualULD composition.
+
+    ``raw`` preserves the original implementation exactly.  ``reference_delta``
+    removes the shared frozen small-assistant initialization so asymmetric
+    weights cannot accidentally inject ``(w1 + w2) * reference_logits``.
+    """
+    if composition_mode == "raw":
+        return a1_logits, a2_logits
+    if composition_mode != "reference_delta":
+        raise ValueError(f"Unsupported DualULD composition mode: {composition_mode}")
+    if reference_logits is None:
+        raise ValueError("reference_delta composition requires reference logits")
+    if reference_logits.shape != a1_logits.shape or a1_logits.shape != a2_logits.shape:
+        raise ValueError(
+            "reference_delta logits must have identical shapes: "
+            f"reference={tuple(reference_logits.shape)} "
+            f"a1={tuple(a1_logits.shape)} a2={tuple(a2_logits.shape)}"
+        )
+    return a1_logits - reference_logits, a2_logits - reference_logits
+
+
 def masked_center(logits: torch.Tensor, active: torch.Tensor) -> torch.Tensor:
     """Center logits over active vocabulary entries and zero inactive ones."""
     weights = active.to(logits.dtype)

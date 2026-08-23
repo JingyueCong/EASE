@@ -1,9 +1,15 @@
 """Dual-ULD wrapper for open-unlearning.
 
-At inference time:
+At inference time the legacy ``raw`` mode uses:
     final_logits = base_logits
                  + weight_a1 * filtered(A1.logits)
                  + weight_a2 * filtered(A2.logits)
+
+The optional ``reference_delta`` mode instead composes only the learned
+assistant changes:
+    final_logits = base_logits
+                 + weight_a1 * filtered(A1.logits - reference.logits)
+                 + weight_a2 * filtered(A2.logits - reference.logits)
 
 A1 is trained on (forget ∪ R_sub) with `remember+uniform` loss; weight_a1 < 0
 subtracts its memorisation. A2 is trained on R_sub only with the same loss;
@@ -24,7 +30,11 @@ from torch.nn import CrossEntropyLoss
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from model.f2r_calibration import calibrated_residual, load_calibration
+from model.f2r_calibration import (
+    assistant_components,
+    calibrated_residual,
+    load_calibration,
+)
 
 logger = logging.getLogger("model.dual_uld")
 
@@ -96,11 +106,19 @@ class DualULDForCausalLM(LlamaForCausalLM):
         calibration_path: Optional[str] = None,
         alignment_enabled: bool = False,
         gate_enabled: bool = False,
+        composition_mode: str = "raw",
+        reference_path: Optional[str] = None,
         **kwargs,
     ):
         for name, val in (("a1_path", a1_path), ("a2_path", a2_path)):
             if val is None or val == "???":
                 raise ValueError(f"DualULDForCausalLM.from_pretrained requires `{name}`.")
+
+        if composition_mode not in {"raw", "reference_delta"}:
+            raise ValueError(
+                "DualULD composition_mode must be raw or reference_delta "
+                f"(got: {composition_mode})"
+            )
 
         model = super().from_pretrained(pretrained_model_name_or_path, **kwargs)
         device = next(model.parameters()).device
@@ -140,11 +158,52 @@ class DualULDForCausalLM(LlamaForCausalLM):
             a1.to(device); a1.eval()
             a2.to(device); a2.eval()
 
+        reference = None
+        if composition_mode == "reference_delta":
+            if share_a1 or share_a2:
+                raise ValueError(
+                    "reference_delta currently requires sliced assistants with "
+                    "sibling fullmodel directories, not shared-base adapters"
+                )
+            if not reference_path or reference_path in {"null", "auto"}:
+                reference_path = os.path.normpath(
+                    os.path.join(a1_path, "..", "fullmodel")
+                )
+            if not os.path.isdir(reference_path):
+                raise FileNotFoundError(
+                    "DualULD reference_delta requires a frozen assistant "
+                    f"reference model directory (got: {reference_path})"
+                )
+            logger.info(f"DualULD: loading frozen assistant reference from {reference_path}")
+            reference_extra = {}
+            if torch_dtype is not None:
+                reference_extra["torch_dtype"] = torch_dtype
+            if attn_impl is not None:
+                reference_extra["attn_implementation"] = attn_impl
+            reference = AutoModelForCausalLM.from_pretrained(
+                reference_path, **reference_extra
+            )
+            reference.to(device); reference.eval()
+            for name, assistant in (("a1", a1), ("a2", a2)):
+                if assistant is None:
+                    continue
+                for field in ("vocab_size", "hidden_size", "num_hidden_layers"):
+                    expected = getattr(reference.config, field, None)
+                    actual = getattr(assistant.config, field, None)
+                    if expected != actual:
+                        raise ValueError(
+                            f"DualULD reference/{name} config mismatch for {field}: "
+                            f"reference={expected} assistant={actual}"
+                        )
+
         object.__setattr__(model, "_dual_a1", a1)
         object.__setattr__(model, "_dual_a2", a2)
         object.__setattr__(model, "_dual_shared_peft", shared_peft)
         object.__setattr__(model, "_dual_share_a1", share_a1)
         object.__setattr__(model, "_dual_share_a2", share_a2)
+        object.__setattr__(model, "_dual_reference", reference)
+        model._dual_composition_mode = composition_mode
+        model._dual_reference_path = reference_path
         model._dual_w1 = float(weight_a1)
         model._dual_w2 = float(weight_a2)
         model._dual_top_filter = float(top_logit_filter)
@@ -172,6 +231,7 @@ class DualULDForCausalLM(LlamaForCausalLM):
             f"a1={a1_path} a2={a2_path} "
             f"weight_a1={weight_a1} weight_a2={weight_a2} "
             f"top_logit_filter={top_logit_filter} "
+            f"composition={composition_mode} reference={reference_path} "
             f"alignment={alignment_enabled} gate={gate_enabled} "
             f"calibration={calibration_path}"
         )
@@ -232,17 +292,27 @@ class DualULDForCausalLM(LlamaForCausalLM):
         a1_logits   = a1_out.logits.to(base_logits.device)
         a2_logits   = a2_out.logits.to(base_logits.device)
 
+        reference_logits = None
+        if self._dual_reference is not None:
+            reference_logits = self._dual_reference(**common).logits.to(base_logits.device)
+        a1_component, a2_component = assistant_components(
+            a1_logits,
+            a2_logits,
+            reference_logits,
+            composition_mode=self._dual_composition_mode,
+        )
+
         if self._dual_top_filter > 0.0:
             base_logits, mask = _relative_top_filter(base_logits, self._dual_top_filter)
-            a1_logits = a1_logits.clone(); a1_logits[mask] = 0.0
-            a2_logits = a2_logits.clone(); a2_logits[mask] = 0.0
+            a1_component = a1_component.clone(); a1_component[mask] = 0.0
+            a2_component = a2_component.clone(); a2_component[mask] = 0.0
             active = ~mask
         else:
             active = torch.ones_like(base_logits, dtype=torch.bool)
 
         delta, _ = calibrated_residual(
-            a1_logits,
-            a2_logits,
+            a1_component,
+            a2_component,
             active,
             self._dual_w1,
             self._dual_w2,

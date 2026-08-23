@@ -80,6 +80,8 @@ F2R_VARIANT="${F2R_VARIANT:-F2R}"
 CALIBRATION_PATH="${CALIBRATION_PATH:-null}"
 ALIGNMENT_ENABLED="${ALIGNMENT_ENABLED:-false}"
 GATE_ENABLED="${GATE_ENABLED:-false}"
+COMPOSITION_MODE="${COMPOSITION_MODE:-raw}"
+REFERENCE_PATH="${REFERENCE_PATH:-null}"
 TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
@@ -110,6 +112,10 @@ for flag_name in ALIGNMENT_ENABLED GATE_ENABLED; do
         *) echo "$flag_name must be true or false (got: $flag_value)" >&2; exit 1 ;;
     esac
 done
+case "$COMPOSITION_MODE" in
+    raw|reference_delta) ;;
+    *) echo "COMPOSITION_MODE must be raw or reference_delta (got: $COMPOSITION_MODE)" >&2; exit 1 ;;
+esac
 if { [ "$ALIGNMENT_ENABLED" = "true" ] || [ "$GATE_ENABLED" = "true" ]; } \
     && [ ! -s "$CALIBRATION_PATH" ]; then
     echo "Missing calibration artifact: $CALIBRATION_PATH" >&2
@@ -275,6 +281,7 @@ echo "  A2 optimization  : lr=$A2_TRAIN_LR, epochs=$A2_TRAIN_EP, uniform-weight=
 echo "  explicit steps   : A1=$A1_TRAIN_STEPS / A2=$A2_TRAIN_STEPS (0=epoch-derived)"
 echo "  assistant data   : A1=$A1_DATA_MODE / A2=$A2_DATA_MODE"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
+echo "  composition      : $COMPOSITION_MODE (reference=$REFERENCE_PATH)"
 echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
 echo "  calibration      : $CALIBRATION_PATH"
 echo "  optimizer        : $TRAIN_OPTIM"
@@ -429,6 +436,17 @@ if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     echo "Could not resolve both assistant checkpoints." >&2
     exit 1
 fi
+if [ "$COMPOSITION_MODE" = "reference_delta" ]; then
+    if [ "$REFERENCE_PATH" = "null" ] || [ "$REFERENCE_PATH" = "auto" ] \
+        || [ -z "$REFERENCE_PATH" ]; then
+        REFERENCE_PATH="$(cd "$A1_CKPT/../fullmodel" 2>/dev/null && pwd || true)"
+    fi
+    if [ -z "$REFERENCE_PATH" ] || [ ! -d "$REFERENCE_PATH" ]; then
+        echo "Missing frozen assistant reference for reference_delta composition." >&2
+        echo "Resolved reference: ${REFERENCE_PATH:-empty}" >&2
+        exit 1
+    fi
+fi
 if [ ! -d "$A1_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
     echo "Assistant checkpoint override does not exist." >&2
     echo "A1: $A1_CKPT" >&2
@@ -511,6 +529,8 @@ fi
         model.model_args.calibration_path="$CALIBRATION_PATH" \
         model.model_args.alignment_enabled="$ALIGNMENT_ENABLED" \
         model.model_args.gate_enabled="$GATE_ENABLED" \
+        model.model_args.composition_mode="$COMPOSITION_MODE" \
+        model.model_args.reference_path="$REFERENCE_PATH" \
         model.model_args.attn_implementation=sdpa \
         model.tokenizer_args.pretrained_model_name_or_path="$HF_TOKENIZER" \
         forget_split="$SPLIT" \
@@ -550,6 +570,8 @@ fi
     --calibration-path "$CALIBRATION_PATH" \
     --alignment-enabled "$ALIGNMENT_ENABLED" \
     --gate-enabled "$GATE_ENABLED" \
+    --composition-mode "$COMPOSITION_MODE" \
+    --reference-path "$REFERENCE_PATH" \
     --views "$VIEWS" \
     --a1-num-layer "$A1_NUM_LAYER" \
     --a2-num-layer "$A2_NUM_LAYER" \

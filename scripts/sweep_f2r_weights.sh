@@ -26,6 +26,8 @@ TARGET_AGG="${TARGET_AGG:-$DEFAULT_TARGET_AGG}"
 TARGET_MARGIN="${TARGET_MARGIN:-0.005}"
 A1_CHECKPOINT_OVERRIDE="${A1_CHECKPOINT_OVERRIDE:-}"
 A2_CHECKPOINT_OVERRIDE="${A2_CHECKPOINT_OVERRIDE:-}"
+COMPOSITION_MODE="${COMPOSITION_MODE:-raw}"
+REFERENCE_PATH="${REFERENCE_PATH:-null}"
 
 latest_checkpoint() {
     find "$1" -name 'checkpoint-*' -type d 2>/dev/null \
@@ -87,7 +89,7 @@ fi
 
 mkdir -p "$RESULTS_DIR/logs"
 MANIFEST="$RESULTS_DIR/manifest.csv"
-echo "tag,weight_a1,weight_a2,top_filter,task_name,report" > "$MANIFEST"
+echo "tag,weight_a1,weight_a2,top_filter,task_name,report,composition_mode,reference_path" > "$MANIFEST"
 
 echo "============================================================"
 echo "F2R inference sweep (frozen assistants; no retraining)"
@@ -97,6 +99,8 @@ echo "  weight pairs  : $WEIGHT_PAIRS"
 echo "  top filters   : $TOP_FILTERS"
 echo "  A1            : $A1_CKPT"
 echo "  A2            : $A2_CKPT"
+echo "  composition   : $COMPOSITION_MODE"
+echo "  reference     : $REFERENCE_PATH"
 echo "  results       : $RESULTS_DIR"
 echo "  BS-S target   : ${TARGET_AGG:-not set}"
 echo "  target margin : $TARGET_MARGIN"
@@ -118,6 +122,7 @@ run_one() {
         A2_CHECKPOINT_OVERRIDE="$A2_CKPT" \
         WEIGHT_A1="$w1" WEIGHT_A2="$w2" TOP_FILTER="$filter" \
         TASK_NAME="$task_name" HF_PREFLIGHT=0 EVAL_OVERWRITE=true \
+        COMPOSITION_MODE="$COMPOSITION_MODE" REFERENCE_PATH="$REFERENCE_PATH" \
         SELECTION_RETAIN_ACCESS=true \
         bash "$RUNNER" > "$RESULTS_DIR/logs/${tag}.log" 2>&1
     echo "[$(date '+%H:%M:%S')] done  $tag on GPU $gpu"
@@ -149,7 +154,7 @@ for pair in "${PAIR_LIST[@]}"; do
         tag="${tag//./p}"
         task_name="tofu_Llama-3.2-1B-Instruct_${SPLIT}_F2R_sweep_${SWEEP_NAME}_${tag}"
         report="${EASE_ROOT}/open-unlearning/saves/eval/${task_name}/F2R_REPORT.json"
-        echo "$tag,$w1,$w2,$filter,$task_name,$report" >> "$MANIFEST"
+        echo "$tag,$w1,$w2,$filter,$task_name,$report,$COMPOSITION_MODE,$REFERENCE_PATH" >> "$MANIFEST"
         run_one "$gpu" "$tag" "$w1" "$w2" "$filter" "$task_name" "$report" &
         pids+=("$!")
         INDEX=$((INDEX + 1))

@@ -37,6 +37,8 @@ TRAINING_METADATA_FIELDS = [
     "preserve_kl_weight",
     "evidence_weight",
     "claim_mode",
+    "composition_mode",
+    "reference_path",
     "a1_seed",
     "a2_seed",
     "models_root",

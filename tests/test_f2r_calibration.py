@@ -41,6 +41,32 @@ class F2RCalibrationTest(unittest.TestCase):
         torch.testing.assert_close(delta, -1.2 * self.a1 + 0.4 * self.a2)
         self.assertIsNone(gate)
 
+    def test_reference_delta_removes_shared_initialization(self):
+        reference = torch.tensor([[[0.4, 0.8, 0.2, -0.1]]])
+        a1 = reference + torch.tensor([[[0.1, -0.2, 0.0, 0.3]]])
+        a2 = reference + torch.tensor([[[-0.3, 0.1, 0.2, 0.0]]])
+        delta1, delta2 = calibration.assistant_components(
+            a1,
+            a2,
+            reference,
+            composition_mode="reference_delta",
+        )
+        torch.testing.assert_close(delta1, a1 - reference)
+        torch.testing.assert_close(delta2, a2 - reference)
+
+    def test_raw_components_remain_backward_compatible(self):
+        component1, component2 = calibration.assistant_components(
+            self.a1, self.a2, composition_mode="raw"
+        )
+        self.assertIs(component1, self.a1)
+        self.assertIs(component2, self.a2)
+
+    def test_reference_delta_requires_reference(self):
+        with self.assertRaisesRegex(ValueError, "requires reference logits"):
+            calibration.assistant_components(
+                self.a1, self.a2, composition_mode="reference_delta"
+            )
+
     def test_alignment_changes_only_centered_active_logits(self):
         delta, _ = calibration.calibrated_residual(
             self.a1,
