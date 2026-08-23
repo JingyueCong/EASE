@@ -50,6 +50,37 @@ class F2DHierarchyTest(unittest.TestCase):
             self.assertTrue(cell["supervision"]["claim_spans"])
             self.assertTrue(cell["supervision"]["evidence_spans"])
 
+    def test_evidence_mode_uses_only_paired_difference_spans(self):
+        left = {"question": "Q1", "answer": "Mira won the Silver Quill in Rome."}
+        right = {"question": "Q2", "answer": "Nora won the Amber Crown in Rome."}
+        hierarchy.annotate_pair(left, right, claim_mode="evidence")
+
+        for cell in (left, right):
+            supervision = cell["supervision"]
+            self.assertEqual(supervision["version"], "paired-diffspan-v1")
+            self.assertEqual(
+                supervision["claim_spans"], supervision["evidence_spans"]
+            )
+            selected = " ".join(
+                cell["answer"][start:end]
+                for start, end in supervision["claim_spans"]
+            )
+            self.assertNotIn("in Rome", selected)
+
+    def test_invalid_claim_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported claim mode"):
+            hierarchy.annotate_pair(
+                {"answer": "left"}, {"answer": "right"}, claim_mode="invalid"
+            )
+
+    def test_evidence_mode_rejects_identical_paired_answers(self):
+        with self.assertRaisesRegex(ValueError, "non-empty paired answer change"):
+            hierarchy.annotate_pair(
+                {"answer": "The same answer."},
+                {"answer": "The same answer."},
+                claim_mode="evidence",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

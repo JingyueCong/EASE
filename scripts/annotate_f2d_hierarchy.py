@@ -45,7 +45,11 @@ def merge_spans(spans: Iterable[Tuple[int, int]]) -> List[List[int]]:
     return merged
 
 
-def paired_evidence_spans(left: str, right: str) -> Tuple[List[List[int]], List[List[int]]]:
+def paired_evidence_spans(
+    left: str,
+    right: str,
+    fallback_full: bool = True,
+) -> Tuple[List[List[int]], List[List[int]]]:
     """Return answer-relative changed spans for a matched pair."""
     left_tokens = lexical_tokens(left)
     right_tokens = lexical_tokens(right)
@@ -73,9 +77,9 @@ def paired_evidence_spans(left: str, right: str) -> Tuple[List[List[int]], List[
 
     # Identical paired answers carry no contrastive evidence.  Keeping the
     # complete answer is safer than silently producing an empty objective.
-    if not left_spans and left.strip():
+    if fallback_full and not left_spans and left.strip():
         left_spans = [(0, len(left))]
-    if not right_spans and right.strip():
+    if fallback_full and not right_spans and right.strip():
         right_spans = [(0, len(right))]
     return merge_spans(left_spans), merge_spans(right_spans)
 
@@ -101,24 +105,41 @@ def claims_covering_evidence(text: str, evidence: Sequence[Sequence[int]]) -> Li
     return merge_spans(selected or [(0, len(text))])
 
 
-def annotate_pair(left: Dict, right: Dict) -> None:
-    left_evidence, right_evidence = paired_evidence_spans(left["answer"], right["answer"])
+def annotate_pair(left: Dict, right: Dict, claim_mode: str = "clause") -> None:
+    if claim_mode not in {"clause", "evidence"}:
+        raise ValueError(f"Unsupported claim mode: {claim_mode}")
+    left_evidence, right_evidence = paired_evidence_spans(
+        left["answer"],
+        right["answer"],
+        fallback_full=claim_mode != "evidence",
+    )
+    if claim_mode == "evidence" and (not left_evidence or not right_evidence):
+        raise ValueError("Exact diff-span mode requires a non-empty paired answer change")
     for cell, evidence in ((left, left_evidence), (right, right_evidence)):
+        claim_spans = (
+            evidence
+            if claim_mode == "evidence"
+            else claims_covering_evidence(cell["answer"], evidence)
+        )
         cell["supervision"] = {
-            "version": "paired-hierarchy-v1",
-            "claim_spans": claims_covering_evidence(cell["answer"], evidence),
+            "version": (
+                "paired-diffspan-v1"
+                if claim_mode == "evidence"
+                else "paired-hierarchy-v1"
+            ),
+            "claim_spans": claim_spans,
             "evidence_spans": evidence,
         }
 
 
-def annotate_record(record: Dict) -> Dict:
+def annotate_record(record: Dict, claim_mode: str = "clause") -> Dict:
     cells = record["cells"]
-    annotate_pair(cells["C11"], cells["C01"])
-    annotate_pair(cells["C10"], cells["C00"])
+    annotate_pair(cells["C11"], cells["C01"], claim_mode=claim_mode)
+    annotate_pair(cells["C10"], cells["C00"], claim_mode=claim_mode)
     return record
 
 
-def annotate_file(input_path: Path, output_path: Path) -> Dict:
+def annotate_file(input_path: Path, output_path: Path, claim_mode: str = "clause") -> Dict:
     records = []
     with input_path.open(encoding="utf-8") as handle:
         for line_no, line in enumerate(handle, 1):
@@ -127,7 +148,7 @@ def annotate_file(input_path: Path, output_path: Path) -> Dict:
             record = json.loads(line)
             if not isinstance(record.get("cells"), dict):
                 raise ValueError(f"{input_path}:{line_no}: cells must be an object")
-            records.append(annotate_record(record))
+            records.append(annotate_record(record, claim_mode=claim_mode))
     if not records:
         raise ValueError(f"No records found in {input_path}")
 
@@ -139,7 +160,12 @@ def annotate_file(input_path: Path, output_path: Path) -> Dict:
     cells = [cell for record in records for cell in record["cells"].values()]
     metadata = {
         "method": "U-F2D",
-        "annotation": "paired-hierarchy-v1",
+        "annotation": (
+            "paired-diffspan-v1"
+            if claim_mode == "evidence"
+            else "paired-hierarchy-v1"
+        ),
+        "claim_mode": claim_mode,
         "input": str(input_path.resolve()),
         "input_sha256": sha256(input_path),
         "output": str(output_path.resolve()),
@@ -161,8 +187,17 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-units", type=int, default=200)
+    parser.add_argument(
+        "--claim-mode",
+        choices=("clause", "evidence"),
+        default="clause",
+        help=(
+            "Use clause spans (legacy hierarchy) or exact paired-difference "
+            "spans (local intervention training)."
+        ),
+    )
     args = parser.parse_args()
-    metadata = annotate_file(args.input, args.output)
+    metadata = annotate_file(args.input, args.output, claim_mode=args.claim_mode)
     if metadata["units"] != args.expected_units:
         args.output.unlink(missing_ok=True)
         args.output.with_suffix(".json").unlink(missing_ok=True)
