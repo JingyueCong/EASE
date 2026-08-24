@@ -1536,3 +1536,17 @@ assistant representation strength，而不是冻结 composition 的 residual sca
 reference-delta，禁用 alignment/gate。入口为 `scripts/sweep_f2d_v512_a1strength4.sh`，总预算
 为 4 个训练 pair 和 12 个完整报告。只有该设计显示 A1 steps 或 uniform factor 的一致正效应，
 才允许围绕胜出 cell 做下一轮局部推理搜索。
+
+该 2×2 实验最终最好为 `A1 steps=96 / uniform=1.5` 配合
+`(-1.3,1.2,0.0003)`，得到 `Agg=0.535500`、`Mem=0.522797`、
+`Util=0.548836`。它相对纯 V5.12 reference-delta baseline 提高 `0.008360`，但 96 steps
+平均优于 108 steps，uniform 的正效应也依赖 operating point；因此不把结果解释为“继续增加
+A1 强度必然提高”，并停止扩大纯 V5.12 steps/uniform 网格。
+
+后续只做一次冻结 hybrid ceiling 检验：将上述胜出的 V5.12 causal A1 checkpoint-96 与
+FullAnswer A2 checkpoint-72 组合，保持 reference-delta 且关闭 alignment/gate，扫描
+`w1={-1.3,-1.5,-1.7,-1.9}`、`w2={1.2,1.4,1.6}`、
+`filter={0.0002,0.0003}`，共 24 个完整评估。入口为
+`scripts/sweep_f2d_v512_stronga1_fulla2_refdelta.sh`。该实验使用 FullAnswer A2，必须报告为
+hybrid ceiling/ablation，不能替代纯 V5.12 causal 主结果；其选择同样标记
+`selection_retain_access=true`。
