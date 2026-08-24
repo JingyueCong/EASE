@@ -1485,3 +1485,35 @@ validator 与语义 critic 的权威规则冲突、修复要求恢复 source fac
 最终论文至少报告 FullAnswer、V5.11、V5.12、F2R 和 CIRU-H；不得只报告最好一点而隐藏失败
 构造版本。若 V5.12 的 Agg 仍低于 FullAnswer，应将结论表述为“改善 causal-pair validity 与
 审计风险，但未改善当前 TOFU Agg”，而不是继续后验修改数据直到超过基线。
+
+## 38. Reference-delta 与动态残差校准
+
+冻结权重搜索显示，全局标量继续细扫已经接近饱和：V5.12 同源双助手最好达到
+`Agg=0.526883`，V5.12 A1 与 FullAnswer A2 的 reference-delta 组合在局部细扫后达到
+`Agg=0.543096`，仍低于 FullAnswer 的 `0.553712`。因此下一阶段不再扩大同一全局
+`(w_1,w_2,filter)` 网格，而检验残差是否需要按词表维度和 token 上下文动态校准。
+
+Reference-delta composition 定义为：
+
+\[
+z=z_{base}+w_1(z_{A1}-z_R)+w_2(z_{A2}-z_R),
+\]
+
+其中 `R` 是 A1/A2 训练前保存的同一个冻结小模型。它消除非对称权重下无意注入的
+`(w_1+w_2)z_R`。当 `w_1=-w_2` 时，该式与原始 raw composition 完全等价，因此
+FullAnswer 固定点 `(-1.8,1.8,0.0004)` 可作为无混杂 baseline。
+
+预注册的 calibration pilot 固定 FullAnswer `a72_a72` checkpoint、数据、seed、filter 与
+全局权重，只比较四个 inference-only 方法：
+
+1. `baseline`：不做校准；
+2. `alignment`：在 C01/C10/C00 控制答案上拟合 vocabulary-diagonal A2 scale；
+3. `gate`：用 C11 answer token 为正类、C01/C10/C00 answer token 为负类拟合六特征
+   logistic token gate；
+4. `alignment_gate`：先应用 alignment，再在已对齐残差上拟合 gate。
+
+校准不读取 retain examples，也不重新训练 A1/A2；四种方法的最终选择仍读取完整
+Mem/Util/Agg，必须标记 `selection_retain_access=true`。运行入口为
+`scripts/run_f2d_fullanswer_refdelta_calibration_pilot.sh`。若 alignment/gate 均未超过未校准
+FullAnswer baseline，则停止继续调 gate 超参数，并把主要瓶颈判定为 assistant representation
+而非 global composition；下一步应改变训练目标或 assistant architecture。

@@ -29,6 +29,7 @@ sys.path.insert(0, str(OPEN_UNLEARNING_SRC))
 from model.dual_uld import _load_assistant, _relative_top_filter  # noqa: E402
 from model.f2r_calibration import (  # noqa: E402
     FEATURE_NAMES,
+    assistant_components,
     calibrated_residual,
     masked_center,
     residual_features,
@@ -60,6 +61,24 @@ def make_gate_examples(records: Sequence[Dict]) -> List[QAExample]:
     examples: List[QAExample] = []
     seen_sources = set()
     for record in records:
+        cells = record.get("cells")
+        if isinstance(cells, dict):
+            missing = [name for name in ("C11", "C01", "C10", "C00") if name not in cells]
+            if missing:
+                raise ValueError(
+                    f"{record.get('source_id', 'unknown')} missing factorial cells: {missing}"
+                )
+            for name in ("C11", "C01", "C10", "C00"):
+                cell = cells[name]
+                examples.append(
+                    QAExample(
+                        cell["question"],
+                        cell["answer"],
+                        int(name == "C11"),
+                        name,
+                    )
+                )
+            continue
         source_id = record["source_id"]
         if source_id not in seen_sources:
             seen_sources.add(source_id)
@@ -85,10 +104,29 @@ def make_gate_examples(records: Sequence[Dict]) -> List[QAExample]:
 
 
 def make_alignment_examples(records: Sequence[Dict]) -> List[QAExample]:
-    return [
-        QAExample(record["matched_question"], record["matched_answer"], 0, "matched")
-        for record in records
-    ]
+    examples = []
+    for record in records:
+        cells = record.get("cells")
+        if isinstance(cells, dict):
+            missing = [name for name in ("C01", "C10", "C00") if name not in cells]
+            if missing:
+                raise ValueError(
+                    f"{record.get('source_id', 'unknown')} missing alignment cells: "
+                    f"{missing}"
+                )
+            for name in ("C01", "C10", "C00"):
+                cell = cells[name]
+                examples.append(QAExample(cell["question"], cell["answer"], 0, name))
+        else:
+            examples.append(
+                QAExample(
+                    record["matched_question"],
+                    record["matched_answer"],
+                    0,
+                    "matched",
+                )
+            )
+    return examples
 
 
 def encode_example(tokenizer, example: QAExample, max_length: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -133,7 +171,16 @@ def batches(
 
 
 @torch.inference_mode()
-def assistant_logits(base, a1, a2, ids, attention_mask):
+def assistant_logits(
+    base,
+    a1,
+    a2,
+    reference,
+    ids,
+    attention_mask,
+    *,
+    composition_mode: str,
+):
     kwargs = dict(
         input_ids=ids,
         attention_mask=attention_mask,
@@ -142,13 +189,24 @@ def assistant_logits(base, a1, a2, ids, attention_mask):
         output_hidden_states=False,
         return_dict=True,
     )
-    return base(**kwargs).logits, a1(**kwargs).logits, a2(**kwargs).logits
+    base_logits = base(**kwargs).logits
+    a1_logits = a1(**kwargs).logits
+    a2_logits = a2(**kwargs).logits
+    reference_logits = reference(**kwargs).logits if reference is not None else None
+    a1_component, a2_component = assistant_components(
+        a1_logits,
+        a2_logits,
+        reference_logits,
+        composition_mode=composition_mode,
+    )
+    return base_logits, a1_component, a2_component
 
 
 def fit_alignment(
     base,
     a1,
     a2,
+    reference,
     tokenizer,
     examples: Sequence[QAExample],
     *,
@@ -162,6 +220,7 @@ def fit_alignment(
     min_observations: int,
     scale_min: float,
     scale_max: float,
+    composition_mode: str,
 ) -> Tuple[np.ndarray, Dict[str, float]]:
     if weight_a2 == 0:
         raise ValueError("Alignment requires a non-zero weight_a2")
@@ -176,7 +235,15 @@ def fit_alignment(
     ):
         ids, attention = ids.to(device), attention.to(device)
         answer_mask = answer_mask.to(device)
-        base_logits, a1_logits, a2_logits = assistant_logits(base, a1, a2, ids, attention)
+        base_logits, a1_logits, a2_logits = assistant_logits(
+            base,
+            a1,
+            a2,
+            reference,
+            ids,
+            attention,
+            composition_mode=composition_mode,
+        )
         _, inactive = _relative_top_filter(base_logits, top_filter)
         active = ~inactive
         a1_centered = masked_center(a1_logits, active)
@@ -209,6 +276,7 @@ def collect_gate_features(
     base,
     a1,
     a2,
+    reference,
     tokenizer,
     examples: Sequence[QAExample],
     alignment_scale: np.ndarray,
@@ -222,6 +290,7 @@ def collect_gate_features(
     weight_a2: float,
     max_tokens_per_class: int,
     seed: int,
+    composition_mode: str,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, int]]:
     state = {
         "alignment_scale": torch.as_tensor(
@@ -236,7 +305,15 @@ def collect_gate_features(
     ):
         ids, attention = ids.to(device), attention.to(device)
         answer_mask = answer_mask.to(device)
-        base_logits, a1_logits, a2_logits = assistant_logits(base, a1, a2, ids, attention)
+        base_logits, a1_logits, a2_logits = assistant_logits(
+            base,
+            a1,
+            a2,
+            reference,
+            ids,
+            attention,
+            composition_mode=composition_mode,
+        )
         _, inactive = _relative_top_filter(base_logits, top_filter)
         active = ~inactive
         a1_logits = a1_logits.masked_fill(inactive, 0.0)
@@ -339,6 +416,12 @@ def parse_args():
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--a1-path", required=True)
     parser.add_argument("--a2-path", required=True)
+    parser.add_argument(
+        "--composition-mode",
+        choices=("raw", "reference_delta"),
+        default="raw",
+    )
+    parser.add_argument("--reference-path")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--alignment-input", type=Path)
     parser.add_argument("--weight-a1", type=float, default=-1.2)
@@ -380,6 +463,32 @@ def main():
     a1 = _load_assistant(args.a1_path, dtype, "sdpa").to(device).eval()
     print(f"Loading A2: {args.a2_path}", flush=True)
     a2 = _load_assistant(args.a2_path, dtype, "sdpa").to(device).eval()
+    reference = None
+    resolved_reference_path = None
+    if args.composition_mode == "reference_delta":
+        reference_path = args.reference_path
+        if not reference_path:
+            reference_path = str(Path(args.a1_path).parent / "fullmodel")
+        if not Path(reference_path).is_dir():
+            raise FileNotFoundError(
+                f"Reference-delta calibration reference not found: {reference_path}"
+            )
+        resolved_reference_path = str(Path(reference_path).resolve())
+        print(f"Loading reference: {resolved_reference_path}", flush=True)
+        reference = AutoModelForCausalLM.from_pretrained(
+            resolved_reference_path,
+            torch_dtype=dtype,
+            attn_implementation="sdpa",
+        ).to(device).eval()
+        for name, assistant in (("a1", a1), ("a2", a2)):
+            for field in ("vocab_size", "hidden_size", "num_hidden_layers"):
+                expected = getattr(reference.config, field, None)
+                actual = getattr(assistant.config, field, None)
+                if expected != actual:
+                    raise ValueError(
+                        f"Reference/{name} config mismatch for {field}: "
+                        f"reference={expected} assistant={actual}"
+                    )
 
     vocab_size = base.config.vocab_size
     alignment_diagnostics: Dict[str, float] = {}
@@ -388,6 +497,7 @@ def main():
             base,
             a1,
             a2,
+            reference,
             tokenizer,
             make_alignment_examples(records),
             device=device,
@@ -400,6 +510,7 @@ def main():
             min_observations=args.alignment_min_observations,
             scale_min=args.alignment_scale_min,
             scale_max=args.alignment_scale_max,
+            composition_mode=args.composition_mode,
         )
     elif args.mode == "alignment-gate":
         if not args.alignment_input:
@@ -425,6 +536,7 @@ def main():
             base,
             a1,
             a2,
+            reference,
             tokenizer,
             make_gate_examples(records),
             alignment_scale,
@@ -437,6 +549,7 @@ def main():
             weight_a2=args.weight_a2,
             max_tokens_per_class=args.max_tokens_per_class,
             seed=args.seed,
+            composition_mode=args.composition_mode,
         )
         gate_coef, gate_intercept, feature_mean, feature_std, gate_diagnostics = (
             fit_logistic_gate(
@@ -465,6 +578,8 @@ def main():
         "base_model": args.base_model,
         "a1_path": args.a1_path,
         "a2_path": args.a2_path,
+        "composition_mode": args.composition_mode,
+        "reference_path": resolved_reference_path,
         "weight_a1": args.weight_a1,
         "weight_a2": args.weight_a2,
         "top_filter": args.top_filter,
