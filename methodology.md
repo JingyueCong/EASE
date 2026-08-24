@@ -1605,3 +1605,37 @@ FullAnswer checkpoint-72，推理固定在 boundary winner `(-2.0,1.7,0.0004)`�
 reference-delta 且关闭 alignment/gate。入口为 `scripts/sweep_f2d_v512_a1contrast4.sh`，四个
 configuration 可在四张 GPU 上并行。该实验仍是 causal-A1/FullAnswer-A2 hybrid ablation；
 若四项均未超过 `0.551721`，则停止这一 loss 形式，不后验扩大 margin/regularizer 网格。
+
+实际 paired-contrast 结果验证了停止条件：四项中最好为
+`lambda_c=0.1, lambda_p=0.03`，得到 `Agg=0.520235`、`Mem=0.475630`、
+`Util=0.574070`。相对旧 boundary，Util 增加 `0.007603`，但 Mem 降低
+`0.062093`，最终 Agg 降低 `0.031486`；`lambda_c=0.3` 的两项更差。因此该目标使
+A1 过度专门化于局部 question-answer compatibility，不能覆盖 TOFU 的 paraphrase/extraction
+遗忘要求，后续停止 margin、contrast weight 与 placebo-KL 网格。
+
+## 40. Context-selective gate 与 DualULD 终止判据
+
+对 ICLR 2026 LLM Beliefs 原始表格复核后，forget05/Llama-3.2-1B 的 BS-S 为
+`Agg=0.58, Mem=0.54, Util=0.63`，且表格明确使用 retain regularization。当前 causal hybrid
+boundary 为 `0.551721/0.537723/0.566467`；Mem 已近似达到 BS-S，主要差距是 Util，而不是
+遗忘强度。继续增强 A1 或全局负权重会沿同一 Mem--Util frontier 移动，不能解决 broad-retain、
+real-author 与 world-fact utility 的损失。
+
+因此只允许一次不重新训练 assistant 的 context-selective gate 诊断。固定 V5.12 strong A1
+checkpoint-96、FullAnswer A2 checkpoint-72、reference-delta 与 filter `0.0004`，分别在三处
+已观察 frontier 点训练独立 logistic gate：
+
+1. utility side `(-1.9,1.6)`；
+2. boundary winner `(-2.0,1.7)`；
+3. memorization side `(-2.1,1.8)`。
+
+gate 只使用 forget-derived causal cells，令 C11 answer tokens 为 on，C01/C10/C00 answer
+tokens 为 off；训练不读取 retain examples。每一点独立拟合是为了避免把一个 operating point
+上的 residual-feature classifier 外推到另一点。推理时 sigmoid gate 逐 token 缩放完整
+reference-delta residual，alignment 关闭，A1/A2 checkpoint 保持冻结。
+
+入口为 `scripts/run_f2d_v512_context_gate3.sh`。成功必须同时满足：
+`Agg>0.551721`、`Mem>=0.53`、`Util>=0.60`。脚本将结果和预注册判断写入
+`CONTEXT_GATE_DECISION.json`。若三个点均失败，则停止 static DualULD 的 gate、alignment、
+global weights、pair-margin 与 span variants；达到 `0.58` 的后续工作必须改为 sequence-level
+bootstrapping、真实 retain regularization 或新的条件化架构，而不能继续后验扩大当前网格。
