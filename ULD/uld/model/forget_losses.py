@@ -219,6 +219,150 @@ class FactorialHierarchicalLoss:
             'retain_loss': regularization,
         }
 
+
+class FactorialContrastiveA1Loss:
+    """Paired A1 objective for target separation and placebo preservation.
+
+    Each source contributes five rows in a fixed mini-batch: C11, C01, a
+    cross-question negative that combines the C01 question with the immutable
+    C11 answer, C10, and C00.  The margin therefore compares the same answer
+    under the source and replacement questions, while the placebo KL keeps A1
+    close to the frozen base on both placebo cells.
+    """
+
+    factorial_five_sampler = True
+    # Kept non-null for compatibility with trainer/introspection code.
+    retain_loss_func = True
+    forget_loss_func = True
+
+    def __init__(
+        self,
+        retain_weight=1.5,
+        contrast_weight=0.1,
+        contrast_margin=0.5,
+        placebo_kl_weight=0.01,
+    ) -> None:
+        self.retain_weight = float(retain_weight)
+        self.contrast_weight = float(contrast_weight)
+        self.contrast_margin = float(contrast_margin)
+        self.placebo_kl_weight = float(placebo_kl_weight)
+        for name in (
+            'retain_weight', 'contrast_weight', 'contrast_margin',
+            'placebo_kl_weight',
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative")
+
+    @staticmethod
+    def _sample_mean(values, weights):
+        weights = weights.to(values.dtype)
+        return (values * weights).sum(dim=-1) / weights.sum(dim=-1).clamp(min=1.0)
+
+    @staticmethod
+    def _select_single(pair_ids, cell_ids, pair_id, cell_id):
+        selected = torch.nonzero(
+            (pair_ids == pair_id) & (cell_ids == cell_id), as_tuple=False
+        ).flatten()
+        if selected.numel() != 1:
+            raise ValueError(
+                f"pair {int(pair_id)} must contain exactly one cell {cell_id}; "
+                f"found {selected.numel()}"
+            )
+        return selected[0]
+
+    def __call__(self, model, batch: Dict[str, Any], oracle_model=None):
+        if oracle_model is None:
+            raise ValueError(
+                "FactorialContrastiveA1Loss requires a frozen oracle/base model"
+            )
+        pair_ids = batch.get('pair_ids')
+        cell_ids = batch.get('cell_ids')
+        if pair_ids is None or cell_ids is None:
+            raise ValueError(
+                "FactorialContrastiveA1Loss requires pair_ids and cell_ids"
+            )
+        if batch['input_ids'].shape[0] % 5 != 0:
+            raise ValueError("factorial-five mini-batch size must be divisible by 5")
+        unique_pairs = torch.unique(pair_ids)
+        if unique_pairs.numel() * 5 != batch['input_ids'].shape[0]:
+            raise ValueError(
+                "factorial-five mini-batch must contain five rows per source"
+            )
+        expected_cells = torch.arange(5, device=cell_ids.device)
+        for pair_id in unique_pairs:
+            actual_cells = torch.sort(cell_ids[pair_ids == pair_id]).values
+            if not torch.equal(actual_cells, expected_cells):
+                raise ValueError(
+                    f"pair {int(pair_id)} must contain cells 0..4 exactly once"
+                )
+
+        outputs = model(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+        )
+        logits = outputs.logits[..., :-1, :].contiguous()
+        labels = batch['labels'][..., 1:].contiguous()
+        valid_answer = labels != -100
+        safe_labels = labels.clamp(min=0)
+        log_probs = F.log_softmax(logits, dim=-1)
+        target_log_probs = log_probs.gather(
+            -1, safe_labels.unsqueeze(-1)
+        ).squeeze(-1)
+        sample_nll = -self._sample_mean(target_log_probs, valid_answer)
+
+        c11 = cell_ids == 0
+        c01 = cell_ids == 1
+        placebo = (cell_ids == 3) | (cell_ids == 4)
+        if not c11.any() or not c01.any() or not placebo.any():
+            raise ValueError("factorial-five batch is missing required cells")
+        ce_loss = sample_nll[c11].mean()
+
+        # Answer-local KL(U || p), retaining the legacy constant so zero means
+        # exactly uniform. Prompt and padding tokens are intentionally excluded.
+        vocab = logits.shape[-1]
+        uniform_values = -log_probs.mean(dim=-1) - torch.log(
+            torch.tensor(vocab, dtype=log_probs.dtype, device=log_probs.device)
+        )
+        uniform_per_sample = self._sample_mean(uniform_values, valid_answer)
+        uniform_loss = uniform_per_sample[c01].mean()
+
+        contrast_terms = []
+        for pair_id in unique_pairs:
+            positive = self._select_single(pair_ids, cell_ids, pair_id, 0)
+            cross_negative = self._select_single(pair_ids, cell_ids, pair_id, 2)
+            # Require the same source answer to be easier under C11 than under
+            # the C01 question by at least contrast_margin nats/token.
+            separation = sample_nll[cross_negative] - sample_nll[positive]
+            contrast_terms.append(
+                F.softplus(self.contrast_margin - separation)
+            )
+        contrast_loss = torch.stack(contrast_terms).mean()
+
+        with torch.no_grad():
+            oracle_logits = oracle_model(
+                input_ids=batch['input_ids'],
+                attention_mask=batch['attention_mask'],
+            ).logits[..., :-1, :]
+            oracle_log_probs = F.log_softmax(oracle_logits, dim=-1)
+        token_kl = F.kl_div(
+            log_probs,
+            oracle_log_probs,
+            reduction='none',
+            log_target=True,
+        ).sum(dim=-1)
+        placebo_kl = self._sample_mean(token_kl, valid_answer)[placebo].mean()
+
+        target_objective = ce_loss + self.contrast_weight * contrast_loss
+        regularization = (
+            self.retain_weight * uniform_loss
+            + self.placebo_kl_weight * placebo_kl
+        )
+        return {
+            'loss': target_objective + regularization,
+            'forget_loss': target_objective,
+            'retain_loss': regularization,
+        }
+
 # For RMU
 class RMULoss(ForgetRetainLoss):
     def __init__(self, forget_loss_func, retain_loss_func, model_config, layerid, retain_weight=1200, steering_coeff=6.5) -> None:
@@ -473,6 +617,13 @@ def UniformLossFunc(model, input_ids, attention_mask, labels=None, **kwargs):
     return kl_div
 
 def create_unlearn_loss(loss_config):
+    if loss_config.get('loss_type') == 'factorial_contrastive_a1':
+        return FactorialContrastiveA1Loss(
+            retain_weight=loss_config.get('retain_weight', 1.5),
+            contrast_weight=loss_config.get('contrast_weight', 0.1),
+            contrast_margin=loss_config.get('contrast_margin', 0.5),
+            placebo_kl_weight=loss_config.get('placebo_kl_weight', 0.01),
+        )
     if loss_config.get('loss_type') == 'factorial_hierarchical':
         return FactorialHierarchicalLoss(
             retain_weight=loss_config.get('retain_weight', 1.0),
@@ -505,6 +656,8 @@ def create_unlearn_loss(loss_config):
         )
 
 def loss_requries_oracle(loss_config):
+    if loss_config.get('loss_type') == 'factorial_contrastive_a1':
+        return True
     if loss_config.get('loss_type') == 'factorial_hierarchical':
         return float(loss_config.get('preserve_kl_weight', 0.0)) > 0
     forget_loss = loss_config.get('forget_loss', None)

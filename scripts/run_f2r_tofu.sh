@@ -89,6 +89,9 @@ TRAIN_OPTIM="${TRAIN_OPTIM:-adamw_torch}"
 TRAIN_LOSS_CONFIG="${TRAIN_LOSS_CONFIG:-remember+uniform}"
 PRESERVE_KL_WEIGHT="${PRESERVE_KL_WEIGHT:-0.0}"
 EVIDENCE_WEIGHT="${EVIDENCE_WEIGHT:-0.0}"
+CONTRAST_WEIGHT="${CONTRAST_WEIGHT:-0.1}"
+CONTRAST_MARGIN="${CONTRAST_MARGIN:-0.5}"
+PLACEBO_KL_WEIGHT="${PLACEBO_KL_WEIGHT:-0.01}"
 TRAIN_STEPS="${TRAIN_STEPS:-0}"
 RETAIN_WEIGHT="${RETAIN_WEIGHT:-5.0}"
 SEED="${SEED:-42}"
@@ -171,19 +174,13 @@ for steps_name in A1_TRAIN_STEPS A2_TRAIN_STEPS; do
     fi
 done
 
-if { [ -n "$A1_CHECKPOINT_OVERRIDE" ] && [ -z "$A2_CHECKPOINT_OVERRIDE" ]; } \
-    || { [ -z "$A1_CHECKPOINT_OVERRIDE" ] && [ -n "$A2_CHECKPOINT_OVERRIDE" ]; }; then
-    echo "Set both A1_CHECKPOINT_OVERRIDE and A2_CHECKPOINT_OVERRIDE, or neither." >&2
-    exit 1
-fi
-if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
-    if [ ! -d "$A1_CHECKPOINT_OVERRIDE" ] || [ ! -d "$A2_CHECKPOINT_OVERRIDE" ]; then
-        echo "Assistant checkpoint override does not exist." >&2
-        echo "A1: $A1_CHECKPOINT_OVERRIDE" >&2
-        echo "A2: $A2_CHECKPOINT_OVERRIDE" >&2
+for override_name in A1_CHECKPOINT_OVERRIDE A2_CHECKPOINT_OVERRIDE; do
+    override_value="${!override_name}"
+    if [ -n "$override_value" ] && [ ! -d "$override_value" ]; then
+        echo "$override_name does not exist: $override_value" >&2
         exit 1
     fi
-fi
+done
 
 for executable in "$TRAIN_PY" "$EVAL_PY"; do
     if [ ! -x "$executable" ]; then
@@ -286,6 +283,9 @@ echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GAT
 echo "  calibration      : $CALIBRATION_PATH"
 echo "  optimizer        : $TRAIN_OPTIM"
 echo "  training loss    : $TRAIN_LOSS_CONFIG (preserve-KL=$PRESERVE_KL_WEIGHT, evidence-weight=$EVIDENCE_WEIGHT)"
+if [ "$TRAIN_LOSS_CONFIG" = "factorial_contrastive_a1" ]; then
+    echo "  causal contrast  : weight=$CONTRAST_WEIGHT margin=$CONTRAST_MARGIN placebo-KL=$PLACEBO_KL_WEIGHT"
+fi
 echo "  eval overwrite   : $EVAL_OVERWRITE"
 echo "  selection access : $SELECTION_RETAIN_ACCESS"
 echo "  Hugging Face     : $HF_ENDPOINT"
@@ -343,7 +343,7 @@ train_role() {
     local role_seed="${!seed_var}"
     local role_data_mode="${!data_mode_var}"
     local signature
-    signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|loss=$TRAIN_LOSS_CONFIG|preserve_kl=$PRESERVE_KL_WEIGHT|evidence_weight=$EVIDENCE_WEIGHT|seed=$role_seed"
+    signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|loss=$TRAIN_LOSS_CONFIG|preserve_kl=$PRESERVE_KL_WEIGHT|evidence_weight=$EVIDENCE_WEIGHT|contrast_weight=$CONTRAST_WEIGHT|contrast_margin=$CONTRAST_MARGIN|placebo_kl=$PLACEBO_KL_WEIGHT|seed=$role_seed"
     if [ "$role_data_mode" != "f2r_${role}" ]; then
         signature="${signature}|data_mode=$role_data_mode"
     fi
@@ -379,6 +379,21 @@ train_role() {
             "unlearn_loss.evidence_weight=$EVIDENCE_WEIGHT"
         )
     fi
+    if [ "$TRAIN_LOSS_CONFIG" = "factorial_contrastive_a1" ]; then
+        if [ "$role" != "a1" ] || [ "$role_data_mode" != "f2d_contrast_a1" ]; then
+            echo "factorial_contrastive_a1 is valid only for A1/f2d_contrast_a1" >&2
+            exit 1
+        fi
+        if [ $((role_train_bs % 5)) -ne 0 ]; then
+            echo "factorial_contrastive_a1 requires A1_TRAIN_BS divisible by 5" >&2
+            exit 1
+        fi
+        loss_args+=(
+            "unlearn_loss.contrast_weight=$CONTRAST_WEIGHT"
+            "unlearn_loss.contrast_margin=$CONTRAST_MARGIN"
+            "unlearn_loss.placebo_kl_weight=$PLACEBO_KL_WEIGHT"
+        )
+    fi
     CUDA_VISIBLE_DEVICES="$GPU" "$TRAIN_PY" "$EASE_ROOT/ULD/scripts/hf_forget_train.py" \
         project="f2r_${role}_${SPLIT}" \
         data=tofu_chat3 \
@@ -412,10 +427,13 @@ train_role() {
 
 if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
     echo "[2/4] Skipping A1 training (explicit frozen checkpoint)"
-    echo "[3/4] Skipping A2 training (explicit frozen checkpoint)"
 else
     echo "[2/4] Training A1"
     (cd "$EASE_ROOT/ULD" && train_role a1)
+fi
+if [ -n "$A2_CHECKPOINT_OVERRIDE" ]; then
+    echo "[3/4] Skipping A2 training (explicit frozen checkpoint)"
+else
     echo "[3/4] Training A2"
     (cd "$EASE_ROOT/ULD" && train_role a2)
 fi
@@ -425,13 +443,8 @@ latest_checkpoint() {
         | awk -F'checkpoint-' '{print $NF, $0}' \
         | sort -n | tail -1 | cut -d' ' -f2-
 }
-if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
-    A1_CKPT="$A1_CHECKPOINT_OVERRIDE"
-    A2_CKPT="$A2_CHECKPOINT_OVERRIDE"
-else
-    A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
-    A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
-fi
+A1_CKPT="${A1_CHECKPOINT_OVERRIDE:-$(latest_checkpoint "${MODELS_ROOT}/a1")}"
+A2_CKPT="${A2_CHECKPOINT_OVERRIDE:-$(latest_checkpoint "${MODELS_ROOT}/a2")}"
 if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     echo "Could not resolve both assistant checkpoints." >&2
     exit 1
@@ -453,7 +466,7 @@ if [ ! -d "$A1_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
     echo "A2: $A2_CKPT" >&2
     exit 1
 fi
-if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
+if [ -n "$A1_CHECKPOINT_OVERRIDE" ] || [ -n "$A2_CHECKPOINT_OVERRIDE" ]; then
     echo "      Using explicit A1 checkpoint: $A1_CKPT"
     echo "      Using explicit A2 checkpoint: $A2_CKPT"
 fi
@@ -592,6 +605,9 @@ fi
     --training-loss "$TRAIN_LOSS_CONFIG" \
     --preserve-kl-weight "$PRESERVE_KL_WEIGHT" \
     --evidence-weight "$EVIDENCE_WEIGHT" \
+    --contrast-weight "$CONTRAST_WEIGHT" \
+    --contrast-margin "$CONTRAST_MARGIN" \
+    --placebo-kl-weight "$PLACEBO_KL_WEIGHT" \
     --selection-retain-access "$SELECTION_RETAIN_ACCESS" \
     "${summary_args[@]}"
 echo "Done. Full report: $EVAL_DIR/F2R_REPORT.md"

@@ -77,6 +77,7 @@ class ToFU_DataModule(TrainDataModule):
         base_retain_data = datasets.Dataset.from_dict({'question': [], 'answer': []})
         self.forget_length = len(base_forget_data)
         self.retain_length = 0
+        self.factorial_units = None
         if with_retain:
             if strict_retain_free:
                 raise ValueError("strict_retain_free=True is incompatible with with_retain=True")
@@ -145,6 +146,51 @@ class ToFU_DataModule(TrainDataModule):
                 f"CE={ce_cell}({self.forget_length}), "
                 f"uniform={uniform_cell}({self.retain_length}) from "
                 f"{counterfactual_path}"
+            )
+
+        # A1-only causal contrast: preserve exact source pairing and expose
+        # placebo cells to the loss without treating them as new facts.
+        elif data_role == 'f2d_contrast_a1':
+            if counterfactual_path is None:
+                raise ValueError("f2d_contrast_a1 requires counterfactual_path")
+            if with_retain:
+                raise ValueError("f2d_contrast_a1 must run with with_retain=False")
+
+            units = load_ciru_units(counterfactual_path)
+            rows = []
+            cell_specs = (
+                ("C11", 0, 0),
+                ("C01", 1, 1),
+                ("X01_SOURCE", 2, 1),
+                ("C10", 3, 1),
+                ("C00", 4, 1),
+            )
+            for cell_name, cell_id, retainlabel in cell_specs:
+                for pair_id, unit in enumerate(units):
+                    if cell_name == "X01_SOURCE":
+                        row = {
+                            "question": unit["cells"]["C01"]["question"],
+                            "answer": unit["cells"]["C11"]["answer"],
+                        }
+                    else:
+                        row = dict(unit["cells"][cell_name])
+                    row.update(
+                        _f2d_pair_id=pair_id,
+                        _f2d_cell_id=cell_id,
+                        _retainlabel=retainlabel,
+                    )
+                    rows.append(row)
+            base_forget_data = datasets.Dataset.from_list(rows)
+            base_retain_data = datasets.Dataset.from_dict(
+                {'question': [], 'answer': []}
+            )
+            self.factorial_units = len(units)
+            self.forget_length = len(rows)
+            self.retain_length = 0
+            print(
+                "Loaded paired F2D A1 contrast: "
+                f"units={len(units)}, rows={len(rows)}, "
+                "cells=C11/C01/X01_SOURCE/C10/C00"
             )
 
         # -------- F2R: derive both roles from forget-conditioned data only --------
@@ -224,9 +270,10 @@ class ToFU_DataModule(TrainDataModule):
             else:
                 raise ValueError(f"Unknown data_role: {data_role}")
 
-        base_forget_data = datasets.concatenate_datasets([
-            base_forget_data, base_retain_data
-        ])
+        if len(base_retain_data) > 0:
+            base_forget_data = datasets.concatenate_datasets([
+                base_forget_data, base_retain_data
+            ])
         self.forget_data = base_forget_data
         self.eval_sets = {
             'forget': self.forget_eval,

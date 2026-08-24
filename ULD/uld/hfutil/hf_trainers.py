@@ -14,15 +14,16 @@ import numpy as np
 import inspect
 
 from transformers.training_args import TrainingArguments
-from ..data.datamodule import EqualForgetRetainSampler
+from ..data.datamodule import EqualForgetRetainSampler, FactorialFiveSampler
 
 
 class ForgetTrainer(Trainer):
     
-    def __init__(self, model, train_loss_function: Callable, is_deepspeed=False, oracle_model=None, equal_sampler=False, seed=42, is_offset=False, **kwargs):
+    def __init__(self, model, train_loss_function: Callable, is_deepspeed=False, oracle_model=None, equal_sampler=False, factorial_five_sampler=False, seed=42, is_offset=False, **kwargs):
         super(ForgetTrainer, self).__init__(model=model, **kwargs)
         self.train_loss_function = train_loss_function
         self.equal_sampler = equal_sampler
+        self.factorial_five_sampler = factorial_five_sampler
         self.oracle_model = oracle_model
         self.seed = seed
         if oracle_model is not None and is_deepspeed:
@@ -32,11 +33,20 @@ class ForgetTrainer(Trainer):
             if self.oracle_model is not None:
                 self.oracle_model.requires_grad_(False)
                 self._move_model_to_device(self.oracle_model, self.args.device)
+                self.oracle_model.eval()
                 
     def _get_train_sampler(self, generator=None) -> Optional[torch.utils.data.Sampler]:
         if self.train_dataset is None or not has_length(self.train_dataset):
             return None
 
+        if self.factorial_five_sampler:
+            units = getattr(self.train_dataset, 'factorial_units', None)
+            if units is None:
+                raise ValueError(
+                    "Factorial-five loss requires dataset.factorial_units"
+                )
+            print("Using FactorialFiveSampler")
+            return FactorialFiveSampler(units, generator=generator)
         if self.equal_sampler:
             print("Using EqualForgetRetainSampler")
             return EqualForgetRetainSampler(self.train_dataset.forget_length, self.train_dataset.retain_length, generator=generator)

@@ -1558,3 +1558,50 @@ hybrid ceiling/ablation，不能替代纯 V5.12 causal 主结果；其选择同�
 `w2={1.6,1.7,1.8}`、`filter={0.0003,0.0004}`，共 18 点，入口为
 `scripts/sweep_f2d_v512_stronga1_fulla2_boundary18.sh`。若该扩展仍未超过 FullAnswer，则停止
 hybrid 全局权重搜索；无论结果如何，它仍属于 hybrid ceiling/ablation，而不是纯 causal 主结果。
+
+该 boundary extension 最终在内部点 `(-2.0,1.7,0.0004)` 达到
+`Agg=0.551721`、`Mem=0.537723`、`Util=0.566467`、`MU=0.464177`，距
+FullAnswer 仅 `0.001991`，但仍未超过它。更强的 A1 权重 `-2.1` 已同时降低 aggregate 和
+utility，因此按预注册停止规则终止 hybrid 全局权重扩展。该结果说明 frozen composition 已接近
+局部饱和，剩余问题不宜再用更密的三维权重网格解释。
+
+## 39. 成对 A1 因果对比目标
+
+标准 A1 的 `CE(C11)+Uniform(C01)` 分别处理两条文本，却没有直接约束同一个 source fact 在
+source question 与 replacement question 下的相对可辨识性。为检验这一 representation
+瓶颈，下一项实验保留 V5.12 的 200 个 causal units，并为每个 source 构造严格同批的五元组：
+
+1. `C11=(q_{11},y_{11})`，source factual positive；
+2. `C01=(q_{01},y_{01})`，replacement factual control；
+3. `X01_SOURCE=(q_{01},y_{11})`，只用于对比的 cross-question negative；
+4. `C10` 与 `C00`，用于约束 A1 在 placebo relation 上贴近冻结 base。
+
+其中 cross negative 不写回数据 artifact，也不改变任何 frozen cell。令
+`nll(y|q)` 为 answer-token 平均负对数似然，成对 margin 为：
+
+\[
+\mathcal L_{pair}=\operatorname{softplus}\left(
+m+\operatorname{nll}(y_{11}|q_{11})
+-\operatorname{nll}(y_{11}|q_{01})\right).
+\]
+
+该项要求同一 source answer 在 `q11` 下比在 replacement `q01` 下至少容易 `m` nats/token。
+placebo preservation 则在 `C10/C00` answer tokens 上计算冻结 base 到 A1 的 forward KL：
+
+\[
+\mathcal L_{A1}=\operatorname{CE}(C_{11})
++1.5\,\operatorname{KL}(U\Vert p_{A1}(C_{01}))
++\lambda_c\mathcal L_{pair}
++\lambda_p\operatorname{KL}(p_R\Vert p_{A1};C_{10},C_{00}).
+\]
+
+实现使用 source-grouped five-row sampler，并在 loss 内再次验证每个 mini-batch 对每个 source
+恰好包含 cell `0..4` 各一次；oracle/base 冻结且处于 evaluation mode。这样 margin、uniform
+和 placebo KL 都在 answer tokens 上计算，prompt 与 padding token 不进入目标。
+
+首轮只运行预注册的 2×2：`lambda_c={0.1,0.3}`、`lambda_p={0.01,0.03}`，固定
+`m=0.5`、A1 96 steps、uniform 1.5、LR `5e-4`、LoRA 2 layers/rank 16。A2 使用冻结
+FullAnswer checkpoint-72，推理固定在 boundary winner `(-2.0,1.7,0.0004)`，采用
+reference-delta 且关闭 alignment/gate。入口为 `scripts/sweep_f2d_v512_a1contrast4.sh`，四个
+configuration 可在四张 GPU 上并行。该实验仍是 causal-A1/FullAnswer-A2 hybrid ablation；
+若四项均未超过 `0.551721`，则停止这一 loss 形式，不后验扩大 margin/regularizer 网格。

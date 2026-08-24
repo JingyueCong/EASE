@@ -171,8 +171,18 @@ def main(configs):
     else:
         oracle_model = None
 
-    requires_equal_sampler = (loss_function.retain_loss_func is not None) 
+    requires_factorial_five = bool(
+        getattr(loss_function, 'factorial_five_sampler', False)
+    )
+    requires_equal_sampler = (
+        loss_function.retain_loss_func is not None
+        and not requires_factorial_five
+    )
     LOGGER.info("Training with equal sampler: ", requires_equal_sampler=requires_equal_sampler)
+    LOGGER.info(
+        "Training with factorial-five sampler: ",
+        requires_factorial_five=requires_factorial_five,
+    )
 
     custom_callbacks = [simpleprofilercallback]
     trainer = ForgetTrainer(
@@ -180,6 +190,7 @@ def main(configs):
         train_loss_function=loss_function,
         oracle_model=oracle_model,
         equal_sampler=requires_equal_sampler,
+        factorial_five_sampler=requires_factorial_five,
         is_deepspeed=is_deepspeed,
         train_dataset=train_set,
         eval_dataset=val_set,

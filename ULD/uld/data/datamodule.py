@@ -44,9 +44,38 @@ class EqualForgetRetainSampler(Sampler):
         return self.forget_length + self.retain_length
 
 
+class FactorialFiveSampler(Sampler):
+    """Keep each source's five causal-contrast rows in one mini-batch.
+
+    The backing dataset is stored in five contiguous cell blocks.  A single
+    shuffled source order is therefore sufficient to yield C11, C01, the
+    cross-question negative, C10, and C00 together without mixing sources.
+    """
+
+    def __init__(self, num_units, generator=None):
+        self.num_units = int(num_units)
+        self.generator = generator
+        if self.num_units <= 0:
+            raise ValueError("FactorialFiveSampler requires at least one unit")
+
+    def __iter__(self):
+        indices = []
+        for source_index in torch.randperm(
+            self.num_units, generator=self.generator
+        ).tolist():
+            indices.extend(
+                source_index + cell_index * self.num_units
+                for cell_index in range(5)
+            )
+        return iter(indices)
+
+    def __len__(self):
+        return 5 * self.num_units
+
+
 class TorchDataset(torch.utils.data.Dataset):
     # conv_template can prepare_gen_prompt or prepare_prompt
-    def __init__(self, data, tokenizer, conv_template, max_length=500, forget_length=None, retain_length=None, dpo_mode=False):
+    def __init__(self, data, tokenizer, conv_template, max_length=500, forget_length=None, retain_length=None, factorial_units=None, dpo_mode=False):
         super(TorchDataset, self).__init__()
         self.data = data
         self.tokenizer = tokenizer
@@ -54,6 +83,7 @@ class TorchDataset(torch.utils.data.Dataset):
         self.conv_template = conv_template
         self.forget_length = forget_length
         self.retain_length = retain_length
+        self.factorial_units = factorial_units
         self.max_length = max_length
 
         self.dpo_mode = dpo_mode
@@ -146,7 +176,9 @@ class TorchDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item = self.data[idx] # {question: , answer: }
         real_items = [item]
-        if self.forget_length is not None:
+        if '_retainlabel' in item:
+            retainlabel = int(item['_retainlabel'])
+        elif self.forget_length is not None:
             retainlabel = 0 if idx < self.forget_length else 1
         else:
             retainlabel = 0
@@ -174,6 +206,10 @@ class TorchDataset(torch.utils.data.Dataset):
             result[f"{name}evidence_mask"] = evidence_mask
         
         result['retainlabels'] = retainlabel
+        if '_f2d_pair_id' in item:
+            result['pair_ids'] = int(item['_f2d_pair_id'])
+        if '_f2d_cell_id' in item:
+            result['cell_ids'] = int(item['_f2d_cell_id'])
         return result
 
 
@@ -181,13 +217,14 @@ class TrainDataModule(LightningDataModule):
     def __init__(self, split=None, tokenizer=None, conv_template=None, max_len=1000, batch_size=4, with_retain=False, expand_forget=False, with_perturb=False, with_dpo=False, **kwargs) -> None:
         super().__init__()
         
-    def to_torch_dataset(self, data, forget_length=None, retain_length=None, dpo_mode=False):
+    def to_torch_dataset(self, data, forget_length=None, retain_length=None, factorial_units=None, dpo_mode=False):
         torchdataset = TorchDataset(
             data, self.tokenizer, 
             conv_template=self.conv_template, 
             max_length=self.max_len, 
             forget_length=forget_length, 
             retain_length=retain_length,
+            factorial_units=factorial_units,
             dpo_mode=dpo_mode,
         )
         return torchdataset
@@ -206,6 +243,7 @@ class TrainDataModule(LightningDataModule):
             self.forget_data, 
             forget_length=self.forget_length, 
             retain_length=self.retain_length, 
+            factorial_units=getattr(self, 'factorial_units', None),
             dpo_mode=self.dpo_mode
         )
 

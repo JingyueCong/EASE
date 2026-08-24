@@ -1,0 +1,5 @@
+loss_type: factorial_contrastive_a1
+retain_weight: 1.5
+contrast_weight: 0.1
+contrast_margin: 0.5
+placebo_kl_weight: 0.01

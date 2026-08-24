@@ -423,6 +423,9 @@ def main() -> None:
     parser.add_argument("--training-loss", default="remember+uniform")
     parser.add_argument("--preserve-kl-weight", type=float, default=0.0)
     parser.add_argument("--evidence-weight", type=float, default=0.0)
+    parser.add_argument("--contrast-weight", type=float, default=0.0)
+    parser.add_argument("--contrast-margin", type=float, default=0.0)
+    parser.add_argument("--placebo-kl-weight", type=float, default=0.0)
     parser.add_argument("--method-artifact")
     parser.add_argument("--causal-units", type=int)
     parser.add_argument("--causal-layers")
@@ -480,6 +483,9 @@ def main() -> None:
         "training_loss": args.training_loss,
         "preserve_kl_weight": args.preserve_kl_weight,
         "evidence_weight": args.evidence_weight,
+        "contrast_weight": args.contrast_weight,
+        "contrast_margin": args.contrast_margin,
+        "placebo_kl_weight": args.placebo_kl_weight,
         "method_artifact": args.method_artifact,
         "causal_units": args.causal_units,
         "causal_layers": args.causal_layers,
