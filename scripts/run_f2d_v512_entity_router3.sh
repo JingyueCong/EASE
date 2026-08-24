@@ -16,6 +16,7 @@ LAUNCH_V512_ROOT="${F2D_V512_STRONG_A1_ROOT:-}"
 LAUNCH_FULL_MANIFEST="${FULLANSWER_MANIFEST:-}"
 LAUNCH_RESULTS="${RESULTS_DIR:-}"
 LAUNCH_ROUTER="${SEQUENCE_ROUTER_PATH:-}"
+LAUNCH_PHASE="${ENTITY_ROUTER_PHASE:-pilot}"
 
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
@@ -53,7 +54,6 @@ AUDIT="$(absolute_from_root "${LAUNCH_AUDIT:-audits/forget05_author_pairbudget20
 AUTHOR_MANIFEST="$(absolute_from_root "${FORGET_AUTHOR_MANIFEST:-ULD/configs/data/tofu_forget05_author_blocks.json}")"
 V512_ROOT="$(absolute_from_root "${LAUNCH_V512_ROOT:-ULD/outputs_trained_models/f2d_did_1b_forget05_f2d_v512_a1strength4_train_seed42/v512_a1s96_u1p5}")"
 FULL_MANIFEST="$(absolute_from_root "${LAUNCH_FULL_MANIFEST:-open-unlearning/saves/sweeps/forget05_f2d_did200_asym_steps_seed42/manifest.csv}")"
-RESULTS_DIR="$(absolute_from_root "${LAUNCH_RESULTS:-open-unlearning/saves/sweeps/forget05_f2d_v512_entity_router3}")"
 ROUTER_PATH="$(absolute_from_root "${LAUNCH_ROUTER:-ULD/outputs_trained_models/f2r_calibration/forget05_v512_entity_router3.json}")"
 ROUTER_TOKENIZER="${ROUTER_TOKENIZER:-open-unlearning/tofu_Llama-3.2-1B-Instruct_full}"
 
@@ -61,13 +61,33 @@ V512_A1_STEP="${F2D_V512_STRONG_A1_STEP:-96}"
 FULL_TAG="${FULLANSWER_TAG:-a72_a72}"
 FULL_STEP="${FULLANSWER_STEP:-72}"
 
-# Fixed after observing the ungated frontier, before observing router results.
-# All three use the identical hard entity router (match=1, non-match=0).
-POINTS=(
-    "entity_memory:-2.1:1.6:0.0004"
-    "entity_boundary:-2.0:1.7:0.0004"
-    "entity_utility:-1.9:1.6:0.0004"
-)
+# ``refine`` is the one refinement permitted by the pilot decision. It is a
+# one-dimensional interpolation, not another two-dimensional parameter grid.
+case "$LAUNCH_PHASE" in
+    pilot)
+        DEFAULT_RESULTS="open-unlearning/saves/sweeps/forget05_f2d_v512_entity_router3"
+        TASK_NAMESPACE="V512_ENTITY_ROUTER3"
+        POINTS=(
+            "entity_memory:-2.1:1.6:0.0004"
+            "entity_boundary:-2.0:1.7:0.0004"
+            "entity_utility:-1.9:1.6:0.0004"
+        )
+        ;;
+    refine)
+        DEFAULT_RESULTS="open-unlearning/saves/sweeps/forget05_f2d_v512_entity_router_refine3"
+        TASK_NAMESPACE="V512_ENTITY_ROUTER_REFINE3"
+        POINTS=(
+            "entity_mid35:-2.035:1.665:0.0004"
+            "entity_mid50:-2.050:1.650:0.0004"
+            "entity_mid65:-2.065:1.635:0.0004"
+        )
+        ;;
+    *)
+        echo "ENTITY_ROUTER_PHASE must be pilot or refine (got: $LAUNCH_PHASE)" >&2
+        exit 1
+        ;;
+esac
+RESULTS_DIR="$(absolute_from_root "${LAUNCH_RESULTS:-$DEFAULT_RESULTS}")"
 
 for required in "$DATA" "$AUDIT" "$AUTHOR_MANIFEST" "$FULL_MANIFEST"; do
     if [ ! -s "$required" ]; then
@@ -174,6 +194,7 @@ echo "tag,weight_a1,weight_a2,top_filter,task_name,report,composition_mode,refer
 cat <<EOF
 ============================================================
 V5.12 request-scoped forget-entity router
+  phase            : $LAUNCH_PHASE
   causal A1        : $V512_A1
   frozen A2        : $FULL_A2
   composition      : reference_delta
@@ -202,7 +223,7 @@ fi
 
 run_eval() {
     local gpu="$1" tag="$2" w1="$3" w2="$4" filter="$5"
-    local task="tofu_Llama-3.2-1B-Instruct_forget05_F2R_V512_ENTITY_ROUTER3_${tag}"
+    local task="tofu_Llama-3.2-1B-Instruct_forget05_F2R_${TASK_NAMESPACE}_${tag}"
     local report="$EASE_ROOT/open-unlearning/saves/eval/${task}/F2R_REPORT.json"
     if [ "$LAUNCH_RESUME" = "true" ] && report_complete "$report"; then
         echo "entity_router_reuse tag=$tag"
@@ -232,7 +253,7 @@ pids=()
 index=0
 for point in "${POINTS[@]}"; do
     IFS=: read -r tag w1 w2 filter <<< "$point"
-    task="tofu_Llama-3.2-1B-Instruct_forget05_F2R_V512_ENTITY_ROUTER3_${tag}"
+    task="tofu_Llama-3.2-1B-Instruct_forget05_F2R_${TASK_NAMESPACE}_${tag}"
     report="$EASE_ROOT/open-unlearning/saves/eval/${task}/F2R_REPORT.json"
     echo "$tag,$w1,$w2,$filter,$task,$report,reference_delta,$V512_REFERENCE,forget_entity_subsequence_v1,$ROUTER_PATH,1.0,0.0,forget_request_entities_only" >> "$MANIFEST"
     run_eval "${GPU_LIST[$index]}" "$tag" "$w1" "$w2" "$filter" &
@@ -250,12 +271,13 @@ echo "[2/2] Summarize and apply preregistered decision rules"
     --target-agg 0.58 --target-margin 0.0 --sweep-kind method-ladder \
     || failures=$((failures + 1))
 
-"$EVAL_PY" - "$EASE_ROOT" "$MANIFEST" "$RESULTS_DIR/ENTITY_ROUTER_DECISION.json" <<'PY'
+"$EVAL_PY" - "$EASE_ROOT" "$MANIFEST" "$RESULTS_DIR/ENTITY_ROUTER_DECISION.json" "$LAUNCH_PHASE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-root, manifest, output = map(Path, sys.argv[1:])
+root, manifest, output = map(Path, sys.argv[1:4])
+phase = sys.argv[4]
 sys.path.insert(0, str(root / "scripts"))
 from summarize_f2r_sweep import load_rows
 
@@ -275,13 +297,14 @@ advance = [
 ]
 if target:
     verdict = "target_0p58_reached"
-elif advance:
+elif advance and phase == "pilot":
     verdict = "advance_request_scoped_router_once"
 else:
     verdict = "stop_request_scoped_router"
 decision = {
     "completed_reports": len(rows),
     "expected_reports": 3,
+    "phase": phase,
     "routing_scope": "forget_request_entities_only",
     "answer_leakage_blocked": True,
     "retain_examples_used_to_build_router": False,

@@ -1665,3 +1665,16 @@ model。该设计把“是否属于删除请求”与“命中后如何遗忘”
 `Agg>0.551721, Mem>=0.53, Util>=0.60`，只允许一次预注册 router refinement；否则停止该
 request-scoped router。结果写入 `ENTITY_ROUTER_DECISION.json`。由于方法显式使用删除实体，论文中
 必须报告为 request-scoped unlearning，而不能与完全 task-agnostic 的静态 composition 混称。
+
+首轮 router 结果证明 request-level 条件化有效。`entity_boundary=(-2.0,1.7,0.0004)` 得到
+`Agg=0.586061, Mem=0.526035, Util=0.661550`，首次超过总体 `0.58`；相对 static
+boundary，Agg 提高 `0.034340`。`entity_memory=(-2.1,1.6,0.0004)` 得到
+`0.578479/0.552072/0.607539`。三个点的 broad model utility 均严格相同为 `0.599694`，
+说明 non-match 请求稳定退回 base；两点间的 Util 差别来自 forget fluency，而不是 retain 再受损。
+
+由于首轮触发预注册的 `advance_request_scoped_router_once`，唯一允许的 refinement 是在
+`entity_boundary` 与 `entity_memory` 连线上做三点一维插值，固定 filter `0.0004`：
+`(-2.035,1.665)`、`(-2.050,1.650)`、`(-2.065,1.635)`。通过设置
+`ENTITY_ROUTER_PHASE=refine` 调用同一入口；输出隔离到
+`forget05_f2d_v512_entity_router_refine3`。该阶段后无论结果如何都不再扩大 router weight grid；
+完全成功仍要求 `Agg>=0.58, Mem>=0.54, Util>=0.63`。
