@@ -1521,3 +1521,18 @@ baseline，则把主要瓶颈判定为 assistant representation 而非 global co
 `scripts/run_f2d_fullanswer_refdelta_calibration_pilot.sh` 只保留为 ceiling diagnostic，用于判断
 同样的校准机制在宽差分 FullAnswer 上是否有效。它不能替代纯 V5.12 主实验，也不能作为
 causal-pair 改进的主结果。
+
+纯 V5.12 alignment pilot 的实际结果为：baseline `Agg=0.527140`、scalar RMS
+`0.525557`、vocabulary-diagonal alignment `0.512547`。A1/A2 control RMS 分别为
+`2.6405/2.7146`，对应 scalar scale `0.9727`，说明整体幅度原本已接近平衡；词表对齐的
+observed-vocabulary mean scale 为 `0.7293`，并同时降低 Mem 与 Util。因此停止 alignment
+ridge/scale 搜索，也暂不运行只能把残差乘以 `[0,1]` 的 sigmoid gate。当前瓶颈被判定为
+assistant representation strength，而不是冻结 composition 的 residual scale。
+
+下一项纯 V5.12 representation experiment 使用固定数据、seed、LR、LoRA 与 A2，采用
+`A1 steps={96,108} × A1 C01-uniform weight={1.25,1.5}` 的 2×2 设计；A2 固定为
+`60 steps / uniform weight=1.0`。每个训练 cell 统一评估三个预注册点：
+`(-1.2,1.2,0.0003)`、`(-1.3,1.2,0.0003)` 与 `(-1.3,1.3,0.0003)`，全部使用
+reference-delta，禁用 alignment/gate。入口为 `scripts/sweep_f2d_v512_a1strength4.sh`，总预算
+为 4 个训练 pair 和 12 个完整报告。只有该设计显示 A1 steps 或 uniform factor 的一致正效应，
+才允许围绕胜出 cell 做下一轮局部推理搜索。
