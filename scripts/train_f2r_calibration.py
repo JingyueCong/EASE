@@ -202,6 +202,30 @@ def assistant_logits(
     return base_logits, a1_component, a2_component
 
 
+def rms_alignment_scale(
+    a1_energy: float,
+    a2_energy: float,
+    *,
+    target_multiplier: float,
+    ridge: float,
+    scale_min: float,
+    scale_max: float,
+) -> float:
+    """Return one positive A2 scale matching weighted A1/A2 residual RMS."""
+    if target_multiplier <= 0:
+        raise ValueError(
+            "RMS alignment requires opposite-sign A1/A2 weights so the target "
+            "multiplier is positive"
+        )
+    if a1_energy < 0 or a2_energy < 0 or ridge < 0:
+        raise ValueError("RMS alignment energies and ridge must be non-negative")
+    denominator = a2_energy + ridge
+    if denominator <= 0:
+        raise ValueError("RMS alignment observed zero A2 energy")
+    value = target_multiplier * float(np.sqrt((a1_energy + ridge) / denominator))
+    return float(np.clip(value, scale_min, scale_max))
+
+
 def fit_alignment(
     base,
     a1,
@@ -221,13 +245,19 @@ def fit_alignment(
     scale_min: float,
     scale_max: float,
     composition_mode: str,
+    alignment_kind: str,
 ) -> Tuple[np.ndarray, Dict[str, float]]:
     if weight_a2 == 0:
         raise ValueError("Alignment requires a non-zero weight_a2")
     vocab_size = base.config.vocab_size
+    if alignment_kind not in ("rms_scalar", "vocab_diagonal"):
+        raise ValueError(f"Unsupported alignment kind: {alignment_kind}")
     numerator = torch.zeros(vocab_size, dtype=torch.float64)
     denominator = torch.zeros(vocab_size, dtype=torch.float64)
     observations = torch.zeros(vocab_size, dtype=torch.int64)
+    a1_energy = 0.0
+    a2_energy = 0.0
+    active_values = 0
     target_multiplier = -float(weight_a1) / float(weight_a2)
 
     for batch_index, (ids, attention, answer_mask, _, _) in enumerate(
@@ -252,17 +282,47 @@ def fit_alignment(
         x = a2_centered[selected].float()
         y = target_multiplier * a1_centered[selected].float()
         valid = active[selected]
-        numerator += (x * y).masked_fill(~valid, 0).sum(dim=0).double().cpu()
-        denominator += x.square().masked_fill(~valid, 0).sum(dim=0).double().cpu()
-        observations += valid.sum(dim=0).cpu()
+        if alignment_kind == "rms_scalar":
+            a1_energy += float(
+                a1_centered[selected].float().square().masked_fill(~valid, 0).sum()
+            )
+            a2_energy += float(x.square().masked_fill(~valid, 0).sum())
+            active_values += int(valid.sum())
+        else:
+            numerator += (x * y).masked_fill(~valid, 0).sum(dim=0).double().cpu()
+            denominator += x.square().masked_fill(~valid, 0).sum(dim=0).double().cpu()
+            observations += valid.sum(dim=0).cpu()
         if batch_index % 25 == 0:
             print(f"alignment batches={batch_index}", flush=True)
+
+    if alignment_kind == "rms_scalar":
+        scalar = rms_alignment_scale(
+            a1_energy,
+            a2_energy,
+            target_multiplier=target_multiplier,
+            ridge=ridge,
+            scale_min=scale_min,
+            scale_max=scale_max,
+        )
+        scale = np.full(vocab_size, scalar, dtype=np.float32)
+        diagnostics = {
+            "alignment_kind": alignment_kind,
+            "active_logit_values": active_values,
+            "a1_rms": float(np.sqrt(a1_energy / max(active_values, 1))),
+            "a2_rms": float(np.sqrt(a2_energy / max(active_values, 1))),
+            "target_multiplier": target_multiplier,
+            "scalar_scale": scalar,
+            "scale_min": scalar,
+            "scale_max": scalar,
+        }
+        return scale, diagnostics
 
     scale = (numerator + ridge) / (denominator + ridge)
     scale[observations < min_observations] = 1.0
     scale = scale.clamp(scale_min, scale_max).float().numpy()
     changed = observations.numpy() >= min_observations
     diagnostics = {
+        "alignment_kind": alignment_kind,
         "observed_vocabulary": int(changed.sum()),
         "scale_mean_observed": float(scale[changed].mean()) if changed.any() else 1.0,
         "scale_min": float(scale.min()),
@@ -432,6 +492,11 @@ def parse_args():
     parser.add_argument("--limit-records", type=int, default=0)
     parser.add_argument("--max-tokens-per-class", type=int, default=30000)
     parser.add_argument("--alignment-ridge", type=float, default=10.0)
+    parser.add_argument(
+        "--alignment-kind",
+        choices=("rms_scalar", "vocab_diagonal"),
+        default="vocab_diagonal",
+    )
     parser.add_argument("--alignment-min-observations", type=int, default=8)
     parser.add_argument("--alignment-scale-min", type=float, default=0.25)
     parser.add_argument("--alignment-scale-max", type=float, default=4.0)
@@ -511,6 +576,7 @@ def main():
             scale_min=args.alignment_scale_min,
             scale_max=args.alignment_scale_max,
             composition_mode=args.composition_mode,
+            alignment_kind=args.alignment_kind,
         )
     elif args.mode == "alignment-gate":
         if not args.alignment_input:
@@ -583,6 +649,7 @@ def main():
         "weight_a1": args.weight_a1,
         "weight_a2": args.weight_a2,
         "top_filter": args.top_filter,
+        "alignment_kind": args.alignment_kind,
         "records": len(records),
         "feature_names": FEATURE_NAMES,
         "alignment": alignment_diagnostics,

@@ -83,6 +83,28 @@ class TrainF2RCalibrationExamplesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing alignment cells"):
             trainer.make_alignment_examples([self.factorial])
 
+    def test_scalar_rms_alignment_matches_weighted_energy(self):
+        scale = trainer.rms_alignment_scale(
+            4.0,
+            1.0,
+            target_multiplier=1.0,
+            ridge=0.0,
+            scale_min=0.25,
+            scale_max=4.0,
+        )
+        self.assertEqual(scale, 2.0)
+
+    def test_scalar_rms_alignment_requires_opposite_sign_weights(self):
+        with self.assertRaisesRegex(ValueError, "opposite-sign"):
+            trainer.rms_alignment_scale(
+                1.0,
+                1.0,
+                target_multiplier=-1.0,
+                ridge=0.0,
+                scale_min=0.25,
+                scale_max=4.0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

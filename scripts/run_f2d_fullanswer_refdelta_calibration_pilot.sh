@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Ceiling diagnostic only; not the causal-preserving V5.12 main experiment.
 # Inference-only FullAnswer reference-delta calibration pilot:
 # baseline vs vocabulary alignment vs token gate vs alignment+gate.
 set -euo pipefail
@@ -132,7 +133,8 @@ MANIFEST="$RESULTS_DIR/manifest.csv"
 
 cat <<EOF
 ============================================================
-FullAnswer reference-delta alignment/gate pilot
+FullAnswer reference-delta alignment/gate ceiling diagnostic
+  causal status   : ablation only; not the V5.12 main method
   data            : $DATA
   A1 / A2         : checkpoint-$FULL_STEP / checkpoint-$FULL_STEP
   composition     : reference_delta

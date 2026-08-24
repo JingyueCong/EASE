@@ -1503,17 +1503,21 @@ z=z_{base}+w_1(z_{A1}-z_R)+w_2(z_{A2}-z_R),
 `(w_1+w_2)z_R`。当 `w_1=-w_2` 时，该式与原始 raw composition 完全等价，因此
 FullAnswer 固定点 `(-1.8,1.8,0.0004)` 可作为无混杂 baseline。
 
-预注册的 calibration pilot 固定 FullAnswer `a72_a72` checkpoint、数据、seed、filter 与
-全局权重，只比较四个 inference-only 方法：
+主 calibration pilot 必须保留纯 V5.12 supervision：固定 V5.12 `a84/a60` checkpoints、
+V5.12 200-row pair-budget 数据、seed 和当前最好固定点 `(-1.2,1.2,0.0003)`，只比较三个
+inference-only 方法：
 
-1. `baseline`：不做校准；
-2. `alignment`：在 C01/C10/C00 控制答案上拟合 vocabulary-diagonal A2 scale；
-3. `gate`：用 C11 answer token 为正类、C01/C10/C00 answer token 为负类拟合六特征
-   logistic token gate；
-4. `alignment_gate`：先应用 alignment，再在已对齐残差上拟合 gate。
+1. `baseline`：reference-delta，不做校准；
+2. `rms_scalar`：在 C01/C10/C00 控制答案上用整体 residual RMS 比例拟合单一 A2 scale；
+3. `vocab_diagonal`：在同一控制答案上按词表维度拟合 A2 scale。
 
-校准不读取 retain examples，也不重新训练 A1/A2；四种方法的最终选择仍读取完整
-Mem/Util/Agg，必须标记 `selection_retain_access=true`。运行入口为
-`scripts/run_f2d_fullanswer_refdelta_calibration_pilot.sh`。若 alignment/gate 均未超过未校准
-FullAnswer baseline，则停止继续调 gate 超参数，并把主要瓶颈判定为 assistant representation
-而非 global composition；下一步应改变训练目标或 assistant architecture。
+校准不读取 retain examples，也不重新训练 A1/A2；三种方法的最终选择仍读取完整
+Mem/Util/Agg，必须标记 `selection_retain_access=true`。主运行入口为
+`scripts/run_f2d_v512_refdelta_alignment_pilot.sh`。在该固定比较完成前不得加入 gate，避免把
+normalization、alignment 与动态路由混为一个改动。若两种 alignment 均未超过未校准 V5.12
+baseline，则把主要瓶颈判定为 assistant representation 而非 global composition；下一步应改变
+训练目标或 assistant architecture。
+
+`scripts/run_f2d_fullanswer_refdelta_calibration_pilot.sh` 只保留为 ceiling diagnostic，用于判断
+同样的校准机制在宽差分 FullAnswer 上是否有效。它不能替代纯 V5.12 主实验，也不能作为
+causal-pair 改进的主结果。
