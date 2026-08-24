@@ -35,6 +35,7 @@ class V512StrongA1FullA2ReferenceDeltaTest(unittest.TestCase):
             * len(filters.group(1).split()),
             24,
         )
+        self.assertIn('LAUNCH_EXPECTED_EVALUATIONS="${EXPECTED_EVALUATIONS:-24}"', self.text)
 
     def test_preserves_reference_delta_without_calibration(self):
         self.assertIn("COMPOSITION_MODE=reference_delta", self.text)

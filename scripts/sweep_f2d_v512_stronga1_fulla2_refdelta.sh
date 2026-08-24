@@ -18,6 +18,7 @@ LAUNCH_RESULTS_DIR="${RESULTS_DIR:-}"
 LAUNCH_A1_GRID="${WEIGHT_A1_GRID:-}"
 LAUNCH_A2_GRID="${WEIGHT_A2_GRID:-}"
 LAUNCH_FILTER_GRID="${TOP_FILTERS:-}"
+LAUNCH_EXPECTED_EVALUATIONS="${EXPECTED_EVALUATIONS:-24}"
 
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
@@ -125,6 +126,10 @@ read -r -a A1_VALUES <<< "$A1_GRID"
 read -r -a A2_VALUES <<< "$A2_GRID"
 read -r -a FILTER_VALUES <<< "$FILTER_GRID"
 EVALUATIONS=$((${#A1_VALUES[@]} * ${#A2_VALUES[@]} * ${#FILTER_VALUES[@]}))
+if [ "$EVALUATIONS" -ne "$LAUNCH_EXPECTED_EVALUATIONS" ]; then
+    echo "Expected $LAUNCH_EXPECTED_EVALUATIONS preregistered evaluations; got $EVALUATIONS" >&2
+    exit 1
+fi
 
 cat <<EOF
 ============================================================
@@ -145,11 +150,7 @@ V5.12 strong-A1 / FullAnswer-A2 reference-delta sweep
 EOF
 
 if [ "${DRY_RUN:-false}" = "true" ]; then
-    if [ "$EVALUATIONS" -ne 24 ]; then
-        echo "Expected the preregistered 24-point grid; got $EVALUATIONS" >&2
-        exit 1
-    fi
-    echo "Dry run OK; checkpoints, references, and 24-point grid were validated."
+    echo "Dry run OK; checkpoints, references, and ${EVALUATIONS}-point grid were validated."
     exit 0
 fi
 

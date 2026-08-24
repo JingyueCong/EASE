@@ -1550,3 +1550,11 @@ FullAnswer A2 checkpoint-72 组合，保持 reference-delta 且关闭 alignment/
 `scripts/sweep_f2d_v512_stronga1_fulla2_refdelta.sh`。该实验使用 FullAnswer A2，必须报告为
 hybrid ceiling/ablation，不能替代纯 V5.12 causal 主结果；其选择同样标记
 `selection_retain_access=true`。
+
+该 24 点 hybrid 检验最终在网格边界 `(-1.9,1.6,0.0003)` 达到
+`Agg=0.547708`、`Mem=0.522498`、`Util=0.575475`，相对旧 hybrid 提高
+`0.004612`，距 FullAnswer 仅 `0.006004`。由于最优点同时位于 A1/A2 权重边界，允许一次
+预注册的冻结 boundary extension：`w1={-1.9,-2.0,-2.1}`、
+`w2={1.6,1.7,1.8}`、`filter={0.0003,0.0004}`，共 18 点，入口为
+`scripts/sweep_f2d_v512_stronga1_fulla2_boundary18.sh`。若该扩展仍未超过 FullAnswer，则停止
+hybrid 全局权重搜索；无论结果如何，它仍属于 hybrid ceiling/ablation，而不是纯 causal 主结果。
