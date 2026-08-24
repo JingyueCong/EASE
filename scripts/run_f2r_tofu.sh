@@ -82,6 +82,8 @@ ALIGNMENT_ENABLED="${ALIGNMENT_ENABLED:-false}"
 GATE_ENABLED="${GATE_ENABLED:-false}"
 COMPOSITION_MODE="${COMPOSITION_MODE:-raw}"
 REFERENCE_PATH="${REFERENCE_PATH:-null}"
+SEQUENCE_ROUTER_ENABLED="${SEQUENCE_ROUTER_ENABLED:-false}"
+SEQUENCE_ROUTER_PATH="${SEQUENCE_ROUTER_PATH:-null}"
 TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
@@ -108,7 +110,7 @@ case "$SELECTION_RETAIN_ACCESS" in
     true|false) ;;
     *) echo "SELECTION_RETAIN_ACCESS must be true or false (got: $SELECTION_RETAIN_ACCESS)" >&2; exit 1 ;;
 esac
-for flag_name in ALIGNMENT_ENABLED GATE_ENABLED; do
+for flag_name in ALIGNMENT_ENABLED GATE_ENABLED SEQUENCE_ROUTER_ENABLED; do
     flag_value="${!flag_name}"
     case "$flag_value" in
         true|false) ;;
@@ -122,6 +124,10 @@ esac
 if { [ "$ALIGNMENT_ENABLED" = "true" ] || [ "$GATE_ENABLED" = "true" ]; } \
     && [ ! -s "$CALIBRATION_PATH" ]; then
     echo "Missing calibration artifact: $CALIBRATION_PATH" >&2
+    exit 1
+fi
+if [ "$SEQUENCE_ROUTER_ENABLED" = "true" ] && [ ! -s "$SEQUENCE_ROUTER_PATH" ]; then
+    echo "Missing sequence-router artifact: $SEQUENCE_ROUTER_PATH" >&2
     exit 1
 fi
 
@@ -544,6 +550,8 @@ fi
         model.model_args.gate_enabled="$GATE_ENABLED" \
         model.model_args.composition_mode="$COMPOSITION_MODE" \
         model.model_args.reference_path="$REFERENCE_PATH" \
+        model.model_args.sequence_router_enabled="$SEQUENCE_ROUTER_ENABLED" \
+        model.model_args.sequence_router_path="$SEQUENCE_ROUTER_PATH" \
         model.model_args.attn_implementation=sdpa \
         model.tokenizer_args.pretrained_model_name_or_path="$HF_TOKENIZER" \
         forget_split="$SPLIT" \
@@ -585,6 +593,8 @@ fi
     --gate-enabled "$GATE_ENABLED" \
     --composition-mode "$COMPOSITION_MODE" \
     --reference-path "$REFERENCE_PATH" \
+    --sequence-router-enabled "$SEQUENCE_ROUTER_ENABLED" \
+    --sequence-router-path "$SEQUENCE_ROUTER_PATH" \
     --views "$VIEWS" \
     --a1-num-layer "$A1_NUM_LAYER" \
     --a2-num-layer "$A2_NUM_LAYER" \

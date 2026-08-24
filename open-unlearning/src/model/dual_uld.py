@@ -35,6 +35,7 @@ from model.f2r_calibration import (
     calibrated_residual,
     load_calibration,
 )
+from model.f2r_routing import load_sequence_router, sequence_router_scale
 
 logger = logging.getLogger("model.dual_uld")
 
@@ -108,6 +109,8 @@ class DualULDForCausalLM(LlamaForCausalLM):
         gate_enabled: bool = False,
         composition_mode: str = "raw",
         reference_path: Optional[str] = None,
+        sequence_router_enabled: bool = False,
+        sequence_router_path: Optional[str] = None,
         **kwargs,
     ):
         for name, val in (("a1_path", a1_path), ("a2_path", a2_path)):
@@ -209,6 +212,7 @@ class DualULDForCausalLM(LlamaForCausalLM):
         model._dual_top_filter = float(top_logit_filter)
         model._dual_alignment_enabled = bool(alignment_enabled)
         model._dual_gate_enabled = bool(gate_enabled)
+        model._dual_sequence_router_enabled = bool(sequence_router_enabled)
         calibration = None
         if model._dual_alignment_enabled or model._dual_gate_enabled:
             if not calibration_path or calibration_path == "null":
@@ -222,6 +226,18 @@ class DualULDForCausalLM(LlamaForCausalLM):
                 vocab_size=model.config.vocab_size,
             )
         object.__setattr__(model, "_dual_calibration", calibration)
+        sequence_router = None
+        if model._dual_sequence_router_enabled:
+            if not sequence_router_path or sequence_router_path == "null":
+                raise ValueError(
+                    "DualULD sequence routing requires sequence_router_path"
+                )
+            sequence_router = load_sequence_router(
+                sequence_router_path,
+                device=device,
+            )
+        object.__setattr__(model, "_dual_sequence_router", sequence_router)
+        model._dual_sequence_router_path = sequence_router_path
 
         model.generation_config.use_cache = False
         model.config.use_cache = False
@@ -233,7 +249,9 @@ class DualULDForCausalLM(LlamaForCausalLM):
             f"top_logit_filter={top_logit_filter} "
             f"composition={composition_mode} reference={reference_path} "
             f"alignment={alignment_enabled} gate={gate_enabled} "
-            f"calibration={calibration_path}"
+            f"calibration={calibration_path} "
+            f"sequence_router={sequence_router_enabled} "
+            f"sequence_router_path={sequence_router_path}"
         )
         return model
 
@@ -320,6 +338,15 @@ class DualULDForCausalLM(LlamaForCausalLM):
             alignment_enabled=self._dual_alignment_enabled,
             gate_enabled=self._dual_gate_enabled,
         )
+        if self._dual_sequence_router_enabled:
+            route_scale, _ = sequence_router_scale(
+                input_ids,
+                attention_mask,
+                self._dual_sequence_router,
+                labels=labels,
+                dtype=delta.dtype,
+            )
+            delta = delta * route_scale.view(-1, 1, 1)
         logits = base_logits + delta
 
         loss = None

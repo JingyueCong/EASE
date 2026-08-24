@@ -20,6 +20,8 @@ model_args:
   gate_enabled: false
   composition_mode: raw
   reference_path: null
+  sequence_router_enabled: false
+  sequence_router_path: null
 model_handler: DualULDForCausalLM
 tokenizer_args:
   pretrained_model_name_or_path: open-unlearning/tofu_Llama-3.2-1B-Instruct_full

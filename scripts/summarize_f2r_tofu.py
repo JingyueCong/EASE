@@ -403,6 +403,10 @@ def main() -> None:
         default="raw",
     )
     parser.add_argument("--reference-path", default="null")
+    parser.add_argument(
+        "--sequence-router-enabled", choices=("true", "false"), default="false"
+    )
+    parser.add_argument("--sequence-router-path", default="null")
     parser.add_argument("--views", type=int)
     parser.add_argument("--a1-num-layer", type=int)
     parser.add_argument("--a2-num-layer", type=int)
@@ -463,6 +467,8 @@ def main() -> None:
         "gate_enabled": args.gate_enabled == "true",
         "composition_mode": args.composition_mode,
         "reference_path": args.reference_path,
+        "sequence_router_enabled": args.sequence_router_enabled == "true",
+        "sequence_router_path": args.sequence_router_path,
         "views": args.views,
         "a1_num_layer": args.a1_num_layer,
         "a2_num_layer": args.a2_num_layer,

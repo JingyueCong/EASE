@@ -1639,3 +1639,29 @@ reference-delta residual，alignment 关闭，A1/A2 checkpoint 保持冻结。
 `CONTEXT_GATE_DECISION.json`。若三个点均失败，则停止 static DualULD 的 gate、alignment、
 global weights、pair-margin 与 span variants；达到 `0.58` 的后续工作必须改为 sequence-level
 bootstrapping、真实 retain regularization 或新的条件化架构，而不能继续后验扩大当前网格。
+
+三个 context-gate 点全部完成后，最佳 `gate_memory` 仅为
+`Agg=0.499876, Mem=0.403436, Util=0.656907`。相对 ungated boundary，gate 将
+Util 提高 `0.090440`，但 Mem 降低 `0.134287`，说明 residual-feature sigmoid gate 主要学成了
+全局衰减器，没有学会区分 forget 与 retain 请求。实验因此触发
+`stop_static_dual_gate_and_weight_variants`，后续不再扩大 token gate、alignment 或全局权重网格。
+
+## 41. Request-scoped forget-entity sequence router
+
+最后一个保留 causal assistant 的架构诊断改为 request-level routing，而不是 token-level residual
+分类。删除请求已经明确给出 forget05 的十个 author entity；router 只由该删除请求构造，不读取
+retain、real-author 或 world-fact 样本。输入 prompt 若包含任一 canonical forget author 的精确
+token subsequence，则启用完整 causal reference-delta residual；否则 residual 乘零，退回 base
+model。该设计把“是否属于删除请求”与“命中后如何遗忘”分离，后者仍完全由 V5.12 causal A1
+和 FullAnswer A2 实现。
+
+为避免评估泄漏，teacher-forced scoring 只在 `labels == -100` 的 prompt token 上匹配实体；自由
+生成时只扫描 assistant header 之前的 token。标准答案或已生成答案中出现 forget author 不能改变
+路由。入口为 `scripts/run_f2d_v512_entity_router3.sh`，固定同一 hard router 并只比较三个预注册的
+既有 frontier 点：`(-2.1,1.6,0.0004)`、`(-2.0,1.7,0.0004)` 与
+`(-1.9,1.6,0.0004)`；不重新训练 assistant，也不搜索新的 weight 网格。
+
+目标判据为 `Agg>=0.58, Mem>=0.54, Util>=0.63`；若未达到目标但满足
+`Agg>0.551721, Mem>=0.53, Util>=0.60`，只允许一次预注册 router refinement；否则停止该
+request-scoped router。结果写入 `ENTITY_ROUTER_DECISION.json`。由于方法显式使用删除实体，论文中
+必须报告为 request-scoped unlearning，而不能与完全 task-agnostic 的静态 composition 混称。
