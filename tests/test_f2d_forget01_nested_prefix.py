@@ -34,7 +34,7 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     )
 
 
-class Forget01NestedPrefixTest(unittest.TestCase):
+class Forget01ExactSubsetTest(unittest.TestCase):
     def test_derivation_is_exact_versioned_and_non_overwriting(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -49,7 +49,10 @@ class Forget01NestedPrefixTest(unittest.TestCase):
             write_jsonl(
                 reference,
                 [
-                    {"question": f"Question {i}?", "answer": f"Answer {i}."}
+                    {
+                        "question": f"Question {160 + i}?",
+                        "answer": f"Answer {160 + i}.",
+                    }
                     for i in range(40)
                 ],
             )
@@ -70,6 +73,7 @@ class Forget01NestedPrefixTest(unittest.TestCase):
                 str(reference),
             ]
             first = subprocess.run(command, check=True, capture_output=True, text=True)
+            self.assertIn("source_blocks=[8, 9]", first.stdout)
             self.assertIn("C11=byte-identical", first.stdout)
             second = subprocess.run(command, check=True, capture_output=True, text=True)
             self.assertIn("V5.12 output: reused", second.stdout)
@@ -77,7 +81,11 @@ class Forget01NestedPrefixTest(unittest.TestCase):
             self.assertEqual(len(derived), 40)
             self.assertEqual(derived[0]["source_id"], "forget01_perturbed-00000")
             self.assertEqual(derived[-1]["source_id"], "forget01_perturbed-00039")
-            self.assertEqual(derived[7]["cells"]["C11"], row(7, "v512")["cells"]["C11"])
+            self.assertEqual(
+                derived[7]["cells"]["C11"], row(167, "v512")["cells"]["C11"]
+            )
+            self.assertEqual(derived[7]["block_id"], 0)
+            self.assertEqual(derived[27]["block_id"], 1)
             self.assertEqual(
                 derived[7]["generation"]["source_ref"],
                 "forget01_perturbed-00007",
@@ -85,6 +93,8 @@ class Forget01NestedPrefixTest(unittest.TestCase):
             provenance = json.loads(manifest.read_text())
             self.assertTrue(provenance["c11_exact_match"])
             self.assertFalse(provenance["content_cells_changed"])
+            self.assertEqual(provenance["source_indices"], list(range(160, 200)))
+            self.assertEqual(provenance["source_blocks"], [8, 9])
 
             v512_output.write_text("user-owned-content\n", encoding="utf-8")
             refused = subprocess.run(command, capture_output=True, text=True)

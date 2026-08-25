@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Derive frozen forget01 factorial data from the nested forget05 prefix.
+"""Derive frozen forget01 factorial data from an exact forget05 QA subset.
 
-The script is deliberately fail-closed.  It first proves that all 40 immutable
-C11 question/answer pairs are byte-identical to the canonical
-``forget01_perturbed`` split.  Only then does it copy the first two author
-blocks, rewrite source-id prefixes, and emit new versioned files.  Existing
-outputs are reused only when their bytes already match the derived content;
-they are never overwritten.
+The script is deliberately fail-closed.  It locates every canonical
+``forget01_perturbed`` C11 question/answer pair by an exact, unique match among
+the 200 frozen forget05 C11 rows.  V5.12 and FullAnswer must independently
+produce the same 40-row mapping.  Only then are those two author blocks copied,
+renumbered to forget01 indices 0..39, and emitted under new versioned paths.
+Existing outputs are reused only when their bytes already match the derived
+content; they are never overwritten.
 """
 
 from __future__ import annotations
@@ -100,31 +101,51 @@ def load_reference(path: Path | None) -> list[tuple[str, str]]:
     return [(str(row["question"]), str(row["answer"])) for row in dataset]
 
 
-def rewrite_source_ids(value: Any) -> Any:
+def rewrite_source_ids(value: Any, id_mapping: dict[str, str]) -> Any:
     if isinstance(value, str):
-        return value.replace(SOURCE_SPLIT + "-", TARGET_SPLIT + "-")
+        result = value
+        for source_id, target_id in id_mapping.items():
+            result = result.replace(source_id, target_id)
+        return result
     if isinstance(value, list):
-        return [rewrite_source_ids(item) for item in value]
+        return [rewrite_source_ids(item, id_mapping) for item in value]
     if isinstance(value, dict):
-        return {key: rewrite_source_ids(item) for key, item in value.items()}
+        return {
+            key: rewrite_source_ids(item, id_mapping) for key, item in value.items()
+        }
     return value
 
 
 def derive(
-    by_index: dict[int, dict[str, Any]], source_path: Path, label: str
+    by_index: dict[int, dict[str, Any]],
+    mapping: list[int],
+    source_path: Path,
+    label: str,
 ) -> list[dict[str, Any]]:
     source_hash = sha256_file(source_path)
+    id_mapping = {
+        f"{SOURCE_SPLIT}-{source_index_value:05d}": f"{TARGET_SPLIT}-{target_index:05d}"
+        for target_index, source_index_value in enumerate(mapping)
+    }
     output = []
-    for index in range(TARGET_ROWS):
-        row = rewrite_source_ids(by_index[index])
+    for target_index, source_index_value in enumerate(mapping):
+        row = rewrite_source_ids(by_index[source_index_value], id_mapping)
+        source_block = source_index_value // BLOCK_SIZE
+        target_block = target_index // BLOCK_SIZE
+        row["source_id"] = f"{TARGET_SPLIT}-{target_index:05d}"
+        row["block_id"] = target_block
         generation = row.get("generation")
         if not isinstance(generation, dict):
             generation = {}
             row["generation"] = generation
         generation["forget01_derivation"] = {
-            "method": "verified-nested-prefix-v1",
+            "method": "verified-exact-subset-v1",
             "source_split": SOURCE_SPLIT,
             "target_split": TARGET_SPLIT,
+            "source_index": source_index_value,
+            "target_index": target_index,
+            "source_block": source_block,
+            "target_block": target_block,
             "source_sha256": source_hash,
             "source_label": label,
             "content_cells_changed": False,
@@ -183,24 +204,56 @@ def main() -> None:
             f"canonical {TARGET_SPLIT} must contain {TARGET_ROWS} rows, got {len(reference)}"
         )
 
-    for index in range(TARGET_ROWS):
-        expected = reference[index]
-        v512_c11 = qa(v512[index]["cells"]["C11"], f"V5.12 index {index}")
-        full_c11 = qa(fullanswer[index]["cells"]["C11"], f"FullAnswer index {index}")
-        if v512_c11 != expected or full_c11 != expected:
-            raise ValueError(
-                f"C11 mismatch at index {index}; forget01 is not an exact nested prefix"
-            )
+    def unique_qa_index(
+        rows: dict[int, dict[str, Any]], label: str
+    ) -> dict[tuple[str, str], list[int]]:
+        grouped: dict[tuple[str, str], list[int]] = {}
+        for source_index_value, row in rows.items():
+            pair = qa(row["cells"]["C11"], f"{label} index {source_index_value}")
+            grouped.setdefault(pair, []).append(source_index_value)
+        return grouped
 
-    v512_rows = derive(v512, args.v512_source, "V5.12")
-    full_rows = derive(fullanswer, args.fullanswer_source, "FullAnswer")
+    v512_qa = unique_qa_index(v512, "V5.12")
+    full_qa = unique_qa_index(fullanswer, "FullAnswer")
+    v512_mapping: list[int] = []
+    full_mapping: list[int] = []
+    for target_index, expected in enumerate(reference):
+        v512_matches = v512_qa.get(expected, [])
+        full_matches = full_qa.get(expected, [])
+        if len(v512_matches) != 1 or len(full_matches) != 1:
+            raise ValueError(
+                "C11 exact subset match must be unique at forget01 index "
+                f"{target_index}; V5.12={v512_matches} FullAnswer={full_matches}"
+            )
+        v512_mapping.append(v512_matches[0])
+        full_mapping.append(full_matches[0])
+    if v512_mapping != full_mapping:
+        raise ValueError("V5.12 and FullAnswer disagree on the forget01 source mapping")
+    if len(set(v512_mapping)) != TARGET_ROWS:
+        raise ValueError("forget01 exact subset mapping is not one-to-one")
+    mapped_blocks = sorted({index // BLOCK_SIZE for index in v512_mapping})
+    if len(mapped_blocks) != TARGET_ROWS // BLOCK_SIZE:
+        raise ValueError(
+            f"forget01 mapping must contain two coherent author blocks, got {mapped_blocks}"
+        )
+    expected_block_mapping = [
+        mapped_blocks[target_index // BLOCK_SIZE] for target_index in range(TARGET_ROWS)
+    ]
+    observed_block_mapping = [index // BLOCK_SIZE for index in v512_mapping]
+    if observed_block_mapping != expected_block_mapping:
+        raise ValueError(
+            "forget01 ordering does not preserve two contiguous 20-row author blocks"
+        )
+
+    v512_rows = derive(v512, v512_mapping, args.v512_source, "V5.12")
+    full_rows = derive(fullanswer, full_mapping, args.fullanswer_source, "FullAnswer")
     v512_payload = jsonl_bytes(v512_rows)
     full_payload = jsonl_bytes(full_rows)
     v512_status = write_new_or_reuse(args.v512_output, v512_payload)
     full_status = write_new_or_reuse(args.fullanswer_output, full_payload)
 
     manifest = {
-        "design": "forget01-verified-nested-prefix-v1",
+        "design": "forget01-verified-exact-subset-v1",
         "source_split": SOURCE_SPLIT,
         "target_split": TARGET_SPLIT,
         "rows": TARGET_ROWS,
@@ -208,6 +261,12 @@ def main() -> None:
         "block_size": BLOCK_SIZE,
         "c11_exact_match": True,
         "content_cells_changed": False,
+        "source_indices": v512_mapping,
+        "source_blocks": mapped_blocks,
+        "source_to_target_ids": {
+            f"{SOURCE_SPLIT}-{source_index_value:05d}": f"{TARGET_SPLIT}-{target_index:05d}"
+            for target_index, source_index_value in enumerate(v512_mapping)
+        },
         "sources": {
             "v512": {
                 "path": str(args.v512_source.resolve()),
@@ -232,9 +291,9 @@ def main() -> None:
     manifest_payload = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
     manifest_status = write_new_or_reuse(args.manifest_output, manifest_payload)
     print(
-        "forget01 nested-prefix gate OK: "
+        "forget01 exact-subset gate OK: "
         f"rows={TARGET_ROWS} blocks={TARGET_ROWS // BLOCK_SIZE} "
-        "C11=byte-identical content_cells_changed=0"
+        f"source_blocks={mapped_blocks} C11=byte-identical content_cells_changed=0"
     )
     print(f"V5.12 output: {v512_status} {args.v512_output}")
     print(f"FullAnswer output: {full_status} {args.fullanswer_output}")

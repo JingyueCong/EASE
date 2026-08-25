@@ -41,12 +41,12 @@ TRAIN_PY="${TRAIN_PY:-${HOME}/miniconda3/envs/ease-f2r-train/bin/python}"
 EVAL_PY="${PY:-${HOME}/miniconda3/envs/ease-f2r-eval/bin/python}"
 SOURCE_V512="$(absolute_from_root "${F2D_V512_FORGET05_SOURCE:-ULD/data/ciru/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl}")"
 SOURCE_FULL="$(absolute_from_root "${FULLANSWER_FORGET05_SOURCE:-ULD/data/ciru/forget05_ciru200_seed42_full_authorblock_v1.jsonl}")"
-V512_DATA="$(absolute_from_root "${F2D_V512_DATA_PATH:-ULD/data/ciru/forget01_author_pairbudget40_seed42_v5_12_nested_prefix_v1.jsonl}")"
-FULL_DATA="$(absolute_from_root "${FULLANSWER_DATA_PATH:-ULD/data/ciru/forget01_ciru40_seed42_full_authorblock_nested_prefix_v1.jsonl}")"
-DERIVATION_MANIFEST="$(absolute_from_root "${F2D_FORGET01_DERIVATION_MANIFEST:-ULD/data/ciru/forget01_v512_full_nested_prefix_v1.derivation.json}")"
-V512_AUDIT="$(absolute_from_root "${F2D_V512_AUDIT_DIR:-audits/forget01_author_pairbudget40_seed42_v5_12_nested_prefix_v1}")"
-FULL_AUDIT="$(absolute_from_root "${FULLANSWER_AUDIT_DIR:-audits/forget01_fullanswer40_seed42_nested_prefix_v1}")"
-SWEEP_NAME="${SWEEP_NAME:-f2d_v512_dual_depth4_nested_prefix_seed42}"
+V512_DATA="$(absolute_from_root "${F2D_V512_DATA_PATH:-ULD/data/ciru/forget01_author_pairbudget40_seed42_v5_12_exact_subset_v1.jsonl}")"
+FULL_DATA="$(absolute_from_root "${FULLANSWER_DATA_PATH:-ULD/data/ciru/forget01_ciru40_seed42_full_authorblock_exact_subset_v1.jsonl}")"
+DERIVATION_MANIFEST="$(absolute_from_root "${F2D_FORGET01_DERIVATION_MANIFEST:-ULD/data/ciru/forget01_v512_full_exact_subset_v1.derivation.json}")"
+V512_AUDIT="$(absolute_from_root "${F2D_V512_AUDIT_DIR:-audits/forget01_author_pairbudget40_seed42_v5_12_exact_subset_v1}")"
+FULL_AUDIT="$(absolute_from_root "${FULLANSWER_AUDIT_DIR:-audits/forget01_fullanswer40_seed42_exact_subset_v1}")"
+SWEEP_NAME="${SWEEP_NAME:-f2d_v512_dual_depth4_exact_subset_seed42}"
 MODELS_ROOT="$EASE_ROOT/ULD/outputs_trained_models/f2d_did_1b_forget01_${SWEEP_NAME}"
 RESULTS_DIR="$EASE_ROOT/open-unlearning/saves/sweeps/forget01_${SWEEP_NAME}"
 TARGET_AGG="${TARGET_AGG:-0.57}"
@@ -69,7 +69,7 @@ if [ -n "${FORGET01_REFERENCE_JSONL:-}" ]; then
     reference_args=(--reference-jsonl "$(absolute_from_root "$FORGET01_REFERENCE_JSONL")")
 fi
 
-echo "[0/4] Verify nested split and derive immutable forget01 copies"
+echo "[0/4] Verify exact C11 subset and derive immutable forget01 copies"
 "$TRAIN_PY" "$EASE_ROOT/scripts/derive_f2d_forget01_from_forget05.py" \
     --v512-source "$SOURCE_V512" \
     --fullanswer-source "$SOURCE_FULL" \
@@ -118,7 +118,7 @@ cat <<EOF
 Forget01 static Dual Assistant 4/4 replication
   causal A1 data    : $V512_DATA
   FullAnswer A2 data: $FULL_DATA
-  source policy     : exact verified prefix of frozen forget05 artifacts
+  source policy     : exact uniquely matched subset of frozen forget05 artifacts
   old artifacts     : read-only; no overwrite
   architecture      : A1=4 layers / A2=4 layers / LoRA rank=16
   training pairs    : exposure-matched 20/14; moderate 32/24 steps
