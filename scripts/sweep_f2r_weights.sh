@@ -28,6 +28,7 @@ A1_CHECKPOINT_OVERRIDE="${A1_CHECKPOINT_OVERRIDE:-}"
 A2_CHECKPOINT_OVERRIDE="${A2_CHECKPOINT_OVERRIDE:-}"
 COMPOSITION_MODE="${COMPOSITION_MODE:-raw}"
 REFERENCE_PATH="${REFERENCE_PATH:-null}"
+TASK_MODEL_NAME="${TASK_MODEL_NAME:-Llama-3.2-1B-Instruct}"
 
 latest_checkpoint() {
     find "$1" -name 'checkpoint-*' -type d 2>/dev/null \
@@ -152,7 +153,7 @@ for pair in "${PAIR_LIST[@]}"; do
         gpu="${GPU_LIST[$((INDEX % ${#GPU_LIST[@]}))]}"
         tag="w1${w1//-/m}_w2${w2//-/m}_f${filter//./p}"
         tag="${tag//./p}"
-        task_name="tofu_Llama-3.2-1B-Instruct_${SPLIT}_F2R_sweep_${SWEEP_NAME}_${tag}"
+        task_name="tofu_${TASK_MODEL_NAME}_${SPLIT}_F2R_sweep_${SWEEP_NAME}_${tag}"
         report="${EASE_ROOT}/open-unlearning/saves/eval/${task_name}/F2R_REPORT.json"
         echo "$tag,$w1,$w2,$filter,$task_name,$report,$COMPOSITION_MODE,$REFERENCE_PATH" >> "$MANIFEST"
         run_one "$gpu" "$tag" "$w1" "$w2" "$filter" "$task_name" "$report" &
