@@ -11,9 +11,10 @@ class DualDepth4ScriptTest(unittest.TestCase):
         cls.text = (ROOT / "scripts/sweep_f2d_v512_dual_depth4.sh").read_text()
 
     def test_is_static_no_router_capacity_ablation(self):
-        self.assertIn('"d4_2|4|2|', self.text)
-        self.assertIn('"d2_4|2|4|', self.text)
-        self.assertIn('"d4_4|4|4|', self.text)
+        self.assertIn("PAIRS=(d4_2 d2_4 d4_4)", self.text)
+        self.assertIn("a1_layers=4; a2_layers=2", self.text)
+        self.assertIn("a1_layers=2; a2_layers=4", self.text)
+        self.assertIn("a1_layers=4; a2_layers=4", self.text)
         self.assertIn("SEQUENCE_ROUTER_ENABLED=false", self.text)
         self.assertIn("ALIGNMENT_ENABLED=false", self.text)
         self.assertIn("GATE_ENABLED=false", self.text)
@@ -34,6 +35,10 @@ class DualDepth4ScriptTest(unittest.TestCase):
         self.assertIn("inference points  : 4 per pair (12 total)", self.text)
         for point in ("conservative", "intermediate", "legacy_best", "strong"):
             self.assertEqual(self.text.count(f'"{point}:'), 1)
+
+    def test_never_serializes_checkpoint_paths_with_pipe_delimiter(self):
+        self.assertNotIn("IFS='|' read", self.text)
+        self.assertIn('a1="$NEW_A1"; a2="$OLD_A2"', self.text)
 
 
 if __name__ == "__main__":

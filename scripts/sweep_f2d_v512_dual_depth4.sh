@@ -203,13 +203,7 @@ POINTS=(
     "legacy_best:-2.0:1.7:0.0004"
     "strong:-2.2:1.9:0.0004"
 )
-PAIRS=(
-    "d4_2|4|2|$NEW_A1|$OLD_A2|$NEW_A1_REF|$OLD_A2_REF"
-    "d2_4|2|4|$OLD_A1|$NEW_A2|$OLD_A1_REF|$NEW_A2_REF"
-    # Both four-layer fullmodels are deterministic slices of the same base;
-    # sharing one reference avoids loading a redundant fourth model on GPU.
-    "d4_4|4|4|$NEW_A1|$NEW_A2|$NEW_A1_REF|$NEW_A1_REF"
-)
+PAIRS=(d4_2 d2_4 d4_4)
 
 run_eval() {
     local gpu="$1" pair="$2" a1_layers="$3" a2_layers="$4"
@@ -255,8 +249,33 @@ wait_batch() {
     done
     pids=()
 }
-for pair_spec in "${PAIRS[@]}"; do
-    IFS='|' read -r pair a1_layers a2_layers a1 a2 a1_ref a2_ref <<< "$pair_spec"
+for pair in "${PAIRS[@]}"; do
+    # Checkpoint directories contain literal `|` characters in Hydra's run
+    # name.  Assign fields explicitly instead of serializing them with a
+    # delimiter, otherwise valid paths are truncated at `|loss:...`.
+    case "$pair" in
+        d4_2)
+            a1_layers=4; a2_layers=2
+            a1="$NEW_A1"; a2="$OLD_A2"
+            a1_ref="$NEW_A1_REF"; a2_ref="$OLD_A2_REF"
+            ;;
+        d2_4)
+            a1_layers=2; a2_layers=4
+            a1="$OLD_A1"; a2="$NEW_A2"
+            a1_ref="$OLD_A1_REF"; a2_ref="$NEW_A2_REF"
+            ;;
+        d4_4)
+            a1_layers=4; a2_layers=4
+            a1="$NEW_A1"; a2="$NEW_A2"
+            # Both fullmodels are deterministic four-layer slices of the same
+            # base, so one shared reference avoids redundant GPU memory.
+            a1_ref="$NEW_A1_REF"; a2_ref="$NEW_A1_REF"
+            ;;
+        *)
+            echo "Unknown depth pair: $pair" >&2
+            exit 1
+            ;;
+    esac
     for point_spec in "${POINTS[@]}"; do
         IFS=: read -r point w1 w2 filter <<< "$point_spec"
         gpu="${GPU_LIST[$((index % ${#GPU_LIST[@]}))]}"
