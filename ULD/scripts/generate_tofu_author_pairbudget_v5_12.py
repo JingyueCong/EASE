@@ -416,7 +416,9 @@ def load_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def load_profiles(path: Path, data_digest: str) -> tuple[dict, dict[int, dict]]:
+def load_profiles(
+    path: Path, data_digest: str, expected_block_ids: set[int] | None = None
+) -> tuple[dict, dict[int, dict]]:
     if not path.is_file():
         raise ValueError(f"missing base profiles: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -438,8 +440,12 @@ def load_profiles(path: Path, data_digest: str) -> tuple[dict, dict[int, dict]]:
             row["source_id"]: row for row in ledger
         }
         by_block[block_id] = profile
-    if set(by_block) != set(range(10)):
-        raise ValueError("profile block coverage mismatch")
+    expected = set(range(10)) if expected_block_ids is None else set(expected_block_ids)
+    if len(expected) != 10 or set(by_block) != expected:
+        raise ValueError(
+            "profile block coverage mismatch: "
+            f"expected={sorted(expected)} observed={sorted(by_block)}"
+        )
     return payload, by_block
 
 
@@ -1265,7 +1271,10 @@ def main() -> None:
     base_digest = sha256(args.base_data)
     profiles_digest = sha256(args.base_profiles)
     rows = load_jsonl(args.base_data)
-    base_profiles, profiles = load_profiles(args.base_profiles, base_digest)
+    expected_block_ids = {source_id_index(row["source_id"]) // 20 for row in rows}
+    base_profiles, profiles = load_profiles(
+        args.base_profiles, base_digest, expected_block_ids
+    )
     results = process_rows(
         generation_client, judge_client, args, rows, profiles, args.state_dir,
         base_digest, profiles_digest,

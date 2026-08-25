@@ -152,9 +152,12 @@ def build_context_packet(
     """Build the explicit context that makes the API agent reproducible."""
     source_id = source["source_id"]
     entry = profile["fact_ledger_by_source"][source_id]
-    source_names_target = (
-        v57._normalise(block["target_entity"])
-        in v57._normalise(source["question"])
+    target_bindings = [
+        block["target_entity"], *block.get("target_aliases", [])
+    ]
+    source_names_target = any(
+        v57._normalise(binding) in v57._normalise(source["question"])
+        for binding in target_bindings
     )
     required_identity = (
         profile["replacement_entity"] if source_names_target else None

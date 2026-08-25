@@ -157,6 +157,12 @@ def load_manifest(path: Path) -> Dict:
         for item in authors
     ):
         raise ValueError("every manifest author needs canonical_name")
+    for item in authors:
+        aliases = item.get("aliases", [])
+        if not isinstance(aliases, list) or any(
+            not isinstance(alias, str) or not alias.strip() for alias in aliases
+        ):
+            raise ValueError("manifest author aliases must be non-empty strings")
     return manifest
 
 
@@ -188,11 +194,15 @@ def group_author_blocks(sources: Sequence[Dict[str, str]], manifest: Mapping) ->
         if len(rows) != block_size:
             raise ValueError(f"block {block_id} has {len(rows)} rows")
         canonical = author["canonical_name"].strip()
+        bindings = [canonical, *[alias.strip() for alias in author.get("aliases", [])]]
         mismatched = [
             row["source_id"]
             for row in rows
-            if normalise(canonical)
-            not in normalise(f"{row['question']} {row['answer']}")
+            if not any(
+                normalise(binding)
+                in normalise(f"{row['question']} {row['answer']}")
+                for binding in bindings
+            )
         ]
         if mismatched:
             raise ValueError(
@@ -203,6 +213,7 @@ def group_author_blocks(sources: Sequence[Dict[str, str]], manifest: Mapping) ->
             {
                 "block_id": block_id,
                 "target_entity": canonical,
+                "target_aliases": bindings[1:],
                 "sources": rows,
             }
         )

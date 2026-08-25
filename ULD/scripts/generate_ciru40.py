@@ -186,6 +186,7 @@ def generate_one(
                 }
             record = {
                 "source_id": source["source_id"],
+                "block_id": int(source.get("block_id", -1)),
                 "view": 0,
                 "source_question": source["question"],
                 "source_answer": source["answer"],
@@ -252,6 +253,14 @@ def main() -> None:
             "unchanged in this design."
         ),
     )
+    parser.add_argument(
+        "--source-ids-file",
+        type=Path,
+        help=(
+            "Newline-delimited canonical source ids to generate exactly. "
+            "This is mutually exclusive with stratified sampling."
+        ),
+    )
     parser.add_argument("--model", required=True)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--api-key-env", default="OPENAI_API_KEY")
@@ -278,14 +287,41 @@ def main() -> None:
             f"from {args.include_source_ids_from}"
         )
     all_sources = load_sources(args.split)
-    sources = stratified_sources(
-        all_sources, args.units, args.block_size, args.seed,
-        include_source_ids=include_source_ids,
-    )
+    if args.source_ids_file is not None:
+        requested_ids = [
+            line.strip()
+            for line in args.source_ids_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if include_source_ids:
+            raise SystemExit(
+                "--source-ids-file cannot be combined with --include-source-ids-from"
+            )
+        if len(requested_ids) != args.units or len(set(requested_ids)) != args.units:
+            raise SystemExit(
+                "--source-ids-file must contain exactly --units unique ids"
+            )
+        source_by_canonical_id = {
+            source["source_id"]: source for source in all_sources
+        }
+        missing = [
+            source_id for source_id in requested_ids
+            if source_id not in source_by_canonical_id
+        ]
+        if missing:
+            raise SystemExit(f"requested source ids are absent: {missing[:5]}")
+        sources = [source_by_canonical_id[source_id] for source_id in requested_ids]
+    else:
+        sources = stratified_sources(
+            all_sources, args.units, args.block_size, args.seed,
+            include_source_ids=include_source_ids,
+        )
     source_block = {
         source["source_id"]: index // max(args.block_size, 1)
         for index, source in enumerate(all_sources)
     }
+    for source in sources:
+        source["block_id"] = source_block[source["source_id"]]
     client = OpenAI(api_key=api_key, base_url=args.base_url)
 
     # A failed fixed design must not create the final dataset, but validated
@@ -307,6 +343,7 @@ def main() -> None:
                 record["source_question"] == source["question"]
                 and record["source_answer"] == source["answer"]
             ):
+                record.setdefault("block_id", source_block[record["source_id"]])
                 record_by_id.setdefault(record["source_id"], record)
         records = list(record_by_id.values())
         print(f"resume_valid={len(records)}/{args.units} from {partial_path}")
