@@ -82,6 +82,9 @@ ALIGNMENT_ENABLED="${ALIGNMENT_ENABLED:-false}"
 GATE_ENABLED="${GATE_ENABLED:-false}"
 COMPOSITION_MODE="${COMPOSITION_MODE:-raw}"
 REFERENCE_PATH="${REFERENCE_PATH:-null}"
+A1_REFERENCE_PATH="${A1_REFERENCE_PATH:-auto}"
+A2_REFERENCE_PATH="${A2_REFERENCE_PATH:-auto}"
+TRAIN_ONLY="${TRAIN_ONLY:-false}"
 SEQUENCE_ROUTER_ENABLED="${SEQUENCE_ROUTER_ENABLED:-false}"
 SEQUENCE_ROUTER_PATH="${SEQUENCE_ROUTER_PATH:-null}"
 TRAIN_BS="${TRAIN_BS:-4}"
@@ -109,6 +112,10 @@ HF_PREFLIGHT="${HF_PREFLIGHT:-1}"
 case "$SELECTION_RETAIN_ACCESS" in
     true|false) ;;
     *) echo "SELECTION_RETAIN_ACCESS must be true or false (got: $SELECTION_RETAIN_ACCESS)" >&2; exit 1 ;;
+esac
+case "$TRAIN_ONLY" in
+    true|false) ;;
+    *) echo "TRAIN_ONLY must be true or false (got: $TRAIN_ONLY)" >&2; exit 1 ;;
 esac
 for flag_name in ALIGNMENT_ENABLED GATE_ENABLED SEQUENCE_ROUTER_ENABLED; do
     flag_value="${!flag_name}"
@@ -284,7 +291,9 @@ echo "  A2 optimization  : lr=$A2_TRAIN_LR, epochs=$A2_TRAIN_EP, uniform-weight=
 echo "  explicit steps   : A1=$A1_TRAIN_STEPS / A2=$A2_TRAIN_STEPS (0=epoch-derived)"
 echo "  assistant data   : A1=$A1_DATA_MODE / A2=$A2_DATA_MODE"
 echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
-echo "  composition      : $COMPOSITION_MODE (reference=$REFERENCE_PATH)"
+echo "  composition      : $COMPOSITION_MODE (shared_reference=$REFERENCE_PATH)"
+echo "  role references  : A1=$A1_REFERENCE_PATH A2=$A2_REFERENCE_PATH"
+echo "  train only       : $TRAIN_ONLY"
 echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
 echo "  calibration      : $CALIBRATION_PATH"
 echo "  optimizer        : $TRAIN_OPTIM"
@@ -456,14 +465,31 @@ if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     exit 1
 fi
 if [ "$COMPOSITION_MODE" = "reference_delta" ]; then
-    if [ "$REFERENCE_PATH" = "null" ] || [ "$REFERENCE_PATH" = "auto" ] \
-        || [ -z "$REFERENCE_PATH" ]; then
-        REFERENCE_PATH="$(cd "$A1_CKPT/../fullmodel" 2>/dev/null && pwd || true)"
+    shared_reference=""
+    if [ "$REFERENCE_PATH" != "null" ] && [ "$REFERENCE_PATH" != "auto" ] \
+        && [ -n "$REFERENCE_PATH" ]; then
+        shared_reference="$REFERENCE_PATH"
     fi
-    if [ -z "$REFERENCE_PATH" ] || [ ! -d "$REFERENCE_PATH" ]; then
-        echo "Missing frozen assistant reference for reference_delta composition." >&2
-        echo "Resolved reference: ${REFERENCE_PATH:-empty}" >&2
-        exit 1
+    if [ "$A1_REFERENCE_PATH" = "null" ] || [ "$A1_REFERENCE_PATH" = "auto" ] \
+        || [ -z "$A1_REFERENCE_PATH" ]; then
+        A1_REFERENCE_PATH="${shared_reference:-$(cd "$A1_CKPT/../fullmodel" 2>/dev/null && pwd || true)}"
+    fi
+    if [ "$A2_REFERENCE_PATH" = "null" ] || [ "$A2_REFERENCE_PATH" = "auto" ] \
+        || [ -z "$A2_REFERENCE_PATH" ]; then
+        A2_REFERENCE_PATH="${shared_reference:-$(cd "$A2_CKPT/../fullmodel" 2>/dev/null && pwd || true)}"
+    fi
+    for role_reference in "$A1_REFERENCE_PATH" "$A2_REFERENCE_PATH"; do
+        if [ -z "$role_reference" ] || [ ! -d "$role_reference" ]; then
+            echo "Missing depth-matched frozen assistant reference for reference_delta composition." >&2
+            echo "Resolved A1 reference: ${A1_REFERENCE_PATH:-empty}" >&2
+            echo "Resolved A2 reference: ${A2_REFERENCE_PATH:-empty}" >&2
+            exit 1
+        fi
+    done
+    if [ "$A1_REFERENCE_PATH" = "$A2_REFERENCE_PATH" ]; then
+        REFERENCE_PATH="$A1_REFERENCE_PATH"
+    else
+        REFERENCE_PATH="null"
     fi
 fi
 if [ ! -d "$A1_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
@@ -475,6 +501,12 @@ fi
 if [ -n "$A1_CHECKPOINT_OVERRIDE" ] || [ -n "$A2_CHECKPOINT_OVERRIDE" ]; then
     echo "      Using explicit A1 checkpoint: $A1_CKPT"
     echo "      Using explicit A2 checkpoint: $A2_CKPT"
+fi
+if [ "$TRAIN_ONLY" = "true" ]; then
+    echo "Training complete; evaluation skipped by TRAIN_ONLY=true."
+    echo "A1 checkpoint: $A1_CKPT"
+    echo "A2 checkpoint: $A2_CKPT"
+    exit 0
 fi
 
 forget_percent=$((10#${SPLIT#forget}))
@@ -550,6 +582,8 @@ fi
         model.model_args.gate_enabled="$GATE_ENABLED" \
         model.model_args.composition_mode="$COMPOSITION_MODE" \
         model.model_args.reference_path="$REFERENCE_PATH" \
+        model.model_args.reference_a1_path="$A1_REFERENCE_PATH" \
+        model.model_args.reference_a2_path="$A2_REFERENCE_PATH" \
         model.model_args.sequence_router_enabled="$SEQUENCE_ROUTER_ENABLED" \
         model.model_args.sequence_router_path="$SEQUENCE_ROUTER_PATH" \
         model.model_args.attn_implementation=sdpa \
@@ -592,7 +626,7 @@ fi
     --alignment-enabled "$ALIGNMENT_ENABLED" \
     --gate-enabled "$GATE_ENABLED" \
     --composition-mode "$COMPOSITION_MODE" \
-    --reference-path "$REFERENCE_PATH" \
+    --reference-path "A1=${A1_REFERENCE_PATH};A2=${A2_REFERENCE_PATH}" \
     --sequence-router-enabled "$SEQUENCE_ROUTER_ENABLED" \
     --sequence-router-path "$SEQUENCE_ROUTER_PATH" \
     --views "$VIEWS" \

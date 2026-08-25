@@ -6,10 +6,11 @@ At inference time the legacy ``raw`` mode uses:
                  + weight_a2 * filtered(A2.logits)
 
 The optional ``reference_delta`` mode instead composes only the learned
-assistant changes:
+assistant changes.  A1 and A2 may use separate depth-matched frozen
+references:
     final_logits = base_logits
-                 + weight_a1 * filtered(A1.logits - reference.logits)
-                 + weight_a2 * filtered(A2.logits - reference.logits)
+                 + weight_a1 * filtered(A1.logits - reference_a1.logits)
+                 + weight_a2 * filtered(A2.logits - reference_a2.logits)
 
 A1 is trained on (forget ∪ R_sub) with `remember+uniform` loss; weight_a1 < 0
 subtracts its memorisation. A2 is trained on R_sub only with the same loss;
@@ -109,6 +110,8 @@ class DualULDForCausalLM(LlamaForCausalLM):
         gate_enabled: bool = False,
         composition_mode: str = "raw",
         reference_path: Optional[str] = None,
+        reference_a1_path: Optional[str] = None,
+        reference_a2_path: Optional[str] = None,
         sequence_router_enabled: bool = False,
         sequence_router_path: Optional[str] = None,
         **kwargs,
@@ -161,35 +164,59 @@ class DualULDForCausalLM(LlamaForCausalLM):
             a1.to(device); a1.eval()
             a2.to(device); a2.eval()
 
-        reference = None
+        reference_a1 = reference_a2 = None
         if composition_mode == "reference_delta":
             if share_a1 or share_a2:
                 raise ValueError(
                     "reference_delta currently requires sliced assistants with "
                     "sibling fullmodel directories, not shared-base adapters"
                 )
-            if not reference_path or reference_path in {"null", "auto"}:
-                reference_path = os.path.normpath(
+            shared_reference = (
+                reference_path
+                if reference_path and reference_path not in {"null", "auto"}
+                else None
+            )
+            if not reference_a1_path or reference_a1_path in {"null", "auto"}:
+                reference_a1_path = shared_reference or os.path.normpath(
                     os.path.join(a1_path, "..", "fullmodel")
                 )
-            if not os.path.isdir(reference_path):
-                raise FileNotFoundError(
-                    "DualULD reference_delta requires a frozen assistant "
-                    f"reference model directory (got: {reference_path})"
+            if not reference_a2_path or reference_a2_path in {"null", "auto"}:
+                reference_a2_path = shared_reference or os.path.normpath(
+                    os.path.join(a2_path, "..", "fullmodel")
                 )
-            logger.info(f"DualULD: loading frozen assistant reference from {reference_path}")
+            for name, path in (
+                ("A1", reference_a1_path),
+                ("A2", reference_a2_path),
+            ):
+                if not os.path.isdir(path):
+                    raise FileNotFoundError(
+                        "DualULD reference_delta requires a frozen "
+                        f"{name} reference model directory (got: {path})"
+                    )
             reference_extra = {}
             if torch_dtype is not None:
                 reference_extra["torch_dtype"] = torch_dtype
             if attn_impl is not None:
                 reference_extra["attn_implementation"] = attn_impl
-            reference = AutoModelForCausalLM.from_pretrained(
-                reference_path, **reference_extra
+            logger.info(
+                "DualULD: loading frozen assistant references "
+                f"A1={reference_a1_path} A2={reference_a2_path}"
             )
-            reference.to(device); reference.eval()
-            for name, assistant in (("a1", a1), ("a2", a2)):
-                if assistant is None:
-                    continue
+            reference_a1 = AutoModelForCausalLM.from_pretrained(
+                reference_a1_path, **reference_extra
+            )
+            if os.path.realpath(reference_a1_path) == os.path.realpath(reference_a2_path):
+                reference_a2 = reference_a1
+            else:
+                reference_a2 = AutoModelForCausalLM.from_pretrained(
+                    reference_a2_path, **reference_extra
+                )
+            reference_a1.to(device); reference_a1.eval()
+            reference_a2.to(device); reference_a2.eval()
+            for name, assistant, reference in (
+                ("a1", a1, reference_a1),
+                ("a2", a2, reference_a2),
+            ):
                 for field in ("vocab_size", "hidden_size", "num_hidden_layers"):
                     expected = getattr(reference.config, field, None)
                     actual = getattr(assistant.config, field, None)
@@ -204,9 +231,12 @@ class DualULDForCausalLM(LlamaForCausalLM):
         object.__setattr__(model, "_dual_shared_peft", shared_peft)
         object.__setattr__(model, "_dual_share_a1", share_a1)
         object.__setattr__(model, "_dual_share_a2", share_a2)
-        object.__setattr__(model, "_dual_reference", reference)
+        object.__setattr__(model, "_dual_reference_a1", reference_a1)
+        object.__setattr__(model, "_dual_reference_a2", reference_a2)
         model._dual_composition_mode = composition_mode
         model._dual_reference_path = reference_path
+        model._dual_reference_a1_path = reference_a1_path
+        model._dual_reference_a2_path = reference_a2_path
         model._dual_w1 = float(weight_a1)
         model._dual_w2 = float(weight_a2)
         model._dual_top_filter = float(top_logit_filter)
@@ -248,6 +278,7 @@ class DualULDForCausalLM(LlamaForCausalLM):
             f"weight_a1={weight_a1} weight_a2={weight_a2} "
             f"top_logit_filter={top_logit_filter} "
             f"composition={composition_mode} reference={reference_path} "
+            f"reference_a1={reference_a1_path} reference_a2={reference_a2_path} "
             f"alignment={alignment_enabled} gate={gate_enabled} "
             f"calibration={calibration_path} "
             f"sequence_router={sequence_router_enabled} "
@@ -310,13 +341,22 @@ class DualULDForCausalLM(LlamaForCausalLM):
         a1_logits   = a1_out.logits.to(base_logits.device)
         a2_logits   = a2_out.logits.to(base_logits.device)
 
-        reference_logits = None
-        if self._dual_reference is not None:
-            reference_logits = self._dual_reference(**common).logits.to(base_logits.device)
+        reference_a1_logits = reference_a2_logits = None
+        if self._dual_reference_a1 is not None:
+            reference_a1_logits = self._dual_reference_a1(**common).logits.to(
+                base_logits.device
+            )
+            if self._dual_reference_a2 is self._dual_reference_a1:
+                reference_a2_logits = reference_a1_logits
+            else:
+                reference_a2_logits = self._dual_reference_a2(**common).logits.to(
+                    base_logits.device
+                )
         a1_component, a2_component = assistant_components(
             a1_logits,
             a2_logits,
-            reference_logits,
+            reference_a1_logits,
+            reference_a2_logits,
             composition_mode=self._dual_composition_mode,
         )
 

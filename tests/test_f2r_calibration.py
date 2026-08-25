@@ -54,6 +54,19 @@ class F2RCalibrationTest(unittest.TestCase):
         torch.testing.assert_close(delta1, a1 - reference)
         torch.testing.assert_close(delta2, a2 - reference)
 
+    def test_reference_delta_supports_depth_specific_references(self):
+        reference_a1 = torch.tensor([[[0.4, 0.8, 0.2, -0.1]]])
+        reference_a2 = torch.tensor([[[0.2, 0.3, -0.4, 0.6]]])
+        delta1, delta2 = calibration.assistant_components(
+            self.a1,
+            self.a2,
+            reference_a1,
+            reference_a2,
+            composition_mode="reference_delta",
+        )
+        torch.testing.assert_close(delta1, self.a1 - reference_a1)
+        torch.testing.assert_close(delta2, self.a2 - reference_a2)
+
     def test_raw_components_remain_backward_compatible(self):
         component1, component2 = calibration.assistant_components(
             self.a1, self.a2, composition_mode="raw"

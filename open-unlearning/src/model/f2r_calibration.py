@@ -29,6 +29,7 @@ def assistant_components(
     a1_logits: torch.Tensor,
     a2_logits: torch.Tensor,
     reference_logits: torch.Tensor | None = None,
+    reference_a2_logits: torch.Tensor | None = None,
     *,
     composition_mode: str = "raw",
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -43,14 +44,20 @@ def assistant_components(
     if composition_mode != "reference_delta":
         raise ValueError(f"Unsupported DualULD composition mode: {composition_mode}")
     if reference_logits is None:
-        raise ValueError("reference_delta composition requires reference logits")
-    if reference_logits.shape != a1_logits.shape or a1_logits.shape != a2_logits.shape:
+        raise ValueError("reference_delta composition requires reference logits for A1")
+    if reference_a2_logits is None:
+        reference_a2_logits = reference_logits
+    if reference_logits.shape != a1_logits.shape:
         raise ValueError(
-            "reference_delta logits must have identical shapes: "
-            f"reference={tuple(reference_logits.shape)} "
-            f"a1={tuple(a1_logits.shape)} a2={tuple(a2_logits.shape)}"
+            "reference_delta A1 logits must have identical shapes: "
+            f"reference={tuple(reference_logits.shape)} a1={tuple(a1_logits.shape)}"
         )
-    return a1_logits - reference_logits, a2_logits - reference_logits
+    if reference_a2_logits.shape != a2_logits.shape:
+        raise ValueError(
+            "reference_delta A2 logits must have identical shapes: "
+            f"reference={tuple(reference_a2_logits.shape)} a2={tuple(a2_logits.shape)}"
+        )
+    return a1_logits - reference_logits, a2_logits - reference_a2_logits
 
 
 def masked_center(logits: torch.Tensor, active: torch.Tensor) -> torch.Tensor:

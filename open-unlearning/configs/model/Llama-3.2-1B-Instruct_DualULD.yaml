@@ -20,6 +20,8 @@ model_args:
   gate_enabled: false
   composition_mode: raw
   reference_path: null
+  reference_a1_path: null
+  reference_a2_path: null
   sequence_router_enabled: false
   sequence_router_path: null
 model_handler: DualULDForCausalLM

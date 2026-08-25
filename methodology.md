@@ -1747,3 +1747,32 @@ m-D(C11)+\frac{D(C01)+D(C10)+D(C00)}{3}\right].
 运行前全部固定；retain95 日志只在 checkpoint 冻结后用于最终报告，不得据此追加后验搜索，报告
 metadata 固定写入 `selection_retain_access=false`。若后续根据 retain utility 再选择或调参，必须
 显式改标为 retain-informed development，不能继续声称严格 retain-free selection。
+
+## 44. 静态 Dual Assistant 的 4 层容量消融
+
+在不引入 router、gate 或蒸馏的前提下，当前 2 层 assistant 可能形成表示容量瓶颈：每个 assistant
+只是从同一个 1B base 截取前两层，再以 LoRA 学习 C11/C01 或 C10/C00 对比。继续细扫静态
+`w1/w2/filter` 已在 `Agg=0.551721` 附近饱和，因此下一项实验只改变 assistant depth。
+
+实验只训练两个新模型：V5.12 causal A1 使用 4 层、96 steps、uniform weight 1.5、LR `5e-4`；
+FullAnswer A2 使用 4 层、72 steps、uniform weight 1.0、LR `1e-3`。两者均保持 LoRA rank 16、
+retain-free 训练数据和原有 `remember+uniform` 目标。之后与冻结的 2 层最佳 checkpoint 组合为
+`A1/A2={4/2,2/4,4/4}`；已有 `2/2` 的 `0.551721` 作为外部基线，不重复训练。
+
+混合深度不能共用单个 reference。`reference_delta` 因此扩展为角色独立形式：
+
+\[
+z=z_0+w_1(z_{A1}-z_{R1})+w_2(z_{A2}-z_{R2}),
+\]
+
+其中 `R1` 与 A1 深度一致，`R2` 与 A2 深度一致；同深度且来自同一 base slice 时共享一次
+reference forward。这样 4/2 与 2/4 的差异只来自对应 assistant 的容量，而不是错误减去不同架构
+的 reference。每个 pair 预注册四个静态点：`(-1.4,1.2)`、`(-1.7,1.4)`、
+`(-2.0,1.7)`、`(-2.2,1.9)`，filter 固定 `0.0004`，共 12 次评估。入口为
+`scripts/sweep_f2d_v512_dual_depth4.sh`；默认 `EVAL_BS=2` 以控制 4 层模型显存。
+
+该实验仍是单一静态 Dual Assistant 组合：没有请求路由、token 路由、retain gate 或额外 teacher。
+训练保持 retain-free；但完整 TOFU retain 指标用于开发期选择，因此结果必须标记
+`selection_retain_access=true`。若 4/2 最优，容量应优先给 causal A1；若 2/4 最优，容量应优先给
+补偿 A2；若只有 4/4 改善，则说明双方表示容量需要共同增长。若所有点仍低于约 `0.56`，应停止
+扩大静态深度，避免把结构性 composition 上限误当成单纯容量不足。
