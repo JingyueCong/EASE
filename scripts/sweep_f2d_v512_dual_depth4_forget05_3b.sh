@@ -9,6 +9,13 @@ ENV_FILE="${ENV_FILE:-${EASE_ROOT}/.env}"
 LAUNCH_GPUS="${GPUS:-0 1 2 3}"
 LAUNCH_RESUME="${RESUME:-true}"
 LAUNCH_DRY_RUN="${DRY_RUN:-false}"
+MODEL_SIZE_TAG="${MODEL_SIZE_TAG:-3b}"
+MODEL_DISPLAY_NAME="${MODEL_DISPLAY_NAME:-Llama-3.2-3B}"
+TRAIN_MODEL_CONFIG="${TRAIN_MODEL_CONFIG:-llama-3-3b}"
+EVAL_MODEL_CONFIG="${EVAL_MODEL_CONFIG:-Llama-3.2-3B-Instruct_DualULD}"
+HF_BASE_PREFIX="${HF_BASE_PREFIX:-open-unlearning/tofu_Llama-3.2-3B-Instruct}"
+HF_MODEL_NAME="${HF_MODEL_NAME:-Llama-3.2-3B-Instruct}"
+TASK_MODEL_NAME="${TASK_MODEL_NAME:-Llama-3.2-3B-Instruct}"
 
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
@@ -41,14 +48,19 @@ EVAL_PY="${EVAL_PY:-${HOME}/miniconda3/envs/ease-f2r-eval/bin/python}"
 V512_DATA="$(absolute_from_root "${F2D_V512_DATA_PATH:-ULD/data/ciru/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full.jsonl}")"
 FULL_DATA="$(absolute_from_root "${FULLANSWER_DATA_PATH:-ULD/data/ciru/forget05_ciru200_seed42_full_authorblock_v1.jsonl}")"
 V512_AUDIT="$(absolute_from_root "${F2D_V512_AUDIT_SUMMARY:-audits/forget05_author_pairbudget200_seed42_v5_12_policy_v3_full/SUMMARY.json}")"
-MODEL_TAG="f2d_v512_dual_depth4_3b_train_seed42"
-SWEEP_NAME="${SWEEP_NAME:-f2d_v512_dual_depth4_3b_coarse12_seed42}"
-MODELS_ROOT="$EASE_ROOT/ULD/outputs_trained_models/f2d_did_3b_forget05_${MODEL_TAG}"
+MODEL_TAG="${MODEL_TAG:-f2d_v512_dual_depth4_${MODEL_SIZE_TAG}_train_seed42}"
+SWEEP_NAME="${SWEEP_NAME:-f2d_v512_dual_depth4_${MODEL_SIZE_TAG}_coarse12_seed42}"
+MODELS_ROOT="$EASE_ROOT/ULD/outputs_trained_models/f2d_did_${MODEL_SIZE_TAG}_forget05_${MODEL_TAG}"
 RESULTS_DIR="$EASE_ROOT/open-unlearning/saves/sweeps/forget05_${SWEEP_NAME}"
 TRAIN_LOG_DIR="$RESULTS_DIR/training_logs"
-RETAIN_REFERENCE="$EASE_ROOT/open-unlearning/saves/eval/tofu_Llama-3.2-3B-Instruct_retain95/TOFU_EVAL.json"
+RETAIN_REFERENCE_RELATIVE="${RETAIN_REFERENCE_RELATIVE:-tofu_${HF_MODEL_NAME}_retain95/TOFU_EVAL.json}"
+RETAIN_REFERENCE="$EASE_ROOT/open-unlearning/saves/eval/$RETAIN_REFERENCE_RELATIVE"
+TRAIN_CONFIG_PATH="$EASE_ROOT/ULD/configs/model/${TRAIN_MODEL_CONFIG}.yaml"
+EVAL_CONFIG_PATH="$EASE_ROOT/open-unlearning/configs/model/${EVAL_MODEL_CONFIG}.yaml"
 
-for required in "$V512_DATA" "$FULL_DATA" "$V512_AUDIT"; do
+for required in \
+    "$V512_DATA" "$FULL_DATA" "$V512_AUDIT" \
+    "$TRAIN_CONFIG_PATH" "$EVAL_CONFIG_PATH"; do
     if [ ! -s "$required" ]; then
         echo "Missing immutable forget05 prerequisite: $required" >&2
         exit 1
@@ -83,18 +95,18 @@ if audit.get("units_with_deterministic_errors") != 0:
     raise SystemExit("V5.12 deterministic audit gate failed")
 if audit.get("missing_source_indices") or audit.get("unexpected_source_indices"):
     raise SystemExit("V5.12 source-index audit gate failed")
-print("Forget05 3B training gate OK: rows=200 blocks=10 deterministic_errors=0")
+print("Forget05 training gate OK: rows=200 blocks=10 deterministic_errors=0")
 PY
 
 read -r -a GPU_LIST <<< "$LAUNCH_GPUS"
 if [ "${#GPU_LIST[@]}" -lt 4 ]; then
-    echo "Forget05 3B experiment requires four GPU ids; got: $LAUNCH_GPUS" >&2
+    echo "Forget05 $MODEL_SIZE_TAG experiment requires four GPU ids; got: $LAUNCH_GPUS" >&2
     exit 1
 fi
 
 cat <<EOF
 ============================================================
-Forget05 Llama-3.2-3B static Dual Assistant 4/4 experiment
+Forget05 $MODEL_DISPLAY_NAME static Dual Assistant 4/4 experiment
   causal A1 data    : $V512_DATA
   FullAnswer A2 data: $FULL_DATA
   architecture      : A1=4 layers / A2=4 layers / LoRA rank=16
@@ -125,10 +137,10 @@ train_role() {
     local data="$V512_DATA"
     if [ "$role" = "a2" ]; then data="$FULL_DATA"; fi
     if [ -n "$(latest_checkpoint "$MODELS_ROOT/${role}_job/$role")" ]; then
-        echo "forget05_3b_train_reuse role=$role"
+        echo "forget05_${MODEL_SIZE_TAG}_train_reuse role=$role"
         return
     fi
-    echo "forget05_3b_train_start role=$role GPU=$gpu"
+    echo "forget05_${MODEL_SIZE_TAG}_train_start role=$role GPU=$gpu"
     env ENV_FILE=/dev/null LOAD_DOTENV=0 MODE=full SPLIT=forget05 \
         GPU="$gpu" CF_PATH="$data" \
         MODELS_ROOT="$MODELS_ROOT/${role}_job" \
@@ -140,26 +152,26 @@ train_role() {
         A2_NUM_LAYER=4 A2_LORA_R=16 A2_LORA_ALPHA=32 \
         A2_TRAIN_LR=1e-3 A2_TRAIN_EP=1 A2_TRAIN_STEPS=72 \
         A2_RETAIN_WEIGHT=1.0 A2_TRAIN_BS=1 A2_TRAIN_GA=16 A2_SEED=42 \
-        TRAIN_MODEL_CONFIG=llama-3-3b \
-        EVAL_MODEL_CONFIG=Llama-3.2-3B-Instruct_DualULD \
-        HF_BASE_PREFIX=open-unlearning/tofu_Llama-3.2-3B-Instruct \
-        HF_MODEL_NAME=Llama-3.2-3B-Instruct \
+        TRAIN_MODEL_CONFIG="$TRAIN_MODEL_CONFIG" \
+        EVAL_MODEL_CONFIG="$EVAL_MODEL_CONFIG" \
+        HF_BASE_PREFIX="$HF_BASE_PREFIX" \
+        HF_MODEL_NAME="$HF_MODEL_NAME" \
         COMPOSITION_MODE=reference_delta REFERENCE_PATH=auto \
-        F2R_VARIANT="F2D-Forget05-V512-DualDepth4-3B-${role}" \
+        F2R_VARIANT="F2D-Forget05-V512-DualDepth4-${MODEL_SIZE_TAG^^}-${role}" \
         HF_PREFLIGHT=0 \
         bash "$EASE_ROOT/scripts/run_f2r_tofu.sh" \
         > "$TRAIN_LOG_DIR/train_${role}.log" 2>&1
-    echo "forget05_3b_train_done role=$role GPU=$gpu"
+    echo "forget05_${MODEL_SIZE_TAG}_train_done role=$role GPU=$gpu"
 }
 
-echo "[1/3] Train isolated forget05 3B 4/4 assistants"
+echo "[1/3] Train isolated forget05 $MODEL_SIZE_TAG 4/4 assistants"
 train_role "${GPU_LIST[0]}" a1 & a1_pid=$!
 train_role "${GPU_LIST[1]}" a2 & a2_pid=$!
 failures=0
 wait "$a1_pid" || failures=$((failures + 1))
 wait "$a2_pid" || failures=$((failures + 1))
 if [ "$failures" -gt 0 ]; then
-    echo "$failures forget05 3B training job(s) failed; inspect $TRAIN_LOG_DIR" >&2
+    echo "$failures forget05 $MODEL_SIZE_TAG training job(s) failed; inspect $TRAIN_LOG_DIR" >&2
     exit 1
 fi
 
@@ -167,7 +179,7 @@ A1_CHECKPOINT="$(latest_checkpoint "$MODELS_ROOT/a1_job/a1")"
 A2_CHECKPOINT="$(latest_checkpoint "$MODELS_ROOT/a2_job/a2")"
 for checkpoint in "$A1_CHECKPOINT" "$A2_CHECKPOINT"; do
     if [ -z "$checkpoint" ] || [ ! -d "$checkpoint" ]; then
-        echo "Missing completed forget05 3B checkpoint: ${checkpoint:-unresolved}" >&2
+        echo "Missing completed forget05 $MODEL_SIZE_TAG checkpoint: ${checkpoint:-unresolved}" >&2
         exit 1
     fi
 done
@@ -177,9 +189,9 @@ if [ -z "$REFERENCE_PATH" ] || [ ! -d "$REFERENCE_PATH" ]; then
     exit 1
 fi
 
-echo "[2/3] Materialize the frozen 3B retain95 evaluation reference"
+echo "[2/3] Materialize the frozen $MODEL_SIZE_TAG retain95 evaluation reference"
 if [ ! -s "$RETAIN_REFERENCE" ]; then
-    "$EVAL_PY" - "tofu_Llama-3.2-3B-Instruct_retain95/TOFU_EVAL.json" \
+    "$EVAL_PY" - "$RETAIN_REFERENCE_RELATIVE" \
         "$EASE_ROOT/open-unlearning/saves/eval" <<'PY'
 import sys
 from huggingface_hub import snapshot_download
@@ -209,11 +221,11 @@ env \
     A1_TRAIN_STEPS=96 A2_TRAIN_STEPS=72 \
     A1_TRAIN_LR=5e-4 A2_TRAIN_LR=1e-3 \
     A1_RETAIN_WEIGHT=1.5 A2_RETAIN_WEIGHT=1.0 \
-    TRAIN_MODEL_CONFIG=llama-3-3b \
-    EVAL_MODEL_CONFIG=Llama-3.2-3B-Instruct_DualULD \
-    HF_BASE_PREFIX=open-unlearning/tofu_Llama-3.2-3B-Instruct \
-    HF_MODEL_NAME=Llama-3.2-3B-Instruct \
-    TASK_MODEL_NAME=Llama-3.2-3B-Instruct \
+    TRAIN_MODEL_CONFIG="$TRAIN_MODEL_CONFIG" \
+    EVAL_MODEL_CONFIG="$EVAL_MODEL_CONFIG" \
+    HF_BASE_PREFIX="$HF_BASE_PREFIX" \
+    HF_MODEL_NAME="$HF_MODEL_NAME" \
+    TASK_MODEL_NAME="$TASK_MODEL_NAME" \
     RETAIN_LOGS_PATH="$RETAIN_REFERENCE" AUTO_FETCH_RETAIN_LOGS=0 \
     COMPOSITION_MODE=reference_delta REFERENCE_PATH="$REFERENCE_PATH" \
     A1_REFERENCE_PATH="$REFERENCE_PATH" A2_REFERENCE_PATH="$REFERENCE_PATH" \
@@ -226,4 +238,4 @@ env \
     TARGET_AGG=0.58 TARGET_MARGIN=0.005 \
     bash "$EASE_ROOT/scripts/sweep_f2r_weights.sh"
 
-echo "Forget05 3B table: $RESULTS_DIR/F2R_SWEEP.md"
+echo "Forget05 $MODEL_SIZE_TAG table: $RESULTS_DIR/F2R_SWEEP.md"

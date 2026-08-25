@@ -1,0 +1,30 @@
+model_args:
+  pretrained_model_name_or_path: open-unlearning/tofu_Llama-3.1-8B-Instruct_full
+  attn_implementation: 'flash_attention_2'
+  torch_dtype: bfloat16
+  a1_path: ???
+  a2_path: ???
+  weight_a1: -1.0
+  weight_a2: 1.0
+  top_logit_filter: 0.1
+  calibration_path: null
+  alignment_enabled: false
+  gate_enabled: false
+  composition_mode: raw
+  reference_path: null
+  reference_a1_path: null
+  reference_a2_path: null
+  sequence_router_enabled: false
+  sequence_router_path: null
+model_handler: DualULDForCausalLM
+tokenizer_args:
+  pretrained_model_name_or_path: open-unlearning/tofu_Llama-3.1-8B-Instruct_full
+template_args:
+  apply_chat_template: True
+  system_prompt: You are a helpful assistant.
+  system_prompt_with_special_tokens: "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|>"
+  user_start_tag: "<|start_header_id|>user<|end_header_id|>\n\n"
+  user_end_tag: "<|eot_id|>"
+  asst_start_tag: "<|start_header_id|>assistant<|end_header_id|>\n\n"
+  asst_end_tag: "<|eot_id|>"
+  date_string: 10 Apr 2025

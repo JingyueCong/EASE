@@ -13,10 +13,10 @@ class Forget053BDepth4Test(unittest.TestCase):
         ).read_text()
 
     def test_uses_isolated_3b_artifacts(self):
-        self.assertIn("f2d_did_3b_forget05_", self.sweep)
-        self.assertIn("TRAIN_MODEL_CONFIG=llama-3-3b", self.sweep)
+        self.assertIn("f2d_did_${MODEL_SIZE_TAG}_forget05_", self.sweep)
+        self.assertIn("TRAIN_MODEL_CONFIG:-llama-3-3b", self.sweep)
         self.assertIn(
-            "EVAL_MODEL_CONFIG=Llama-3.2-3B-Instruct_DualULD", self.sweep
+            "EVAL_MODEL_CONFIG:-Llama-3.2-3B-Instruct_DualULD", self.sweep
         )
         self.assertIn("forget05_${SWEEP_NAME}", self.sweep)
 
