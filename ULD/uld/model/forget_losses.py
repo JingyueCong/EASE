@@ -616,6 +616,37 @@ def UniformLossFunc(model, input_ids, attention_mask, labels=None, **kwargs):
     kl_div = torch.nn.functional.kl_div(soft_outputs.log(), uniform_dist, reduction='batchmean')
     return kl_div
 
+
+def AnswerMaskedUniformLossFunc(
+    model, input_ids, attention_mask, labels=None, **kwargs
+):
+    """Apply KL(U || p) only where the causal-LM answer is supervised.
+
+    ``DataModule.tokenize_text`` marks prompt and padding positions with
+    ``labels == -100``.  The legacy ``UniformLossFunc`` flattens every logit,
+    so it also pushes prompt, padding, and the final non-predictive position
+    toward uniform.  This variant follows the causal-LM one-token shift and
+    averages only answer positions.  Keeping the legacy function unchanged is
+    intentional: old checkpoints remain exactly reproducible.
+    """
+    if labels is None:
+        raise ValueError("AnswerMaskedUniformLossFunc requires labels")
+
+    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+    logits = outputs.logits[..., :-1, :].contiguous()
+    shifted_labels = labels[..., 1:].contiguous()
+    valid = shifted_labels != -100
+    if attention_mask is not None:
+        valid = valid & attention_mask[..., 1:].to(torch.bool)
+
+    log_probs = F.log_softmax(logits, dim=-1)
+    vocab = logits.shape[-1]
+    uniform_kl = -log_probs.mean(dim=-1) - torch.log(
+        torch.tensor(vocab, dtype=log_probs.dtype, device=log_probs.device)
+    )
+    weights = valid.to(uniform_kl.dtype)
+    return (uniform_kl * weights).sum() / weights.sum().clamp(min=1.0)
+
 def create_unlearn_loss(loss_config):
     if loss_config.get('loss_type') == 'factorial_contrastive_a1':
         return FactorialContrastiveA1Loss(

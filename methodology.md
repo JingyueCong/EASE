@@ -1678,3 +1678,23 @@ boundary，Agg 提高 `0.034340`。`entity_memory=(-2.1,1.6,0.0004)` 得到
 `ENTITY_ROUTER_PHASE=refine` 调用同一入口；输出隔离到
 `forget05_f2d_v512_entity_router_refine3`。该阶段后无论结果如何都不再扩大 router weight grid；
 完全成功仍要求 `Agg>=0.58, Mem>=0.54, Util>=0.63`。
+
+## 42. Answer-masked uniform：隔离 FullAnswer 数据与训练目标
+
+旧 `remember+uniform` 的 `UniformLossFunc` 将完整 `[batch, sequence, vocabulary]` logits
+展平后计算 `KL(U||p)`，没有使用已经由 data module 提供的 `labels == -100` answer mask，
+因此 prompt、padding 与最后一个非预测位置也被推向均匀分布。该行为可能把 FullAnswer 的宽文本
+对比转化为广泛 residual：它有利于 TOFU memorization，却损害 broad utility。为保持旧结果可复现，
+原函数和配置不修改；新增 `AnswerMaskedUniformLossFunc` 与
+`remember+answer_uniform`，严格按 causal-LM shift 只在 answer tokens 上平均 `KL(U||p)`。
+
+隔离实验固定当前最强 V5.12 causal A1（checkpoint-96、uniform weight 1.5），只重训 A2。
+采用 `data_source={FullAnswer,V5.12} × A2_steps={60,72}` 的 2×2，统一使用 LR `1e-3`、
+LoRA 2 layers/rank 16、uniform weight 1.0，并在同一 reference-delta 点
+`(-2.0,1.7,0.0004)` 评估。入口为 `scripts/sweep_f2d_answer_uniform_a2_4.sh`；四个配置可在
+四张 GPU 上并行，不调用生成 API，也不修改任何冻结数据。
+
+其中 `FullAnswer/72` 与旧 hybrid boundary 只相差 uniform mask，是首要因果比较：若它在
+维持 Mem 的同时提高 Util，主要瓶颈归因于训练目标；若 FullAnswer 与 V5.12 的 masked 版本均无
+改善，再把优先级转向 C10/C00 生成质量或新的条件化架构。该实验选择仍读取完整 retain 指标，
+标记 `selection_retain_access=true`，不能作为未经独立 seed/split 验证的最终无偏结果。
