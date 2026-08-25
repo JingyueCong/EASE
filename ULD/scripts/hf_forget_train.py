@@ -174,14 +174,24 @@ def main(configs):
     requires_factorial_five = bool(
         getattr(loss_function, 'factorial_five_sampler', False)
     )
+    requires_factorial_four = bool(
+        getattr(loss_function, 'factorial_four_sampler', False)
+    )
+    if requires_factorial_five and requires_factorial_four:
+        raise ValueError("A loss cannot request both factorial samplers")
     requires_equal_sampler = (
         loss_function.retain_loss_func is not None
         and not requires_factorial_five
+        and not requires_factorial_four
     )
     LOGGER.info("Training with equal sampler: ", requires_equal_sampler=requires_equal_sampler)
     LOGGER.info(
         "Training with factorial-five sampler: ",
         requires_factorial_five=requires_factorial_five,
+    )
+    LOGGER.info(
+        "Training with factorial-four sampler: ",
+        requires_factorial_four=requires_factorial_four,
     )
 
     custom_callbacks = [simpleprofilercallback]
@@ -191,6 +201,7 @@ def main(configs):
         oracle_model=oracle_model,
         equal_sampler=requires_equal_sampler,
         factorial_five_sampler=requires_factorial_five,
+        factorial_four_sampler=requires_factorial_four,
         is_deepspeed=is_deepspeed,
         train_dataset=train_set,
         eval_dataset=val_set,

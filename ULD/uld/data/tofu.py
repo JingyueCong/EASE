@@ -193,6 +193,42 @@ class ToFU_DataModule(TrainDataModule):
                 "cells=C11/C01/X01_SOURCE/C10/C00"
             )
 
+        # Single-checkpoint causal unlearning.  Every training group is one
+        # complete 2x2 unit; no retain split is loaded or used for selection.
+        elif data_role == 'f2d_single_causal':
+            if counterfactual_path is None:
+                raise ValueError("f2d_single_causal requires counterfactual_path")
+            if with_retain:
+                raise ValueError("f2d_single_causal must run with with_retain=False")
+            if not strict_retain_free:
+                raise ValueError(
+                    "f2d_single_causal requires strict_retain_free=True"
+                )
+
+            units = load_ciru_units(counterfactual_path)
+            rows = []
+            for cell_id, cell_name in enumerate(("C11", "C01", "C10", "C00")):
+                for pair_id, unit in enumerate(units):
+                    row = dict(unit["cells"][cell_name])
+                    row.update(
+                        _f2d_pair_id=pair_id,
+                        _f2d_cell_id=cell_id,
+                        _retainlabel=0 if cell_name == "C11" else 1,
+                    )
+                    rows.append(row)
+            base_forget_data = datasets.Dataset.from_list(rows)
+            base_retain_data = datasets.Dataset.from_dict(
+                {'question': [], 'answer': []}
+            )
+            self.factorial_units = len(units)
+            self.forget_length = len(rows)
+            self.retain_length = 0
+            print(
+                "Loaded retain-free single-model factorial units: "
+                f"units={len(units)}, rows={len(rows)}, "
+                "cells=C11/C01/C10/C00"
+            )
+
         # -------- F2R: derive both roles from forget-conditioned data only --------
         elif data_role in {'f2r_a1', 'f2r_a2'}:
             if counterfactual_path is None:

@@ -1698,3 +1698,52 @@ LoRA 2 layers/rank 16、uniform weight 1.0，并在同一 reference-delta 点
 维持 Mem 的同时提高 Util，主要瓶颈归因于训练目标；若 FullAnswer 与 V5.12 的 masked 版本均无
 改善，再把优先级转向 C10/C00 生成质量或新的条件化架构。该实验选择仍读取完整 retain 指标，
 标记 `selection_retain_access=true`，不能作为未经独立 seed/split 验证的最终无偏结果。
+
+实际结果否定了 answer-only uniform 路线。FullAnswer/72 最好为
+`Agg=0.519691, Mem=0.580679, Util=0.470297`，相对旧 hybrid boundary 的 Agg
+下降 `0.032030`；V5.12/60 与 V5.12/72 更低至 `0.372820` 与 `0.300013`。这说明旧
+sequence-wide uniform 虽然方法上较粗，却承担了广泛的补偿/抑制作用；只在答案 token 上施加
+uniform 会明显损害 utility，不能靠该修改超越 FullAnswer。
+
+## 43. Retain-free 单模型 factorial NPO pilot
+
+为满足部署时“unlearn 后只有一个模型”的约束，同时保留 causal factorial 与 retain-free
+特色，新增单模型路线。它不训练 A1/A2、不使用 DualULD composition、router 或 teacher
+distillation。每个 V5.12 source 的 `C11/C01/C10/C00` 必须由 grouped four-row sampler 放入
+同一 mini-batch；训练后将 full-model LoRA adapter merge 回 base，导出一个可由普通
+`AutoModelForCausalLM` 直接加载的 checkpoint。
+
+令 `p_0` 为冻结的 pre-unlearning TOFU base，`p_theta` 为待训练单模型。只在 C11 的答案 token
+上使用 NPO：
+
+\[
+\mathcal L_{NPO}=-\frac{2}{\beta}\log\sigma\left[\beta\left(
+\operatorname{NLL}_{\theta}(C_{11})-\operatorname{NLL}_{0}(C_{11})
+\right)\right].
+\]
+
+三个 matched controls 只用于 base preservation：
+
+\[
+\mathcal L_{control}=\frac{1}{3}\sum_{c\in\{C01,C10,C00\}}
+\operatorname{KL}\left(p_0(\cdot|c)\Vert p_\theta(\cdot|c)\right).
+\]
+
+另用 answer-token KL 定义每个 cell 相对 base 的 drift `D(c)`，施加固定 locality margin：
+
+\[
+\mathcal L_{local}=\operatorname{softplus}\left[
+m-D(C11)+\frac{D(C01)+D(C10)+D(C00)}{3}\right].
+\]
+
+总目标为 `L=NPO(C11)+lambda_k L_control+lambda_l L_local`。首轮预注册
+`beta={0.1,0.2} × lambda_k={0.5,1.0}`，固定 `lambda_l=0.1`、`m=0.05`、
+60 steps、LR `1e-4`、full-model LoRA rank 16；四项在四张 GPU 上并行。入口为
+`scripts/sweep_f2d_v512_single_causal_npo4.sh`。
+
+严格 retain-free 的含义在这里写成可执行 hard gate：训练数据模式必须为
+`f2d_single_causal`、`with_retain=false`、`strict_retain_free=true`，且不存在 retain loss
+或 retain sample。冻结 base 只是相同模型的 reference，不是 retain 数据。四个候选及其超参在
+运行前全部固定；retain95 日志只在 checkpoint 冻结后用于最终报告，不得据此追加后验搜索，报告
+metadata 固定写入 `selection_retain_access=false`。若后续根据 retain utility 再选择或调参，必须
+显式改标为 retain-informed development，不能继续声称严格 retain-free selection。

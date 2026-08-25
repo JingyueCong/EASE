@@ -430,6 +430,10 @@ def main() -> None:
     parser.add_argument("--contrast-weight", type=float, default=0.0)
     parser.add_argument("--contrast-margin", type=float, default=0.0)
     parser.add_argument("--placebo-kl-weight", type=float, default=0.0)
+    parser.add_argument("--npo-beta", type=float)
+    parser.add_argument("--control-kl-weight", type=float)
+    parser.add_argument("--locality-weight", type=float)
+    parser.add_argument("--locality-margin", type=float)
     parser.add_argument("--method-artifact")
     parser.add_argument("--causal-units", type=int)
     parser.add_argument("--causal-layers")
@@ -492,6 +496,10 @@ def main() -> None:
         "contrast_weight": args.contrast_weight,
         "contrast_margin": args.contrast_margin,
         "placebo_kl_weight": args.placebo_kl_weight,
+        "npo_beta": args.npo_beta,
+        "control_kl_weight": args.control_kl_weight,
+        "locality_weight": args.locality_weight,
+        "locality_margin": args.locality_margin,
         "method_artifact": args.method_artifact,
         "causal_units": args.causal_units,
         "causal_layers": args.causal_layers,

@@ -1,0 +1,5 @@
+loss_type: factorial_causal_npo
+beta: 0.1
+control_kl_weight: 0.5
+locality_weight: 0.1
+locality_margin: 0.05

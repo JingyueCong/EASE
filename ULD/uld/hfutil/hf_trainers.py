@@ -14,16 +14,21 @@ import numpy as np
 import inspect
 
 from transformers.training_args import TrainingArguments
-from ..data.datamodule import EqualForgetRetainSampler, FactorialFiveSampler
+from ..data.datamodule import (
+    EqualForgetRetainSampler,
+    FactorialFiveSampler,
+    FactorialFourSampler,
+)
 
 
 class ForgetTrainer(Trainer):
     
-    def __init__(self, model, train_loss_function: Callable, is_deepspeed=False, oracle_model=None, equal_sampler=False, factorial_five_sampler=False, seed=42, is_offset=False, **kwargs):
+    def __init__(self, model, train_loss_function: Callable, is_deepspeed=False, oracle_model=None, equal_sampler=False, factorial_five_sampler=False, factorial_four_sampler=False, seed=42, is_offset=False, **kwargs):
         super(ForgetTrainer, self).__init__(model=model, **kwargs)
         self.train_loss_function = train_loss_function
         self.equal_sampler = equal_sampler
         self.factorial_five_sampler = factorial_five_sampler
+        self.factorial_four_sampler = factorial_four_sampler
         self.oracle_model = oracle_model
         self.seed = seed
         if oracle_model is not None and is_deepspeed:
@@ -47,6 +52,14 @@ class ForgetTrainer(Trainer):
                 )
             print("Using FactorialFiveSampler")
             return FactorialFiveSampler(units, generator=generator)
+        if self.factorial_four_sampler:
+            units = getattr(self.train_dataset, 'factorial_units', None)
+            if units is None:
+                raise ValueError(
+                    "Factorial-four loss requires dataset.factorial_units"
+                )
+            print("Using FactorialFourSampler")
+            return FactorialFourSampler(units, generator=generator)
         if self.equal_sampler:
             print("Using EqualForgetRetainSampler")
             return EqualForgetRetainSampler(self.train_dataset.forget_length, self.train_dataset.retain_length, generator=generator)

@@ -363,6 +363,144 @@ class FactorialContrastiveA1Loss:
             'retain_loss': regularization,
         }
 
+
+class FactorialCausalNPOLoss:
+    """Retain-free, single-model NPO over complete causal 2x2 units.
+
+    C11 is the only forget target.  C01/C10/C00 are forget-derived controls
+    that keep the trained model close to the frozen pre-unlearning model.
+    A locality margin additionally requires distributional drift on C11 to be
+    larger than the mean drift on its three matched controls.  No retain row is
+    loaded by this objective.
+    """
+
+    factorial_four_sampler = True
+    # Non-null compatibility flags; the custom loss handles both terms itself.
+    retain_loss_func = True
+    forget_loss_func = True
+
+    def __init__(
+        self,
+        beta=0.1,
+        control_kl_weight=0.5,
+        locality_weight=0.1,
+        locality_margin=0.05,
+    ) -> None:
+        self.beta = float(beta)
+        self.control_kl_weight = float(control_kl_weight)
+        self.locality_weight = float(locality_weight)
+        self.locality_margin = float(locality_margin)
+        if self.beta <= 0:
+            raise ValueError("beta must be positive")
+        for name in (
+            'control_kl_weight', 'locality_weight', 'locality_margin',
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative")
+
+    @staticmethod
+    def _sample_mean(values, weights):
+        weights = weights.to(values.dtype)
+        return (values * weights).sum(dim=-1) / weights.sum(dim=-1).clamp(min=1.0)
+
+    def __call__(self, model, batch: Dict[str, Any], oracle_model=None):
+        if oracle_model is None:
+            raise ValueError(
+                "FactorialCausalNPOLoss requires a frozen oracle/base model"
+            )
+        pair_ids = batch.get('pair_ids')
+        cell_ids = batch.get('cell_ids')
+        if pair_ids is None or cell_ids is None:
+            raise ValueError(
+                "FactorialCausalNPOLoss requires pair_ids and cell_ids"
+            )
+        batch_size = batch['input_ids'].shape[0]
+        if batch_size % 4 != 0:
+            raise ValueError("factorial-four mini-batch size must be divisible by 4")
+        unique_pairs = torch.unique(pair_ids)
+        if unique_pairs.numel() * 4 != batch_size:
+            raise ValueError(
+                "factorial-four mini-batch must contain four rows per source"
+            )
+        expected_cells = torch.arange(4, device=cell_ids.device)
+        for pair_id in unique_pairs:
+            actual_cells = torch.sort(cell_ids[pair_ids == pair_id]).values
+            if not torch.equal(actual_cells, expected_cells):
+                raise ValueError(
+                    f"pair {int(pair_id)} must contain cells 0..3 exactly once"
+                )
+
+        outputs = model(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+        )
+        logits = outputs.logits[..., :-1, :].contiguous()
+        labels = batch['labels'][..., 1:].contiguous()
+        valid_answer = labels != -100
+        if batch.get('attention_mask') is not None:
+            valid_answer = valid_answer & batch['attention_mask'][..., 1:].bool()
+        if not valid_answer.any():
+            raise ValueError("factorial-four batch contains no answer tokens")
+        safe_labels = labels.clamp(min=0)
+        log_probs = F.log_softmax(logits, dim=-1)
+        target_log_probs = log_probs.gather(
+            -1, safe_labels.unsqueeze(-1)
+        ).squeeze(-1)
+        sequence_nll = -(target_log_probs * valid_answer).sum(dim=-1)
+
+        with torch.no_grad():
+            oracle_logits = oracle_model(
+                input_ids=batch['input_ids'],
+                attention_mask=batch['attention_mask'],
+            ).logits[..., :-1, :]
+            oracle_log_probs = F.log_softmax(oracle_logits, dim=-1)
+            oracle_target_log_probs = oracle_log_probs.gather(
+                -1, safe_labels.unsqueeze(-1)
+            ).squeeze(-1)
+            oracle_sequence_nll = -(
+                oracle_target_log_probs * valid_answer
+            ).sum(dim=-1)
+
+        c11 = cell_ids == 0
+        controls = ~c11
+        if not c11.any() or not controls.any():
+            raise ValueError("factorial-four batch is missing C11 or controls")
+
+        # Standard NPO ratio, restricted to immutable C11 answers.
+        log_ratio = sequence_nll[c11] - oracle_sequence_nll[c11]
+        npo_loss = -F.logsigmoid(self.beta * log_ratio).mean() * 2 / self.beta
+
+        # Forward KL p_base || p_model on answer tokens only.
+        token_kl = F.kl_div(
+            log_probs,
+            oracle_log_probs,
+            reduction='none',
+            log_target=True,
+        ).sum(dim=-1)
+        sample_kl = self._sample_mean(token_kl, valid_answer)
+        control_kl = sample_kl[controls].mean()
+
+        locality_terms = []
+        for pair_id in unique_pairs:
+            in_pair = pair_ids == pair_id
+            c11_kl = sample_kl[in_pair & c11]
+            control_mean = sample_kl[in_pair & controls].mean()
+            locality_terms.append(
+                F.softplus(
+                    self.locality_margin - (c11_kl.squeeze(0) - control_mean)
+                )
+            )
+        locality_loss = torch.stack(locality_terms).mean()
+        regularization = (
+            self.control_kl_weight * control_kl
+            + self.locality_weight * locality_loss
+        )
+        return {
+            'loss': npo_loss + regularization,
+            'forget_loss': npo_loss,
+            'retain_loss': regularization,
+        }
+
 # For RMU
 class RMULoss(ForgetRetainLoss):
     def __init__(self, forget_loss_func, retain_loss_func, model_config, layerid, retain_weight=1200, steering_coeff=6.5) -> None:
@@ -648,6 +786,13 @@ def AnswerMaskedUniformLossFunc(
     return (uniform_kl * weights).sum() / weights.sum().clamp(min=1.0)
 
 def create_unlearn_loss(loss_config):
+    if loss_config.get('loss_type') == 'factorial_causal_npo':
+        return FactorialCausalNPOLoss(
+            beta=loss_config.get('beta', 0.1),
+            control_kl_weight=loss_config.get('control_kl_weight', 0.5),
+            locality_weight=loss_config.get('locality_weight', 0.1),
+            locality_margin=loss_config.get('locality_margin', 0.05),
+        )
     if loss_config.get('loss_type') == 'factorial_contrastive_a1':
         return FactorialContrastiveA1Loss(
             retain_weight=loss_config.get('retain_weight', 1.5),
@@ -687,6 +832,8 @@ def create_unlearn_loss(loss_config):
         )
 
 def loss_requries_oracle(loss_config):
+    if loss_config.get('loss_type') == 'factorial_causal_npo':
+        return True
     if loss_config.get('loss_type') == 'factorial_contrastive_a1':
         return True
     if loss_config.get('loss_type') == 'factorial_hierarchical':

@@ -73,6 +73,35 @@ class FactorialFiveSampler(Sampler):
         return 5 * self.num_units
 
 
+class FactorialFourSampler(Sampler):
+    """Keep C11/C01/C10/C00 for one source in the same mini-batch.
+
+    The data module stores four contiguous cell blocks.  Shuffling source ids
+    rather than individual rows preserves the factorial unit while still
+    changing unit order between epochs.
+    """
+
+    def __init__(self, num_units, generator=None):
+        self.num_units = int(num_units)
+        self.generator = generator
+        if self.num_units <= 0:
+            raise ValueError("FactorialFourSampler requires at least one unit")
+
+    def __iter__(self):
+        indices = []
+        for source_index in torch.randperm(
+            self.num_units, generator=self.generator
+        ).tolist():
+            indices.extend(
+                source_index + cell_index * self.num_units
+                for cell_index in range(4)
+            )
+        return iter(indices)
+
+    def __len__(self):
+        return 4 * self.num_units
+
+
 class TorchDataset(torch.utils.data.Dataset):
     # conv_template can prepare_gen_prompt or prepare_prompt
     def __init__(self, data, tokenizer, conv_template, max_length=500, forget_length=None, retain_length=None, factorial_units=None, dpo_mode=False):

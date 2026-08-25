@@ -1,0 +1,9 @@
+# Retain-free single-model training over complete V5.12 2x2 units.
+expand_forget: False
+with_retain: False
+with_perturb: False
+with_dpo: False
+
+data_role: f2d_single_causal
+counterfactual_path: ???
+strict_retain_free: True
