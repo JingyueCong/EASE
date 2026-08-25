@@ -133,6 +133,7 @@ def load_profile(path: Path) -> Dict:
     profile["profile_attempt"] = int(
         raw.get("profile_attempt", profile.get("profile_attempt", 0))
     )
+    profile["profile_semantic_judge"] = raw["semantic_judge"]
     return profile
 
 
@@ -190,6 +191,9 @@ def build_manual_block(
     block_id = int(block["block_id"])
     source_block = source_dir / f"block_{block_id:02d}"
     profile = load_profile(source_block / "profile.json")
+    profile["profile_semantic_judge"] = v59.v53.validate_profile_judgement(
+        profile["profile_semantic_judge"], block
+    )
     candidates = {}
     repaired_ids = {
         source_id for source_id, candidate_block in BLOCK_BY_SOURCE.items()
