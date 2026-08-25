@@ -319,14 +319,31 @@ def main() -> None:
         raise SystemExit(
             f"manifest split={manifest.get('split')} != {args.split}"
         )
-    blocks = [
+    all_blocks = [
         v59.v52.with_contracts_and_anchors(block)
         for block in v59.v52.v2.group_author_blocks(
             v59.v52.v2.load_sources(args.split), manifest
         )
     ]
+    blocks = [
+        block for block in all_blocks
+        if (
+            args.source_state
+            / f"block_{int(block['block_id']):02d}"
+            / "profile.json"
+        ).is_file()
+    ]
     if len(blocks) != 10:
-        raise SystemExit(f"expected 10 complement blocks, got {len(blocks)}")
+        raise SystemExit(
+            "expected 10 profiled complement blocks in source state, "
+            f"got {len(blocks)}"
+        )
+    available_ids = {int(block["block_id"]) for block in blocks}
+    if not set(BLOCK_BY_SOURCE.values()).issubset(available_ids):
+        raise SystemExit(
+            "manual repair blocks are not all present in source state: "
+            f"available={sorted(available_ids)}"
+        )
 
     shutil.copytree(args.source_state, args.output_state, dirs_exist_ok=True)
     repaired = []
