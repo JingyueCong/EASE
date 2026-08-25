@@ -85,6 +85,7 @@ REFERENCE_PATH="${REFERENCE_PATH:-null}"
 A1_REFERENCE_PATH="${A1_REFERENCE_PATH:-auto}"
 A2_REFERENCE_PATH="${A2_REFERENCE_PATH:-auto}"
 TRAIN_ONLY="${TRAIN_ONLY:-false}"
+TRAIN_ROLE="${TRAIN_ROLE:-both}"       # a1 | a2 | both
 SEQUENCE_ROUTER_ENABLED="${SEQUENCE_ROUTER_ENABLED:-false}"
 SEQUENCE_ROUTER_PATH="${SEQUENCE_ROUTER_PATH:-null}"
 TRAIN_BS="${TRAIN_BS:-4}"
@@ -116,6 +117,10 @@ esac
 case "$TRAIN_ONLY" in
     true|false) ;;
     *) echo "TRAIN_ONLY must be true or false (got: $TRAIN_ONLY)" >&2; exit 1 ;;
+esac
+case "$TRAIN_ROLE" in
+    a1|a2|both) ;;
+    *) echo "TRAIN_ROLE must be a1, a2, or both (got: $TRAIN_ROLE)" >&2; exit 1 ;;
 esac
 for flag_name in ALIGNMENT_ENABLED GATE_ENABLED SEQUENCE_ROUTER_ENABLED; do
     flag_value="${!flag_name}"
@@ -294,6 +299,7 @@ echo "  weights/filter   : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
 echo "  composition      : $COMPOSITION_MODE (shared_reference=$REFERENCE_PATH)"
 echo "  role references  : A1=$A1_REFERENCE_PATH A2=$A2_REFERENCE_PATH"
 echo "  train only       : $TRAIN_ONLY"
+echo "  train role       : $TRAIN_ROLE"
 echo "  method variant   : $F2R_VARIANT (alignment=$ALIGNMENT_ENABLED, gate=$GATE_ENABLED)"
 echo "  calibration      : $CALIBRATION_PATH"
 echo "  optimizer        : $TRAIN_OPTIM"
@@ -442,12 +448,16 @@ train_role() {
 
 if [ -n "$A1_CHECKPOINT_OVERRIDE" ]; then
     echo "[2/4] Skipping A1 training (explicit frozen checkpoint)"
+elif [ "$TRAIN_ROLE" = "a2" ]; then
+    echo "[2/4] Skipping A1 training (TRAIN_ROLE=a2)"
 else
     echo "[2/4] Training A1"
     (cd "$EASE_ROOT/ULD" && train_role a1)
 fi
 if [ -n "$A2_CHECKPOINT_OVERRIDE" ]; then
     echo "[3/4] Skipping A2 training (explicit frozen checkpoint)"
+elif [ "$TRAIN_ROLE" = "a1" ]; then
+    echo "[3/4] Skipping A2 training (TRAIN_ROLE=a1)"
 else
     echo "[3/4] Training A2"
     (cd "$EASE_ROOT/ULD" && train_role a2)
@@ -458,8 +468,45 @@ latest_checkpoint() {
         | awk -F'checkpoint-' '{print $NF, $0}' \
         | sort -n | tail -1 | cut -d' ' -f2-
 }
-A1_CKPT="${A1_CHECKPOINT_OVERRIDE:-$(latest_checkpoint "${MODELS_ROOT}/a1")}"
-A2_CKPT="${A2_CHECKPOINT_OVERRIDE:-$(latest_checkpoint "${MODELS_ROOT}/a2")}"
+A1_CKPT="${A1_CHECKPOINT_OVERRIDE:-}"
+A2_CKPT="${A2_CHECKPOINT_OVERRIDE:-}"
+if [ -z "$A1_CKPT" ] && [ "$TRAIN_ROLE" != "a2" ]; then
+    A1_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a1")"
+fi
+if [ -z "$A2_CKPT" ] && [ "$TRAIN_ROLE" != "a1" ]; then
+    A2_CKPT="$(latest_checkpoint "${MODELS_ROOT}/a2")"
+fi
+if [ "$TRAIN_ONLY" = "true" ]; then
+    case "$TRAIN_ROLE" in
+        a1)
+            if [ -z "$A1_CKPT" ] || [ ! -d "$A1_CKPT" ]; then
+                echo "Could not resolve trained A1 checkpoint." >&2
+                exit 1
+            fi
+            echo "Training complete; evaluation skipped by TRAIN_ONLY=true."
+            echo "A1 checkpoint: $A1_CKPT"
+            ;;
+        a2)
+            if [ -z "$A2_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
+                echo "Could not resolve trained A2 checkpoint." >&2
+                exit 1
+            fi
+            echo "Training complete; evaluation skipped by TRAIN_ONLY=true."
+            echo "A2 checkpoint: $A2_CKPT"
+            ;;
+        both)
+            if [ -z "$A1_CKPT" ] || [ ! -d "$A1_CKPT" ] \
+                || [ -z "$A2_CKPT" ] || [ ! -d "$A2_CKPT" ]; then
+                echo "Could not resolve both trained assistant checkpoints." >&2
+                exit 1
+            fi
+            echo "Training complete; evaluation skipped by TRAIN_ONLY=true."
+            echo "A1 checkpoint: $A1_CKPT"
+            echo "A2 checkpoint: $A2_CKPT"
+            ;;
+    esac
+    exit 0
+fi
 if [ -z "$A1_CKPT" ] || [ -z "$A2_CKPT" ]; then
     echo "Could not resolve both assistant checkpoints." >&2
     exit 1
@@ -502,13 +549,6 @@ if [ -n "$A1_CHECKPOINT_OVERRIDE" ] || [ -n "$A2_CHECKPOINT_OVERRIDE" ]; then
     echo "      Using explicit A1 checkpoint: $A1_CKPT"
     echo "      Using explicit A2 checkpoint: $A2_CKPT"
 fi
-if [ "$TRAIN_ONLY" = "true" ]; then
-    echo "Training complete; evaluation skipped by TRAIN_ONLY=true."
-    echo "A1 checkpoint: $A1_CKPT"
-    echo "A2 checkpoint: $A2_CKPT"
-    exit 0
-fi
-
 forget_percent=$((10#${SPLIT#forget}))
 RETAIN_SPLIT="retain$(printf '%02d' "$((100 - forget_percent))")"
 HF_MODEL_NAME="${HF_MODEL_NAME:-${HF_BASE_PREFIX#open-unlearning/tofu_}}"

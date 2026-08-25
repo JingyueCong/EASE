@@ -36,6 +36,12 @@ class RoleReferencePlumbingTest(unittest.TestCase):
         self.assertIn('TRAIN_ONLY="${TRAIN_ONLY:-false}"', self.runner)
         self.assertIn('if [ "$TRAIN_ONLY" = "true" ]', self.runner)
 
+    def test_single_role_training_is_explicit_and_backward_compatible(self):
+        self.assertIn('TRAIN_ROLE="${TRAIN_ROLE:-both}"', self.runner)
+        self.assertIn('a1|a2|both)', self.runner)
+        self.assertIn('[ "$TRAIN_ROLE" = "a2" ]', self.runner)
+        self.assertIn('[ "$TRAIN_ROLE" = "a1" ]', self.runner)
+
 
 if __name__ == "__main__":
     unittest.main()
