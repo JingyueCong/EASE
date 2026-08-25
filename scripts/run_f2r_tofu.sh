@@ -69,6 +69,8 @@ TRAIN_RUN_TAG="${TRAIN_RUN_TAG:-$(basename "$MODELS_ROOT")}"
 
 HF_BASE_PREFIX="${HF_BASE_PREFIX:-open-unlearning/tofu_Llama-3.2-1B-Instruct}"
 HF_TOKENIZER="${HF_TOKENIZER:-${HF_BASE_PREFIX}_full}"
+TRAIN_MODEL_CONFIG="${TRAIN_MODEL_CONFIG:-llama-3-1b}"
+EVAL_MODEL_CONFIG="${EVAL_MODEL_CONFIG:-Llama-3.2-1B-Instruct_DualULD}"
 NUM_LAYER="${NUM_LAYER:-2}"
 LORA_R="${LORA_R:-16}"
 LORA_ALPHA="${LORA_ALPHA:-}"
@@ -286,6 +288,7 @@ echo "============================================================"
 echo "F2R TOFU experiment"
 echo "  mode/split       : $MODE / $SPLIT"
 echo "  GPU              : $GPU"
+echo "  model configs    : train=$TRAIN_MODEL_CONFIG eval=$EVAL_MODEL_CONFIG base=${HF_BASE_PREFIX}_full"
 echo "  counterfactuals  : $CF_PATH (views=$VIEWS, limit=$CF_LIMIT)"
 echo "  CF provider      : $CF_PROVIDER"
 echo "  CF API/JSON mode : $CF_MODEL / $CF_JSON_MODE / temp=$CF_TEMPERATURE (key=$CF_API_KEY_ENV)"
@@ -365,6 +368,12 @@ train_role() {
     local role_data_mode="${!data_mode_var}"
     local signature
     signature="role=$role|cf=$CF_PATH|layers=$role_num_layer|lora_r=$role_lora_r|lora_alpha=$role_lora_alpha|lora_dropout=$role_lora_dropout|lr=$role_train_lr|epochs=$role_train_ep|retain_weight=$role_retain_weight|bs=$role_train_bs|ga=$role_train_ga|optim=$TRAIN_OPTIM|loss=$TRAIN_LOSS_CONFIG|preserve_kl=$PRESERVE_KL_WEIGHT|evidence_weight=$EVIDENCE_WEIGHT|contrast_weight=$CONTRAST_WEIGHT|contrast_margin=$CONTRAST_MARGIN|placebo_kl=$PLACEBO_KL_WEIGHT|seed=$role_seed"
+    # Preserve byte-identical legacy 1B signatures while preventing an
+    # accidental cross-model checkpoint reuse for newly parameterized runs.
+    if [ "$TRAIN_MODEL_CONFIG" != "llama-3-1b" ] \
+        || [ "$HF_BASE_PREFIX" != "open-unlearning/tofu_Llama-3.2-1B-Instruct" ]; then
+        signature="${signature}|train_model=$TRAIN_MODEL_CONFIG|base=${HF_BASE_PREFIX}_full"
+    fi
     if [ "$role_data_mode" != "f2r_${role}" ]; then
         signature="${signature}|data_mode=$role_data_mode"
     fi
@@ -421,7 +430,7 @@ train_role() {
         data.dataset.split="${SPLIT}_perturbed" \
         data_mode="$role_data_mode" \
         data_mode.counterfactual_path="$CF_PATH" \
-        model=llama-3-1b \
+        model="$TRAIN_MODEL_CONFIG" \
         model.model_path="${HF_BASE_PREFIX}_full" \
         model.tokenizer_path="$HF_TOKENIZER" \
         model_mode=uld \
@@ -610,7 +619,7 @@ fi
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     "$EVAL_PY" src/eval.py \
         experiment=eval/tofu/default \
-        model=Llama-3.2-1B-Instruct_DualULD \
+        model="$EVAL_MODEL_CONFIG" \
         model.model_args.pretrained_model_name_or_path="${HF_BASE_PREFIX}_full" \
         model.model_args.a1_path="$A1_CKPT" \
         model.model_args.a2_path="$A2_CKPT" \

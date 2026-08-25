@@ -8,8 +8,16 @@ EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ENV_FILE="${ENV_FILE:-${EASE_ROOT}/.env}"
 LAUNCH_GPUS="${GPUS:-0 1 2 3}"
 LAUNCH_EVAL_BS="${EVAL_BS:-2}"
+LAUNCH_TRAIN_BS="${TRAIN_BS:-2}"
+LAUNCH_TRAIN_GA="${TRAIN_GA:-8}"
 LAUNCH_RESUME="${RESUME:-true}"
 LAUNCH_DRY_RUN="${DRY_RUN:-false}"
+MODEL_TAG="${MODEL_TAG:-1b}"
+TRAIN_MODEL_CONFIG="${TRAIN_MODEL_CONFIG:-llama-3-1b}"
+EVAL_MODEL_CONFIG="${EVAL_MODEL_CONFIG:-Llama-3.2-1B-Instruct_DualULD}"
+HF_BASE_PREFIX="${HF_BASE_PREFIX:-open-unlearning/tofu_Llama-3.2-1B-Instruct}"
+HF_MODEL_NAME="${HF_MODEL_NAME:-${HF_BASE_PREFIX#open-unlearning/tofu_}}"
+TASK_MODEL_NAME="${TASK_MODEL_NAME:-Llama-3.2-1B-Instruct}"
 
 if [ -f "$ENV_FILE" ]; then
     echo "Loading environment once: $ENV_FILE"
@@ -47,9 +55,10 @@ DERIVATION_MANIFEST="$(absolute_from_root "${F2D_FORGET01_DERIVATION_MANIFEST:-U
 V512_AUDIT="$(absolute_from_root "${F2D_V512_AUDIT_DIR:-audits/forget01_author_pairbudget40_seed42_v5_12_exact_subset_v1}")"
 FULL_AUDIT="$(absolute_from_root "${FULLANSWER_AUDIT_DIR:-audits/forget01_fullanswer40_seed42_exact_subset_v1}")"
 SWEEP_NAME="${SWEEP_NAME:-f2d_v512_dual_depth4_exact_subset_seed42}"
-MODELS_ROOT="$EASE_ROOT/ULD/outputs_trained_models/f2d_did_1b_forget01_${SWEEP_NAME}"
+MODELS_ROOT="$EASE_ROOT/ULD/outputs_trained_models/f2d_did_${MODEL_TAG}_forget01_${SWEEP_NAME}"
 RESULTS_DIR="$EASE_ROOT/open-unlearning/saves/sweeps/forget01_${SWEEP_NAME}"
 TARGET_AGG="${TARGET_AGG:-0.57}"
+RETAIN_REFERENCE="$EASE_ROOT/open-unlearning/saves/eval/tofu_${HF_MODEL_NAME}_retain99/TOFU_EVAL.json"
 
 for required in "$SOURCE_V512" "$SOURCE_FULL"; do
     if [ ! -s "$required" ]; then
@@ -121,12 +130,14 @@ Forget01 static Dual Assistant 4/4 replication
   source policy     : exact uniquely matched subset of frozen forget05 artifacts
   old artifacts     : read-only; no overwrite
   architecture      : A1=4 layers / A2=4 layers / LoRA rank=16
+  base model        : ${HF_BASE_PREFIX}_full ($MODEL_TAG)
   training pairs    : exposure-matched 20/14; moderate 32/24 steps
   composition       : shared depth-4 reference_delta
   routing/gating    : disabled
   inference points  : 4 per training pair (8 total)
   target Agg        : $TARGET_AGG (forget01 BS-S target)
   GPUs              : $LAUNCH_GPUS
+  train bs/ga       : $LAUNCH_TRAIN_BS / $LAUNCH_TRAIN_GA
 ============================================================
 EOF
 
@@ -158,10 +169,13 @@ train_role() {
         A1_DATA_MODE=f2d_did_a1 A2_DATA_MODE=f2d_did_a2 \
         A1_NUM_LAYER=4 A1_LORA_R=16 A1_LORA_ALPHA=32 \
         A1_TRAIN_LR=5e-4 A1_TRAIN_EP=1 A1_TRAIN_STEPS="$a1_steps" \
-        A1_RETAIN_WEIGHT=1.5 A1_TRAIN_BS=2 A1_TRAIN_GA=8 A1_SEED=42 \
+        A1_RETAIN_WEIGHT=1.5 A1_TRAIN_BS="$LAUNCH_TRAIN_BS" A1_TRAIN_GA="$LAUNCH_TRAIN_GA" A1_SEED=42 \
         A2_NUM_LAYER=4 A2_LORA_R=16 A2_LORA_ALPHA=32 \
         A2_TRAIN_LR=1e-3 A2_TRAIN_EP=1 A2_TRAIN_STEPS="$a2_steps" \
-        A2_RETAIN_WEIGHT=1.0 A2_TRAIN_BS=2 A2_TRAIN_GA=8 A2_SEED=42 \
+        A2_RETAIN_WEIGHT=1.0 A2_TRAIN_BS="$LAUNCH_TRAIN_BS" A2_TRAIN_GA="$LAUNCH_TRAIN_GA" A2_SEED=42 \
+        TRAIN_MODEL_CONFIG="$TRAIN_MODEL_CONFIG" \
+        EVAL_MODEL_CONFIG="$EVAL_MODEL_CONFIG" \
+        HF_BASE_PREFIX="$HF_BASE_PREFIX" HF_MODEL_NAME="$HF_MODEL_NAME" \
         COMPOSITION_MODE=reference_delta REFERENCE_PATH=auto \
         F2R_VARIANT="F2D-Forget01-V512-DualDepth4-${role}" \
         HF_PREFLIGHT=0 \
@@ -205,7 +219,7 @@ run_eval() {
     local a1="$5" a2="$6" reference="$7" point="$8"
     local w1="$9" w2="${10}" filter="${11}"
     local tag="${training}_${point}"
-    local task="tofu_Llama-3.2-1B-Instruct_forget01_F2R_V512_DUAL_DEPTH4_${tag}"
+    local task="tofu_${TASK_MODEL_NAME}_forget01_F2R_V512_DUAL_DEPTH4_${tag}"
     local report="$EASE_ROOT/open-unlearning/saves/eval/$task/F2R_REPORT.json"
     echo "$tag,$w1,$w2,$filter,$task,$report,$training,$a1_steps,$a2_steps,$a1,$a2,$reference,$reference,reference_delta" >> "$MANIFEST"
     if [ "$LAUNCH_RESUME" = "true" ] && [ -s "$report" ] \
@@ -221,6 +235,10 @@ run_eval() {
         REFERENCE_PATH="$reference" COMPOSITION_MODE=reference_delta \
         A1_NUM_LAYER=4 A2_NUM_LAYER=4 A1_TRAIN_STEPS="$a1_steps" A2_TRAIN_STEPS="$a2_steps" \
         A1_RETAIN_WEIGHT=1.5 A2_RETAIN_WEIGHT=1.0 \
+        TRAIN_MODEL_CONFIG="$TRAIN_MODEL_CONFIG" \
+        EVAL_MODEL_CONFIG="$EVAL_MODEL_CONFIG" \
+        HF_BASE_PREFIX="$HF_BASE_PREFIX" HF_MODEL_NAME="$HF_MODEL_NAME" \
+        RETAIN_LOGS_PATH="$RETAIN_REFERENCE" AUTO_FETCH_RETAIN_LOGS=0 \
         WEIGHT_A1="$w1" WEIGHT_A2="$w2" TOP_FILTER="$filter" \
         TASK_NAME="$task" EVAL_BS="$LAUNCH_EVAL_BS" EVAL_OVERWRITE=true \
         ALIGNMENT_ENABLED=false GATE_ENABLED=false SEQUENCE_ROUTER_ENABLED=false \
@@ -254,6 +272,27 @@ for spec in "${TRAININGS[@]}"; do
     TRAIN_A1_STEPS["$training"]="$a1_steps"
     TRAIN_A2_STEPS["$training"]="$a2_steps"
 done
+
+echo "[2.5/4] Materialize the frozen retain99 reference once before parallel evaluation"
+if [ ! -s "$RETAIN_REFERENCE" ]; then
+    reference_rel="tofu_${HF_MODEL_NAME}_retain99/TOFU_EVAL.json"
+    "$EVAL_PY" - "$reference_rel" "$EASE_ROOT/open-unlearning/saves/eval" <<'PY'
+import sys
+from huggingface_hub import snapshot_download
+
+relative_path, output_dir = sys.argv[1:]
+snapshot_download(
+    repo_id="open-unlearning/eval",
+    repo_type="dataset",
+    allow_patterns=[relative_path],
+    local_dir=output_dir,
+)
+PY
+fi
+if [ ! -s "$RETAIN_REFERENCE" ]; then
+    echo "Missing frozen retain99 reference after serial materialization: $RETAIN_REFERENCE" >&2
+    exit 1
+fi
 
 echo "[3/4] Evaluate eight static 4/4 configurations"
 pids=()
