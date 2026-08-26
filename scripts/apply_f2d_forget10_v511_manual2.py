@@ -252,14 +252,25 @@ def main() -> None:
         raise SystemExit(
             f"manifest split={manifest.get('split')} != {args.split}"
         )
-    all_blocks = [
+    manifest_blocks = [
         v511.v52.with_contracts_and_anchors(block)
         for block in v511.v52.v2.group_author_blocks(
             v511.v52.v2.load_sources(args.split), manifest
         )
     ]
+    all_blocks = [
+        block for block in manifest_blocks
+        if (
+            args.source_state
+            / f"block_{int(block['block_id']):02d}"
+            / "profile.json"
+        ).is_file()
+    ]
     if len(all_blocks) != 10:
-        raise SystemExit(f"expected 10 complement blocks, got {len(all_blocks)}")
+        raise SystemExit(
+            "expected 10 profiled complement blocks in source state, "
+            f"got {len(all_blocks)}"
+        )
 
     source_valid = {
         int(block["block_id"])
