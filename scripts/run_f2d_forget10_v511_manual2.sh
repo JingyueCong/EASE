@@ -12,6 +12,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 PY="${GEN_PY:-${HOME}/miniconda3/envs/ease-f2r-train/bin/python}"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 WORK="$ROOT/ULD/data/ciru/forget10_incremental_v1"
 MANIFEST="$WORK/tofu_forget10_author_blocks_exact_v1.json"
 BASE_STATE="$WORK/forget10_author_semantic_agent200_seed42_v5_9_new_manualfix_v1.jsonl.blocks"
