@@ -38,6 +38,8 @@ class Forget10V511Manual2Test(unittest.TestCase):
         self.assertIn("Export the ten cached blocks", self.run_script)
         self.assertIn("regenerated=0", self.run_script)
         self.assertIn("--base-state-dir", self.run_script)
+        self.assertIn("--block-ids 0,1,2,3,4,5,6,7,8,9", self.run_script)
+        self.assertNotIn("--block-ids all", self.run_script)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ echo "[2/2] Export the ten cached blocks (no generation requests)"
     --base-state-dir "$BASE_STATE" \
     --split forget10_perturbed --manifest "$MANIFEST" \
     --output "$OUTPUT" --profiles-output "$OUTPUT_PROFILES" \
-    --state-dir "$OUTPUT_STATE" --block-ids all --seed 42 \
+    --state-dir "$OUTPUT_STATE" --block-ids 0,1,2,3,4,5,6,7,8,9 --seed 42 \
     --model "$MODEL" --judge-model "$JUDGE_MODEL" \
     --base-url "$BASE_URL" --judge-base-url "$JUDGE_BASE_URL" \
     --api-key-env "$API_KEY_ENV" --judge-api-key-env "$JUDGE_API_KEY_ENV" \
