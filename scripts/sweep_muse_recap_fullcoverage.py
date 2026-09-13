@@ -136,8 +136,8 @@ def changed_token_example(tokenizer, positive, control):
         matched.update(range(left, left + size))
     labels = [token if index not in matched and index > 0 else -100
               for index, token in enumerate(positive_ids)]
-    if sum(label != -100 for label in labels) < 2:
-        raise ValueError("C10/C00 pair has fewer than two changed target tokens")
+    if not any(label != -100 for label in labels):
+        raise ValueError("C10/C00 pair has no changed target token")
     return positive_ids, labels, control_ids
 
 

@@ -33,6 +33,14 @@ class FullCoverageTests(unittest.TestCase):
         self.assertEqual(labels, [-100, -100, 9, 8, -100])
         self.assertEqual(controls, [1, 2, 3, 4, 5])
 
+    def test_single_changed_token_is_valid_supervision(self):
+        class Tokenizer:
+            def __call__(self, text, **kwargs):
+                values = {"positive": [1, 2, 9, 4], "control": [1, 2, 3, 4]}
+                return {"input_ids": values[text]}
+        _, labels, _ = sweep.changed_token_example(Tokenizer(), "positive", "control")
+        self.assertEqual(labels, [-100, -100, 9, -100])
+
     def test_design_is_retain_free_and_capacity_matched(self):
         self.assertEqual(sweep.DEPTH, 8)
         self.assertEqual(sweep.RANK, 64)
