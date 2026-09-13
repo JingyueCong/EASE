@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import inspect
 import unittest
 
 
@@ -42,11 +43,17 @@ class FullCoverageTests(unittest.TestCase):
         self.assertEqual(labels, [-100, -100, 9, -100])
 
     def test_design_is_retain_free_and_capacity_matched(self):
+        self.assertEqual(sweep.VERSION, "muse-full-forget-coverage-v2")
         self.assertEqual(sweep.DEPTH, 8)
         self.assertEqual(sweep.RANK, 64)
         self.assertEqual(sweep.PREFIX_TOKENS, 1024)
         self.assertEqual(sweep.TARGET_TOKENS, 128)
         self.assertEqual(len(sweep.POINTS), 4)
+
+    def test_kl_is_normalized_over_tokens(self):
+        source = inspect.getsource(sweep.kl_to_reference)
+        self.assertIn('reduction="none"', source)
+        self.assertIn("sum(-1).mean()", source)
 
     def test_document_digest_is_order_and_boundary_sensitive(self):
         self.assertNotEqual(sweep.document_digest(["ab", "c"]),

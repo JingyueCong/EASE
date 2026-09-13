@@ -27,7 +27,7 @@ import authorize_muse_recap_full1024 as authorization
 import muse_recap_pilot as base
 
 
-VERSION = "muse-full-forget-coverage-v1"
+VERSION = "muse-full-forget-coverage-v2"
 CORPORA = ("News", "Books")
 DEPTH = 8
 RANK = 64
@@ -218,7 +218,10 @@ def kl_to_reference(model, input_ids):
         reference = model(input_ids=tensor, use_cache=False).logits[:, :-1].float().softmax(-1)
     model.train()
     logits = model(input_ids=tensor, use_cache=False).logits[:, :-1].float()
-    loss = F.kl_div(logits.log_softmax(-1), reference, reduction="batchmean")
+    # Average over sequence positions. ``batchmean`` would sum every token and
+    # make the preservation strength grow with context length, which is
+    # especially harmful when moving from short TOFU QA to MUSE passages.
+    loss = F.kl_div(logits.log_softmax(-1), reference, reduction="none").sum(-1).mean()
     del tensor, logits, reference
     return loss
 
