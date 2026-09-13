@@ -1,4 +1,5 @@
 import json
+import inspect
 import sys
 from pathlib import Path
 import unittest
@@ -27,6 +28,10 @@ class Full1024Tests(unittest.TestCase):
 
     def test_policy_is_explicitly_user_authorized(self):
         self.assertEqual(authorization.POLICY, "user-authorized-muse-filtered22-full1024-v1")
+
+    def test_training_children_reenter_full1024_driver(self):
+        self.assertIs(sweep.aligned.run_child, sweep.run_child)
+        self.assertIn("Path(__file__).resolve()", inspect.getsource(sweep.run_child))
 
 
 if __name__ == "__main__":
