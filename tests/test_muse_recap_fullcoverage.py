@@ -40,6 +40,12 @@ class FullCoverageTests(unittest.TestCase):
         self.assertEqual(sweep.TARGET_TOKENS, 128)
         self.assertEqual(len(sweep.POINTS), 4)
 
+    def test_document_digest_is_order_and_boundary_sensitive(self):
+        self.assertNotEqual(sweep.document_digest(["ab", "c"]),
+                            sweep.document_digest(["a", "bc"]))
+        self.assertNotEqual(sweep.document_digest(["ab", "c"]),
+                            sweep.document_digest(["c", "ab"]))
+
 
 if __name__ == "__main__":
     unittest.main()

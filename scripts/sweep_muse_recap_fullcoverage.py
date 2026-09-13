@@ -67,9 +67,15 @@ def load_raw_documents(corpus):
     dataset = Dataset.from_file(str(raw_arrow_path(corpus)))
     if "text" not in dataset.column_names or not len(dataset):
         raise ValueError(f"{corpus}: cached raw forget dataset is invalid")
-    documents = list(dataset["text"])
-    if not all(isinstance(text, str) and text.strip() for text in documents):
-        raise ValueError(f"{corpus}: raw forget documents contain empty text")
+    values = list(dataset["text"])
+    if not all(isinstance(text, str) for text in values):
+        raise ValueError(f"{corpus}: raw forget dataset contains non-string text")
+    # The official raw split contains a small number of empty records.  They
+    # carry no trainable tokens and the original 512-row sampler also skipped
+    # them when it required at least 70 words.
+    documents = [text for text in values if text.strip()]
+    if not documents:
+        raise ValueError(f"{corpus}: raw forget dataset has no non-empty documents")
     return documents
 
 
