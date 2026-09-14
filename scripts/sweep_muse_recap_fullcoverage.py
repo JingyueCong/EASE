@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,7 @@ import muse_recap_pilot as base
 
 
 VERSION = "muse-full-forget-coverage-v2"
+EVIDENCE_VERSION = "muse-evidence-localized-v3"
 CORPORA = ("News", "Books")
 DEPTH = 8
 RANK = 64
@@ -44,6 +46,35 @@ POINTS = {
     "light": (0.50, 0.50, 0.001),
     "a1light": (0.75, 0.50, 0.001),
     "strong": (1.00, 0.75, 0.001),
+}
+EVIDENCE_TARGET_FRACTION = 0.20
+EVIDENCE_RARE_MAX_COUNT = 3
+EVIDENCE_MIN_TOKENS = 2
+EVIDENCE_A1_KL = 1.0
+
+WORD_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z'’-]*\b")
+DATE_PATTERN = re.compile(
+    r"\b(?:\d{1,2}[/-]){1,2}\d{2,4}\b|"
+    r"\b(?:18|19|20)\d{2}\b|"
+    r"\b(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*(?:18|19|20)\d{2})?\b",
+    re.IGNORECASE,
+)
+QUOTE_PATTERN = re.compile(
+    r'"[^"\n]{2,240}"|“[^”\n]{2,240}”|‘[^’\n]{2,240}’'
+)
+ENTITY_PATTERN = re.compile(
+    r"\b(?:[A-Z][A-Za-z'’-]{1,}|[A-Z]{2,})"
+    r"(?:\s+(?:(?:of|the|and|de|van|von|al|bin)\s+)?"
+    r"(?:[A-Z][A-Za-z'’-]{1,}|[A-Z]{2,})){1,5}\b"
+)
+STOPWORDS = {
+    "about", "after", "again", "against", "also", "among", "because",
+    "before", "being", "between", "could", "during", "first", "from",
+    "have", "into", "more", "most", "other", "over", "same", "such",
+    "than", "that", "their", "there", "these", "they", "this", "those",
+    "through", "under", "very", "were", "what", "when", "where", "which",
+    "while", "with", "would", "your",
 }
 
 
@@ -113,6 +144,185 @@ def long_completion_windows(tokenizer, documents):
                      "windows": len(windows), "target_tokens": target_count}
 
 
+def _mark(mask, start, end):
+    """Mark a half-open character span without allocating substring copies."""
+    start = max(0, start)
+    end = min(len(mask), end)
+    if start < end:
+        mask[start:end] = b"\1" * (end - start)
+
+
+def evidence_character_masks(documents):
+    """Return deterministic character masks for localized forget evidence.
+
+    The extractor intentionally uses no model and no retain examples.  It
+    identifies four high-precision surface classes in the raw forget corpus:
+    dates, quoted strings, multi-token named entities, and adjacent rare
+    content words.  The union is later capped in token space per window, so a
+    quote or title cannot turn an entire passage into deletion supervision.
+    """
+    word_counts = {}
+    document_words = []
+    for text in documents:
+        words = list(WORD_PATTERN.finditer(text))
+        document_words.append(words)
+        for match in words:
+            word = match.group(0).lower()
+            word_counts[word] = word_counts.get(word, 0) + 1
+
+    masks = []
+    totals = {key: 0 for key in ("date", "quote", "entity", "rare_phrase", "union")}
+    for text, words in zip(documents, document_words):
+        categories = {
+            key: bytearray(len(text))
+            for key in ("date", "quote", "entity", "rare_phrase")
+        }
+        for match in DATE_PATTERN.finditer(text):
+            _mark(categories["date"], *match.span())
+        for match in QUOTE_PATTERN.finditer(text):
+            _mark(categories["quote"], *match.span())
+        for match in ENTITY_PATTERN.finditer(text):
+            _mark(categories["entity"], *match.span())
+        for left, right in zip(words, words[1:]):
+            left_word = left.group(0).lower()
+            right_word = right.group(0).lower()
+            gap = text[left.end():right.start()]
+            if (
+                len(left_word) >= 5
+                and len(right_word) >= 5
+                and left_word not in STOPWORDS
+                and right_word not in STOPWORDS
+                and word_counts[left_word] <= EVIDENCE_RARE_MAX_COUNT
+                and word_counts[right_word] <= EVIDENCE_RARE_MAX_COUNT
+                and len(gap) <= 3
+                and not any(character in ".,;:!?\n" for character in gap)
+            ):
+                _mark(categories["rare_phrase"], left.start(), right.end())
+
+        union = bytearray(len(text))
+        for key, mask in categories.items():
+            totals[key] += sum(mask)
+            for index, value in enumerate(mask):
+                if value:
+                    union[index] = 1
+        totals["union"] += sum(union)
+        masks.append({**categories, "union": union})
+    return masks, totals
+
+
+def evidence_inventory(documents):
+    _, totals = evidence_character_masks(documents)
+    characters = sum(len(text) for text in documents)
+    return {
+        "characters": characters,
+        "evidence_characters": totals["union"],
+        "evidence_character_fraction": totals["union"] / max(1, characters),
+        "category_characters": {
+            key: totals[key] for key in ("date", "quote", "entity", "rare_phrase")
+        },
+    }
+
+
+def localized_completion_windows(tokenizer, documents):
+    """Build A1 examples with evidence-only CE and complementary local KL."""
+    character_masks, character_totals = evidence_character_masks(documents)
+    windows = []
+    stats = {
+        "documents": len(documents),
+        "tokens": 0,
+        "candidate_windows": 0,
+        "windows": 0,
+        "target_tokens": 0,
+        "evidence_target_tokens": 0,
+        "preserve_target_tokens": 0,
+        "skipped_without_evidence": 0,
+        "category_target_tokens": {
+            key: 0 for key in ("date", "quote", "entity", "rare_phrase")
+        },
+        "category_characters": {
+            key: character_totals[key]
+            for key in ("date", "quote", "entity", "rare_phrase")
+        },
+        "evidence_characters": character_totals["union"],
+    }
+    priorities = {"date": 10, "quote": 8, "entity": 7, "rare_phrase": 5}
+    for document_index, text in enumerate(documents):
+        encoded = tokenizer(
+            text,
+            add_special_tokens=True,
+            truncation=False,
+            return_offsets_mapping=True,
+        )
+        ids = encoded["input_ids"]
+        offsets = encoded["offset_mapping"]
+        if len(ids) != len(offsets):
+            raise ValueError("Tokenizer input ids and offsets have different lengths")
+        stats["tokens"] += len(ids)
+        starts = list(range(8, len(ids) - 15, TARGET_STRIDE))
+        tail_start = max(8, len(ids) - TARGET_TOKENS)
+        if starts and tail_start > starts[-1]:
+            starts.append(tail_start)
+        masks = character_masks[document_index]
+        for target_start in starts:
+            left = max(0, target_start - PREFIX_TOKENS)
+            end = min(len(ids), target_start + TARGET_TOKENS)
+            target_length = end - target_start
+            if target_length < 16:
+                continue
+            stats["candidate_windows"] += 1
+            candidates = []
+            token_categories = {}
+            for token_index in range(target_start, end):
+                char_start, char_end = offsets[token_index]
+                if char_end <= char_start:
+                    continue
+                categories = [
+                    key for key in priorities
+                    if any(masks[key][char_start:char_end])
+                ]
+                if categories:
+                    candidates.append((max(priorities[key] for key in categories), token_index))
+                    token_categories[token_index] = categories
+            if not candidates:
+                stats["skipped_without_evidence"] += 1
+                continue
+            budget = max(
+                EVIDENCE_MIN_TOKENS,
+                math.ceil(target_length * EVIDENCE_TARGET_FRACTION),
+            )
+            selected = {
+                token_index
+                for _, token_index in sorted(candidates, key=lambda item: (-item[0], item[1]))[:budget]
+            }
+            input_ids = ids[left:end]
+            labels = [
+                ids[token_index] if token_index in selected else -100
+                for token_index in range(left, end)
+            ]
+            preserve_mask = [
+                target_start <= token_index < end and token_index not in selected
+                for token_index in range(left, end)
+            ]
+            evidence_count = len(selected)
+            preserve_count = sum(preserve_mask)
+            if evidence_count == 0 or preserve_count == 0:
+                raise ValueError("Localized window lacks evidence or preservation tokens")
+            windows.append((input_ids, labels, document_index, target_start, preserve_mask))
+            stats["windows"] += 1
+            stats["target_tokens"] += target_length
+            stats["evidence_target_tokens"] += evidence_count
+            stats["preserve_target_tokens"] += preserve_count
+            for token_index in selected:
+                for key in token_categories[token_index]:
+                    stats["category_target_tokens"][key] += 1
+    if not windows:
+        raise ValueError("No evidence-localized completion windows")
+    stats["evidence_target_fraction"] = (
+        stats["evidence_target_tokens"] / stats["target_tokens"]
+    )
+    return windows, stats
+
+
 def short_control_views(tokenizer, rows, cell):
     result = []
     for row in rows:
@@ -167,8 +377,11 @@ def prepare(args):
             "sha256": document_digest(documents),
             "arrow": str(raw_arrow_path(corpus)),
         }
+        if args.signal == "evidence":
+            raw[corpus]["evidence_inventory"] = evidence_inventory(documents)
+    version = EVIDENCE_VERSION if args.signal == "evidence" else VERSION
     identity = {
-        "version": VERSION,
+        "version": version,
         "source_run": str(args.source_run),
         "depth": DEPTH,
         "rank": RANK,
@@ -184,6 +397,16 @@ def prepare(args):
         "training_retain_access": False,
         "official_eval_examples_used_for_training": False,
     }
+    if args.signal == "evidence":
+        identity.update({
+            "training_signal": "evidence_localized",
+            "evidence_classes": ["entity", "date", "quote", "rare_phrase"],
+            "evidence_target_fraction": EVIDENCE_TARGET_FRACTION,
+            "evidence_rare_max_count": EVIDENCE_RARE_MAX_COUNT,
+            "evidence_min_tokens": EVIDENCE_MIN_TOKENS,
+            "a1_kl": EVIDENCE_A1_KL,
+            "preservation_signal": "same_window_non_evidence_tokens",
+        })
     if plan_path.exists():
         plan = base.read(plan_path)
         for key, value in identity.items():
@@ -194,9 +417,14 @@ def prepare(args):
         raise ValueError("Unrecognized existing output; refusing overwrite")
     plan = dict(identity, protected_sha256=validate_source(args.source_run))
     (args.run / "assets").symlink_to(args.source_run / "assets", target_is_directory=True)
-    marker = dict(base.read(args.source_run / "EXPERIMENT_AUTHORIZATION.json"),
-                  derived_experiment=VERSION, raw_forget_full_coverage=True,
-                  api_calls=0, training_retain_access=False)
+    marker = dict(
+        base.read(args.source_run / "EXPERIMENT_AUTHORIZATION.json"),
+        derived_experiment=version,
+        raw_forget_full_coverage=args.signal == "full",
+        evidence_localized_deletion=args.signal == "evidence",
+        api_calls=0,
+        training_retain_access=False,
+    )
     base.write(args.run / "EXPERIMENT_AUTHORIZATION.json", marker)
     for corpus in CORPORA:
         folder = args.run / corpus
@@ -226,6 +454,30 @@ def kl_to_reference(model, input_ids):
     return loss
 
 
+def masked_kl_to_reference(model, input_ids, preserve_mask):
+    """Reference KL averaged only over selected next-token positions."""
+    import torch
+    import torch.nn.functional as F
+
+    if len(input_ids) != len(preserve_mask):
+        raise ValueError("input ids and preservation mask have different lengths")
+    tensor = torch.tensor([input_ids], device="cuda")
+    positions = torch.tensor([preserve_mask[1:]], dtype=torch.bool, device="cuda")
+    if not positions.any().item():
+        raise ValueError("preservation mask contains no predicted token")
+    with torch.no_grad(), model.disable_adapter():
+        model.eval()
+        reference = model(input_ids=tensor, use_cache=False).logits[:, :-1].float().softmax(-1)
+    model.train()
+    logits = model(input_ids=tensor, use_cache=False).logits[:, :-1].float()
+    per_position = F.kl_div(
+        logits.log_softmax(-1), reference, reduction="none"
+    ).sum(-1)
+    loss = per_position[positions].mean()
+    del tensor, logits, reference, per_position, positions
+    return loss
+
+
 def train(args):
     import torch
     from peft import LoraConfig, get_peft_model
@@ -242,15 +494,20 @@ def train(args):
     documents = load_raw_documents(args.corpus)
     if document_digest(documents) != plan["raw_forget"][args.corpus]["sha256"]:
         raise ValueError("Raw forget corpus changed after preparation")
+    signal = plan.get("training_signal", "full_completion")
 
     output = folder / "models" / args.role
     tokenizer = AutoTokenizer.from_pretrained(args.run / "assets/tokenizer")
     if args.role == "a1":
-        examples, coverage = long_completion_windows(tokenizer, documents)
-        controls = short_control_views(tokenizer, rows, "C01")
+        if signal == "evidence_localized":
+            examples, coverage = localized_completion_windows(tokenizer, documents)
+            controls = None
+        else:
+            examples, coverage = long_completion_windows(tokenizer, documents)
+            controls = short_control_views(tokenizer, rows, "C01")
         steps = math.ceil(len(examples) / MICRO_BATCHES)
         epochs = 1
-        kl_weight = A1_KL
+        kl_weight = EVIDENCE_A1_KL if signal == "evidence_localized" else A1_KL
     else:
         examples = [changed_token_example(tokenizer, row["cells"]["C10"], row["cells"]["C00"])
                     for row in rows]
@@ -263,7 +520,7 @@ def train(args):
         epochs = A2_EPOCHS
         kl_weight = A2_KL
     spec = {
-        "version": VERSION, "corpus": args.corpus, "role": args.role,
+        "version": plan["version"], "corpus": args.corpus, "role": args.role,
         "depth": DEPTH, "rank": RANK, "steps": steps, "epochs": epochs,
         "lr": LR, "kl": kl_weight, "coverage": coverage, "seed": 42,
         "raw_forget_sha256": plan["raw_forget"][args.corpus]["sha256"],
@@ -271,6 +528,12 @@ def train(args):
         "training_retain_access": False,
         "official_eval_examples_used_for_training": False,
     }
+    if signal == "evidence_localized":
+        spec.update({
+            "training_signal": signal,
+            "evidence_target_fraction": EVIDENCE_TARGET_FRACTION,
+            "preservation_signal": "same_window_non_evidence_tokens",
+        })
     complete = output / "complete.json"
     if complete.exists():
         if base.read(complete)["spec"] != json.loads(json.dumps(spec)):
@@ -320,10 +583,13 @@ def train(args):
             item = examples[order.pop()]
             if args.role == "a1":
                 input_ids, labels = item[0], item[1]
-                if not control_order:
-                    control_order = list(range(len(controls)))
-                    rng.shuffle(control_order)
-                selected_controls.append(controls[control_order.pop()])
+                if signal == "evidence_localized":
+                    selected_controls.append((input_ids, item[4]))
+                else:
+                    if not control_order:
+                        control_order = list(range(len(controls)))
+                        rng.shuffle(control_order)
+                    selected_controls.append(controls[control_order.pop()])
             else:
                 input_ids, labels, control_ids = item
                 selected_controls.append(control_ids)
@@ -333,11 +599,24 @@ def train(args):
             (ce / MICRO_BATCHES).backward()
             ce_values.append(ce.item())
             del input_tensor, label_tensor, ce
-        # One preservation example per four positive windows prevents the
-        # control distribution from dominating full-corpus coverage.
-        control = selected_controls[rng.randrange(len(selected_controls))]
-        kl = kl_to_reference(model, control)
-        (kl_weight * kl).backward()
+        if args.role == "a1" and signal == "evidence_localized":
+            # Preserve the complement of deletion evidence in every target
+            # window.  Both CE and KL are normalized by supervised positions.
+            kl_values = []
+            for control_ids, preserve_mask in selected_controls:
+                local_kl = masked_kl_to_reference(model, control_ids, preserve_mask)
+                (kl_weight * local_kl / MICRO_BATCHES).backward()
+                kl_values.append(local_kl.item())
+                del local_kl
+            kl_value = sum(kl_values) / len(kl_values)
+        else:
+            # One preservation example per four positive windows prevents the
+            # short control distribution from dominating the other signals.
+            control = selected_controls[rng.randrange(len(selected_controls))]
+            kl = kl_to_reference(model, control)
+            (kl_weight * kl).backward()
+            kl_value = kl.item()
+            del kl
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         warmup = max(1, round(steps * 0.1))
         for group in optimizer.param_groups:
@@ -346,9 +625,8 @@ def train(args):
         if step == 0 or (step + 1) % 16 == 0 or step + 1 == steps:
             base.event(
                 f"coverage_train_step corpus={args.corpus} role={args.role} "
-                f"step={step+1}/{steps} ce={sum(ce_values)/len(ce_values):.4f} kl={kl.item():.4f}"
+                f"step={step+1}/{steps} ce={sum(ce_values)/len(ce_values):.4f} kl={kl_value:.4f}"
             )
-        del kl
     model.save_pretrained(output / "checkpoint-final")
     base.write(complete, {"spec": spec, "elapsed_seconds": time.time() - started})
     base.event(f"coverage_train_done corpus={args.corpus} role={args.role}")
@@ -388,9 +666,12 @@ def collect(jobs):
 
 
 def summarize(args):
+    plan = base.read(args.run / "PLAN.json")
+    points = plan["points"]
+    localized = plan.get("training_signal") == "evidence_localized"
     rows = []
     for corpus in CORPORA:
-        for point in POINTS:
+        for point in points:
             spec_path = args.run / corpus / "eval_specs" / f"{point}.json"
             if not spec_path.exists():
                 continue
@@ -399,9 +680,13 @@ def summarize(args):
                 rows.append({"corpus": corpus, "point": point, "report": str(report),
                              **base.read(report)})
     lines = [
-        "# MUSE full-forget coverage experiment", "",
+        ("# MUSE evidence-localized deletion experiment" if localized
+         else "# MUSE full-forget coverage experiment"), "",
         "Training retain access: false; official evaluation examples used for training: false.",
-        "A1 uses the entire raw forget corpus; A2 uses masked audited factorial controls.", "",
+        ("A1 deletes entity/date/quote/rare-phrase evidence and preserves complementary "
+         "same-window tokens; A2 uses masked audited factorial controls."
+         if localized else
+         "A1 uses the entire raw forget corpus; A2 uses masked audited factorial controls."), "",
         "| Corpus | Point | VerbMem ↓ | KnowMem ↓ | UtilPres ↑ |",
         "|---|---|---:|---:|---:|",
     ]
@@ -412,7 +697,7 @@ def summarize(args):
         )
     base.write(args.run / "RESULTS.json", rows)
     (args.run / "RESULTS.md").write_text("\n".join(lines) + "\n")
-    base.event(f"coverage_results completed={len(rows)}/{len(CORPORA)*len(POINTS)}")
+    base.event(f"coverage_results completed={len(rows)}/{len(CORPORA)*len(points)}")
 
 
 def gpu_ready():
@@ -432,21 +717,37 @@ def run(args):
     args.run.mkdir(parents=True, exist_ok=True)
     with (args.run / "run.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        prepare(args)
+        plan = prepare(args)
         if args.preflight_only:
-            base.event("coverage_preflight_ok")
+            if plan.get("training_signal") == "evidence_localized":
+                for corpus in CORPORA:
+                    inventory = plan["raw_forget"][corpus]["evidence_inventory"]
+                    base.event(
+                        f"evidence_preflight corpus={corpus} "
+                        f"characters={inventory['characters']} "
+                        f"evidence_characters={inventory['evidence_characters']} "
+                        f"fraction={inventory['evidence_character_fraction']:.6f}"
+                    )
+                base.event("evidence_preflight_ok")
+            else:
+                base.event("coverage_preflight_ok")
             return
         while not gpu_ready():
             base.event("coverage_wait reason=GPUs_not_idle")
             time.sleep(30)
-        base.event("[1/3] Train full-coverage A1 and masked-factorial A2")
+        localized = plan.get("training_signal") == "evidence_localized"
+        base.event(
+            "[1/3] Train evidence-localized A1 and masked-factorial A2"
+            if localized else
+            "[1/3] Train full-coverage A1 and masked-factorial A2"
+        )
         specs = [("News", "a1"), ("News", "a2"), ("Books", "a1"), ("Books", "a2")]
         with futures.ThreadPoolExecutor(max_workers=4) as pool:
             collect([pool.submit(child, args, "train", corpus, role, {"role": role}, gpu)
                      for gpu, (corpus, role) in enumerate(specs)])
         base.event("[2/3] Evaluate four static reference-delta points per corpus")
         evaluations = [(corpus, point, values) for corpus in CORPORA
-                       for point, values in POINTS.items()]
+                       for point, values in plan["points"].items()]
         with futures.ThreadPoolExecutor(max_workers=4) as pool:
             for start in range(0, len(evaluations), 4):
                 jobs = []
@@ -457,7 +758,11 @@ def run(args):
                     collect(jobs)
                 finally:
                     summarize(args)
-        base.event("[3/3] Full-coverage experiment complete")
+        base.event(
+            "[3/3] Evidence-localized experiment complete"
+            if localized else
+            "[3/3] Full-coverage experiment complete"
+        )
 
 
 def main():
@@ -470,6 +775,7 @@ def main():
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--corpus", choices=CORPORA, default="News")
     parser.add_argument("--role", choices=("a1", "a2"), default="a1")
+    parser.add_argument("--signal", choices=("full", "evidence"), default="full")
     args = parser.parse_args()
     args.run = args.run.resolve()
     if args.source_run is not None:
