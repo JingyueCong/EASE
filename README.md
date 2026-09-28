@@ -1,31 +1,64 @@
-# EASE: Dual Small-Assistant Unlearning via Logit Difference
+<div align="center">
 
-Anonymous code release for double-blind review.
+# EASE
 
-This repository contains the training and evaluation code for our method on
-two LLM-unlearning benchmarks: **TOFU** (synthetic biographical Q&A) and
-**MUSE** (Books / News pre-training corpora).
+### Dual Small-Assistant Unlearning via Logit Difference
 
-## Method (one paragraph)
+Retain-aware LLM unlearning with two compact LoRA assistants and an unchanged
+base model.
 
-Given a fine-tuned base model `M_base`, we train two LoRA assistants of much
-smaller size:
-- **A1** on `forget ∪ R_sub` (forget items plus retain items most similar to
-  forget) with a `remember + uniform` loss — A1 memorises what we want to
-  remove.
-- **A2** on `R_sub` only with the same loss — A2 memorises only the part of
-  retain that is hard to disentangle from forget.
+[![Quality checks](https://github.com/JingyueCong/EASE/actions/workflows/quality.yml/badge.svg)](https://github.com/JingyueCong/EASE/actions/workflows/quality.yml)
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![CUDA](https://img.shields.io/badge/accelerator-CUDA-76B900?logo=nvidia&logoColor=white)
+![Benchmarks](https://img.shields.io/badge/benchmarks-TOFU%20%7C%20MUSE-6f42c1)
 
-At inference time the unlearned model produces:
+[Method](#method) · [Setup](#setup) · [TOFU](#running-tofu) · [MUSE](#running-muse) · [Configuration](#configuration-cheatsheet)
 
+</div>
+
+> [!NOTE]
+> This is an anonymous research release for double-blind review. It includes
+> the code, configs, and derived data required to reproduce experiments; model
+> checkpoints and raw run artifacts are intentionally excluded.
+
+EASE is evaluated on **TOFU** (synthetic biographical Q&A) and **MUSE**
+(Books and News pre-training corpora). It uses a second assistant to protect
+retain examples that are semantically close to the forget set—the region in
+which a single subtractive assistant is most likely to remove useful behavior.
+
+## Method
+
+Given a fine-tuned base model `M_base`, EASE trains two much smaller LoRA
+assistants:
+
+- **A1** learns `forget ∪ R_sub`, where `R_sub` contains retain examples most
+  similar to the forget set. A negative inference weight suppresses this
+  knowledge.
+- **A2** learns only `R_sub`. A positive inference weight restores the
+  retain-side neighborhood affected by A1.
+
+```mermaid
+flowchart LR
+    F[Forget set] --> A1[Assistant A1]
+    R[Similar retain subset R_sub] --> A1
+    R --> A2[Assistant A2]
+    B[Base model] --> C[Logit composition]
+    A1 -->|negative weight| C
+    A2 -->|positive weight| C
+    C --> O[Unlearned output]
 ```
-final_logits = base_logits + w1 * filt(A1.logits) + w2 * filt(A2.logits)
+
+At inference time:
+
+```text
+final_logits = base_logits + w1 · filt(A1.logits) + w2 · filt(A2.logits)
 ```
 
-with `w1 < 0` and `w2 > 0`. On forget items A1 dominates and is subtracted; on
-R_sub items A1 and A2 cancel and `M_base` is preserved; everywhere else both
-assistants are near-uniform and have no effect. `filt(.)` is a top-p logit
-filter that zeroes out small assistant probabilities to avoid noise.
+where `w1 < 0` and `w2 > 0`. A1 dominates on forget items and is subtracted;
+A1 and A2 approximately cancel on `R_sub`; elsewhere, their near-uniform
+outputs have little effect. The relative-top filter is computed from the base
+distribution and masks the same low-relevance token positions in both
+assistants.
 
 ## Repository layout
 
@@ -62,13 +95,14 @@ EASE/
 │
 └── scripts/
     └── run_dual_uld_1b.sh     # ★ Llama-3.2 1B TOFU run via open-unlearning
-                               #   (override env vars to target 3B / 8B —
+                               #   (override env vars to target 3B —
                                #    see "Llama-3.2 ... via open-unlearning" below)
 ```
 
 ## Prerequisites
 
-- Python 3.10
+- Linux with Python 3.10 or newer. The pinned ULD environment uses Python
+  3.10; the bundled open-unlearning package supports Python 3.10+.
 - One or more CUDA-capable GPUs (TOFU 1B fits on a single 24GB; TOFU 7B / 3B
   needs 40GB+; MUSE LLaMA-2-7B needs 40GB+)
 - HuggingFace token only if you fetch gated models (LLaMA-2). Set with
@@ -78,7 +112,8 @@ EASE/
   precomputed augmentations are already shipped in `dual_uld_muse/aug/` and
   `ULD/data/aug_data/tofu/`, so a normal run does **not** need the API.
 
-All shell scripts expect `EASE_ROOT` to point at this repository:
+The entry-point scripts infer the repository root automatically. Setting
+`EASE_ROOT` explicitly remains useful for interactive commands:
 
 ```bash
 export EASE_ROOT=$(pwd)
@@ -90,12 +125,21 @@ location via `MODELS_ROOT=...` if you need to.
 
 ## Setup
 
+Clone the repository and choose the environment for the benchmark you want to
+run:
+
+```bash
+git clone https://github.com/JingyueCong/EASE.git
+cd EASE
+export EASE_ROOT="$(pwd)"
+```
+
 ### TOFU (`ULD/`)
 
 ```bash
 cd $EASE_ROOT/ULD
-conda env create -f environment.yaml      # creates env "uld"
-conda activate uld
+conda env create -f environment.yaml      # creates env "uldenv"
+conda activate uldenv
 pip install -e .
 ```
 
@@ -106,7 +150,7 @@ Reuses the same conda env as ULD. Additional pip packages:
 pip install sentence-transformers openai
 ```
 
-### MUSE evaluation (`open-unlearning/`)
+### Evaluation with `open-unlearning/`
 
 ```bash
 cd $EASE_ROOT/open-unlearning
@@ -114,6 +158,10 @@ pip install -r requirements.txt
 pip install -e .
 python setup_data.py    # downloads MUSE benchmark data into HF cache
 ```
+
+If training and evaluation use separate environments, pass their Python
+interpreters to the orchestration scripts. For TOFU, use `ULD_PY` and `OU_PY`;
+for MUSE, use `TRAIN_PY` and `EVAL_PY`.
 
 ## Running TOFU
 
@@ -136,7 +184,7 @@ Output:
   forget/retain/real_authors/world_facts) under
   `outputs/tune_log/.../eval_tofu.log`.
 
-### Llama-3.2 1B / 3B / 8B (via the open-unlearning framework)
+### Llama-3.2 1B / 3B (via the open-unlearning framework)
 
 A single script ships at [scripts/run_dual_uld_1b.sh](scripts/run_dual_uld_1b.sh).
 It trains both assistants for all three forget splits and evaluates with
@@ -148,19 +196,23 @@ Default settings target **Llama-3.2-1B-Instruct**:
 GPU=0 bash scripts/run_dual_uld_1b.sh
 ```
 
-To run on a **different base model** (3B, 8B, …) override the shell
+To run on the **3B base model**, override the shell
 variables — no script edit needed. The relevant knobs are env-var driven:
 
-| env var | 1B (default) | 3B | 8B |
-|---|---|---|---|
-| `HF_BASE_PREFIX` | `open-unlearning/tofu_Llama-3.2-1B-Instruct` | `open-unlearning/tofu_Llama-3.2-3B-Instruct` | `open-unlearning/tofu_Llama-3.1-8B-Instruct` |
-| `HF_TOKENIZER`   | `${HF_BASE_PREFIX}_full` | same | same |
-| `NUM_LAYER` (assistant depth, ≈ 25 % of base) | `2` | `7` | `8` |
-| `LORA_R` | `16` | `16` | `16` |
-| `WEIGHT_A1` / `WEIGHT_A2` | `-1.0` / `1.0` | `-0.8` / `0.5` | tune |
-| `TOP_FILTER` | `0.01` | `0.01` | `0.01` |
-| `TRAIN_BS` / `TRAIN_GA` | `4 / 4` | `2 / 8` | `1 / 16` |
-| `TRAIN_EP` | `10` | `5` (A1), `3` (A2) | tune |
+| env var | 1B (default) | 3B |
+|---|---|---|
+| `HF_BASE_PREFIX` | `open-unlearning/tofu_Llama-3.2-1B-Instruct` | `open-unlearning/tofu_Llama-3.2-3B-Instruct` |
+| `HF_TOKENIZER`   | `${HF_BASE_PREFIX}_full` | same |
+| `OU_MODEL` | `Llama-3.2-1B-Instruct_DualULD` | `Llama-3.2-3B-Instruct_DualULD` |
+| `RUN_NAME` | `Llama-3.2-1B-Instruct` | `Llama-3.2-3B-Instruct` |
+| `RUN_SLUG` | `llama3_1b` | `llama3_3b` |
+| `ULD_MODEL` | `llama-3-1b` | `llama-3-3b` |
+| `NUM_LAYER` (assistant depth) | `2` | `7` |
+| `LORA_R` | `16` | `16` |
+| `WEIGHT_A1` / `WEIGHT_A2` | `-1.0` / `1.0` | `-0.8` / `0.5` |
+| `TOP_FILTER` | `0.01` | `0.01` |
+| `TRAIN_BS` / `TRAIN_GA` | `4 / 4` | `2 / 8` |
+| `TRAIN_EP_A1` / `TRAIN_EP_A2` | `10 / 10` | `5 / 3` |
 
 Example — 3B run on GPU 1:
 
@@ -168,10 +220,12 @@ Example — 3B run on GPU 1:
 GPU=1 \
 HF_BASE_PREFIX=open-unlearning/tofu_Llama-3.2-3B-Instruct \
 HF_TOKENIZER=open-unlearning/tofu_Llama-3.2-3B-Instruct_full \
+OU_MODEL=Llama-3.2-3B-Instruct_DualULD \
+RUN_NAME=Llama-3.2-3B-Instruct \
+RUN_SLUG=llama3_3b ULD_MODEL=llama-3-3b \
 NUM_LAYER=7 WEIGHT_A2=0.5 \
-TRAIN_BS=2 TRAIN_GA=8 TRAIN_EP=5 \
-MODELS_ROOT=$EASE_ROOT/outputs_trained_models/llama3_3b_dual \
-    bash scripts/run_dual_uld_1b.sh
+TRAIN_BS=2 TRAIN_GA=8 TRAIN_EP_A1=5 TRAIN_EP_A2=3 \
+bash scripts/run_dual_uld_1b.sh
 ```
 
 To run a single split only (skip the others), set `ONLY=forget10` (or
@@ -265,18 +319,18 @@ Key knobs (both frameworks):
 |---|---|---|
 | `weight_a1` | scales A1 logits (negative — subtracts) | −0.6 to −1.0 |
 | `weight_a2` | scales A2 logits (positive — restores R_sub) | `\|w1\|` |
-| `top_logit_filter` | zero out assistant tokens below this prob | 0.01 |
+| `top_logit_filter` | mask assistant tokens outside the base model's relative-top set | 0.01 |
 | `num_layer` | # of base-model layers used for the LoRA assistants | 4 or 8 |
 
 ## What is *not* shipped
 
-To keep this repository under 60MB and respect double-blind anonymity:
+To keep the repository lightweight and preserve the anonymous-review release:
 
 - No trained model weights (LoRA adapters, full-FT checkpoints). Re-run the
   training scripts above.
 - No raw experiment outputs (`outputs/`, `outputs_trained_models/`,
   `saves/eval/` are excluded).
-- No author-identifying git history (all `.git/` directories are stripped).
+- No nested upstream `.git/` directories.
 
 The data augmentation files (paraphrases, perturbations, R_sub indices) and
 the retain-only reference results (used by TOFU's `forget_quality` KS test)

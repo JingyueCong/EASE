@@ -1,0 +1,31 @@
+name: Quality checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Validate shell entry points
+        shell: bash
+        run: |
+          find scripts ULD/bashes dual_uld_muse -type f -name '*.sh' -print0 \
+            | xargs -0 -n1 bash -n
+
+      - name: Compile Python sources
+        run: >-
+          python -m compileall -q
+          ULD/uld ULD/scripts dual_uld_muse open-unlearning/src
