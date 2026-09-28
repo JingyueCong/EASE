@@ -22,12 +22,7 @@
 #               sweep_eval.sh runs each w1 with w2=|w1|.
 
 set -euo pipefail
-EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-export EASE_ROOT
-ROOT="${EASE_ROOT}/dual_uld_muse"
-TRAIN_PY="${TRAIN_PY:-${PY:-python}}"
-EVAL_PY="${EVAL_PY:-${PY:-python}}"
-export EVAL_PY
+ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/dual_uld_muse"
 cd "$ROOT"
 
 SPLIT="${SPLIT:-Books}"
@@ -65,7 +60,7 @@ echo "  weight sweep       : $WS  (w2 = |w1|)"
 echo "============================================================"
 
 echo "[1/3] Train A1"
-CUDA_VISIBLE_DEVICES="$GPU" "$TRAIN_PY" train_assistant.py \
+CUDA_VISIBLE_DEVICES="$GPU" /usr/bin/python train_assistant.py \
     --split "$SPLIT" --role a1 \
     --epochs "$EPOCHS_A1" --batch_size "$BATCH_SIZE" --grad_accum "$GRAD_ACCUM" \
     --num_layer "$NUM_LAYER" --lora_r "$LORA_R" --lora_alpha "$LORA_ALPHA" --lr "$LR" \
@@ -73,7 +68,7 @@ CUDA_VISIBLE_DEVICES="$GPU" "$TRAIN_PY" train_assistant.py \
     2>&1 | tee "$ROOT/logs/${SPLIT}_a1.log"
 
 echo "[2/3] Train A2"
-CUDA_VISIBLE_DEVICES="$GPU" "$TRAIN_PY" train_assistant.py \
+CUDA_VISIBLE_DEVICES="$GPU" /usr/bin/python train_assistant.py \
     --split "$SPLIT" --role a2 \
     --epochs "$EPOCHS_A2" --batch_size "$BATCH_SIZE" --grad_accum "$GRAD_ACCUM" \
     --num_layer "$NUM_LAYER" --lora_r "$LORA_R" --lora_alpha "$LORA_ALPHA" --lr "$LR" \
@@ -89,7 +84,7 @@ echo "DONE. Per-weight summaries:"
 for f in "${EASE_ROOT}/open-unlearning/saves/eval/muse_Llama-2-7b-hf_${SPLIT}_DualULD_w"*"_fast/MUSE_SUMMARY.json"; do
     [ -f "$f" ] || continue
     label=$(basename "$(dirname "$f")" | sed 's/.*_DualULD_//;s/_fast//')
-    "$EVAL_PY" -c "import json,sys; d=json.load(open('$f')); \
+    /usr/bin/python -c "import json,sys; d=json.load(open('$f')); \
 print(f'  {\"$label\":30}  forget_ROUGE={d.get(\"forget_knowmem_ROUGE\",0)*100:5.1f}  privleak={d.get(\"privleak\",0):7.2f}  retain_ROUGE={d.get(\"retain_knowmem_ROUGE\",0)*100:5.1f}')"
 done
 echo "Pick the best (privleak closest to 0, retain_ROUGE high) and rerun"

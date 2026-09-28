@@ -5,20 +5,17 @@
 #   bash sweep_eval.sh Books "-0.3 -0.5 -0.6"
 #   bash sweep_eval.sh News  "-0.3 -0.5 -0.6"
 set -euo pipefail
-EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-ROOT="${EASE_ROOT}/dual_uld_muse"
-EVAL_PY="${EVAL_PY:-${PY:-python}}"
-GPU="${GPU:-0}"
-cd "${EASE_ROOT}/open-unlearning"
+cd ${EASE_ROOT}/open-unlearning
 
 SPLIT="${1:?split (Books|News)}"
 WS="${2:?space-separated w1 list, e.g. \"-0.3 -0.5\"}"
 TOPF="${TOPF:-0.01}"
 EXP="${EXP:-eval/muse/fast}"   # fast = skip verbmem+extraction; default for sweep
+ROOT=${EASE_ROOT}/dual_uld_muse
 SUFFIX="${SUFFIX:-_fast}"        # rename task to avoid clobbering full evals
 
 for W1 in $WS; do
-    W2=$("$EVAL_PY" -c "print(abs(float('$W1')))")
+    W2=$(/usr/bin/python -c "print(abs(float('$W1')))")
     W1S=$(echo "$W1" | sed -e 's/-/m/g' -e 's/\./p/g')
     W2S=$(echo "$W2" | sed -e 's/-/m/g' -e 's/\./p/g')
     TASK="muse_Llama-2-7b-hf_${SPLIT}_DualULD_w1${W1S}_w2${W2S}${SUFFIX}"
@@ -31,8 +28,8 @@ for W1 in $WS; do
     echo "[eval] split=$SPLIT w1=$W1 w2=$W2  topF=$TOPF  task=$TASK"
     echo "===================="
     LOG="${ROOT}/logs/${TASK}.log"
-    CUDA_VISIBLE_DEVICES="$GPU" PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    "$EVAL_PY" src/eval.py \
+    CUDA_VISIBLE_DEVICES=0 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    /usr/bin/python src/eval.py \
         experiment=${EXP} \
         data_split=${SPLIT} \
         model=Llama-2-7b-hf_DualULD \

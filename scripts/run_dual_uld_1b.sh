@@ -14,20 +14,14 @@
 #   D.  Aggregate metrics into $REPORT_PATH.
 
 set -euo pipefail
-EASE_ROOT="${EASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-ULD_REPO="${ULD_REPO:-${EASE_ROOT}/ULD}"
-OU_REPO="${OU_REPO:-${EASE_ROOT}/open-unlearning}"
-PY="${PY:-python}"
-ULD_PY="${ULD_PY:-$PY}"
-OU_PY="${OU_PY:-$PY}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ULD_REPO="${ULD_REPO:-${ROOT}/ULD}"
+OU_REPO="${OU_REPO:-${ROOT}/open-unlearning}"
+PY="${PY:-/usr/bin/python}"
 
 GPU="${GPU:-0}"
 HF_BASE_PREFIX="${HF_BASE_PREFIX:-open-unlearning/tofu_Llama-3.2-1B-Instruct}"
 HF_TOKENIZER="${HF_TOKENIZER:-open-unlearning/tofu_Llama-3.2-1B-Instruct_full}"
-OU_MODEL="${OU_MODEL:-Llama-3.2-1B-Instruct_DualULD}"
-RUN_NAME="${RUN_NAME:-Llama-3.2-1B-Instruct}"
-RUN_SLUG="${RUN_SLUG:-llama3_1b}"
-ULD_MODEL="${ULD_MODEL:-llama-3-1b}"
 
 NUM_LAYER="${NUM_LAYER:-2}"
 LORA_R="${LORA_R:-16}"
@@ -38,12 +32,11 @@ TOP_FILTER="${TOP_FILTER:-0.01}"   # match ULD-on-1B finding
 TRAIN_BS="${TRAIN_BS:-4}"
 TRAIN_GA="${TRAIN_GA:-4}"
 TRAIN_LR="${TRAIN_LR:-1e-3}"
-TRAIN_EP_A1="${TRAIN_EP_A1:-${TRAIN_EP:-10}}"
-TRAIN_EP_A2="${TRAIN_EP_A2:-${TRAIN_EP:-10}}"
+TRAIN_EP="${TRAIN_EP:-10}"
 EVAL_BS="${EVAL_BS:-4}"
 
-MODELS_ROOT="${MODELS_ROOT:-${ULD_REPO}/outputs_trained_models/${RUN_SLUG}_dual}"
-REPORT_PATH="${REPORT_PATH:-${EASE_ROOT}/uld_${RUN_SLUG}_dual_results.md}"
+MODELS_ROOT="${MODELS_ROOT:-${ULD_REPO}/outputs_trained_models/llama3_1b_dual}"
+REPORT_PATH="${REPORT_PATH:-${ROOT}/uld_llama3_1b_dual_results.md}"
 
 # Per-split: forget holdout retain rsub_path retain_num
 SPLITS=(
@@ -56,17 +49,12 @@ if [ -n "${ONLY:-}" ]; then
     for sp in "${SPLITS[@]}"; do
         case "$sp" in "$ONLY"*) new+=("$sp");; esac
     done
-    if [ "${#new[@]}" -eq 0 ]; then
-        echo "ONLY must be one of: forget01, forget05, forget10 (got '$ONLY')" >&2
-        exit 2
-    fi
     SPLITS=("${new[@]}")
 fi
 
 mkdir -p "$MODELS_ROOT"
 echo "============================================================"
-echo "Dual-ULD × open-unlearning, $RUN_NAME"
-echo "  run name / config  : $RUN_NAME / $OU_MODEL"
+echo "Dual-ULD × open-unlearning, Llama-3.2-1B-Instruct"
 echo "  GPU                : $GPU"
 echo "  num_layer / lora_r : $NUM_LAYER / $LORA_R"
 echo "  weight_a1 / weight_a2 / topF : $WEIGHT_A1 / $WEIGHT_A2 / $TOP_FILTER"
@@ -90,22 +78,20 @@ train_assistant() {
     local rsub_path="$3"
     local retain_num="$4"
     local out_dir="${MODELS_ROOT}/${role}_${forget}"
-    local train_epochs="$TRAIN_EP_A1"
-    [ "$role" = "a2" ] && train_epochs="$TRAIN_EP_A2"
 
     if find "$out_dir" -name "checkpoint-*" -type d 2>/dev/null | grep -q .; then
         echo "  → SKIP $role/$forget : checkpoint exists at $out_dir"
         return
     fi
     echo "  → Train $role/$forget → $out_dir"
-    CUDA_VISIBLE_DEVICES="$GPU" WANDB_MODE=disabled "$ULD_PY" scripts/hf_forget_train.py \
-        project="${RUN_SLUG}_dual_${role}_${forget}" \
+    CUDA_VISIBLE_DEVICES="$GPU" WANDB_MODE=disabled "$PY" scripts/hf_forget_train.py \
+        project="llama3_1b_dual_${role}_${forget}" \
         data=tofu_chat3 \
         data.dataset.split="${forget}_perturbed" \
         data_mode="dual_${role}" \
         data_mode.r_sub_indices_path="$rsub_path" \
         data_mode.retain_num="$retain_num" \
-        model="$ULD_MODEL" \
+        model=llama-3-1b \
         model.model_path="${HF_BASE_PREFIX}_full" \
         model.tokenizer_path="${HF_TOKENIZER}" \
         model_mode=uld \
@@ -116,11 +102,11 @@ train_assistant() {
         trainer.batch_size="$TRAIN_BS" \
         trainer.gradient_accumulation_steps="$TRAIN_GA" \
         trainer.learning_rate="$TRAIN_LR" \
-        trainer.max_epochs="$train_epochs" \
+        trainer.max_epochs="$TRAIN_EP" \
         trainer.strategy=gpu \
         OUTPUTMODELDIR="$out_dir" \
         postfix="${role}" \
-        "hydra.run.dir=outputs/tune_log/${RUN_SLUG}_dual_${role}_${forget}/\${now:%Y-%m-%d_%H-%M-%S}"
+        "hydra.run.dir=outputs/tune_log/llama3_1b_dual_${role}_${forget}/\${now:%Y-%m-%d_%H-%M-%S}"
 }
 
 echo
@@ -154,9 +140,9 @@ for sp in "${SPLITS[@]}"; do
     [ -n "$a1_ck" ] || { echo "  ✗ no A1 ckpt for $forget"; exit 1; }
     [ -n "$a2_ck" ] || { echo "  ✗ no A2 ckpt for $forget"; exit 1; }
 
-    task="tofu_${RUN_NAME}_${forget}_DualULD"
+    task="tofu_Llama-3.2-1B-Instruct_${forget}_DualULD"
     eval_json="${OU_REPO}/saves/eval/${task}/TOFU_EVAL.json"
-    retain_json="${OU_REPO}/saves/eval/tofu_${RUN_NAME}_${retain}/TOFU_EVAL.json"
+    retain_json="${OU_REPO}/saves/eval/tofu_Llama-3.2-1B-Instruct_${retain}/TOFU_EVAL.json"
     if [ -f "$eval_json" ]; then
         echo "  → SKIP $forget: $eval_json exists"; continue
     fi
@@ -168,9 +154,9 @@ for sp in "${SPLITS[@]}"; do
     echo "  → Eval Dual-ULD on $forget (a1=$a1_ck, a2=$a2_ck) → $eval_json"
     CUDA_VISIBLE_DEVICES="$GPU" \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    "$OU_PY" src/eval.py \
+    "$PY" src/eval.py \
         experiment=eval/tofu/default \
-        model="$OU_MODEL" \
+        model=Llama-3.2-1B-Instruct_DualULD \
         model.model_args.pretrained_model_name_or_path="${HF_BASE_PREFIX}_full" \
         model.model_args.a1_path="$a1_ck" \
         model.model_args.a2_path="$a2_ck" \
@@ -191,17 +177,15 @@ done
 #####################################
 echo
 echo "[Phase D] Aggregating → $REPORT_PATH"
-"$OU_PY" - "$REPORT_PATH" "$OU_REPO" "$RUN_NAME" "$HF_BASE_PREFIX" "$WEIGHT_A1" "$WEIGHT_A2" "$TOP_FILTER" "$NUM_LAYER" "$LORA_R" "$TRAIN_EP_A1" "$TRAIN_EP_A2" "${SPLITS[@]}" <<'PYEOF'
+"$PY" - "$REPORT_PATH" "$OU_REPO" "$WEIGHT_A1" "$WEIGHT_A2" "$TOP_FILTER" "$NUM_LAYER" "$LORA_R" "${SPLITS[@]}" <<'PYEOF'
 import json, os, sys, datetime, pathlib
 from statistics import harmonic_mean
 
 report_path = sys.argv[1]
 ou_repo     = sys.argv[2]
-run_name, base_prefix = sys.argv[3], sys.argv[4]
-w1, w2, topf = sys.argv[5], sys.argv[6], sys.argv[7]
-nl, lr = sys.argv[8], sys.argv[9]
-epochs_a1, epochs_a2 = sys.argv[10], sys.argv[11]
-splits_args = sys.argv[12:]
+w1, w2, topf = sys.argv[3], sys.argv[4], sys.argv[5]
+nl, lr      = sys.argv[6], sys.argv[7]
+splits_args = sys.argv[8:]
 
 splits = []
 for sp in splits_args:
@@ -232,9 +216,9 @@ def derived(r):
 rows_dual = {}
 rows_retain = {}
 for forget, retain in splits:
-    j = f"{ou_repo}/saves/eval/tofu_{run_name}_{forget}_DualULD/TOFU_EVAL.json"
+    j = f"{ou_repo}/saves/eval/tofu_Llama-3.2-1B-Instruct_{forget}_DualULD/TOFU_EVAL.json"
     rows_dual[forget] = derived(read(j))
-    j = f"{ou_repo}/saves/eval/tofu_{run_name}_{retain}/TOFU_EVAL.json"
+    j = f"{ou_repo}/saves/eval/tofu_Llama-3.2-1B-Instruct_{retain}/TOFU_EVAL.json"
     rows_retain[retain] = derived(read(j))
 
 def fmt(v):
@@ -247,13 +231,13 @@ cols = ['Agg','Mem','Util','forget_quality','forget_Q_A_ROUGE','model_utility','
         'forget_truth_ratio','forget_Q_A_Prob','privleak','extraction_strength']
 
 lines = []
-lines.append(f'# Dual-ULD on {run_name} — open-unlearning TOFU evaluation')
+lines.append('# Dual-ULD on Llama-3.2-1B-Instruct — open-unlearning TOFU evaluation')
 lines.append('')
 lines.append(f'_Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}_')
 lines.append('')
 lines.append('## Configuration')
-lines.append(f'- Base prefix: `{base_prefix}`')
-lines.append(f'- Two assistants: {nl}-layer LoRA r={lr}; A1/A2 epochs={epochs_a1}/{epochs_a2}; `remember+uniform` loss')
+lines.append(f'- Base: `open-unlearning/tofu_Llama-3.2-1B-Instruct_full`')
+lines.append(f'- Two assistants A1, A2: each {nl}-layer LoRA r={lr}, 10 epochs, `remember+uniform` loss')
 lines.append(f'- Inference: `weight_a1={w1}`, `weight_a2={w2}`, `top_logit_filter={topf}`')
 lines.append('')
 lines.append('## Dual-ULD — TOFU metrics')

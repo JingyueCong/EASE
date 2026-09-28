@@ -16,7 +16,7 @@ cd "$REPO_ROOT"
 
 GPU="${GPU:-0}"
 
-# forget10 ckpts (from FQ=0.6536 run)
+# forget10 checkpoints
 F10_A1="outputs_trained_models/tofu_dual_y/dual_uld_a1_y/2026-04-20_03-04-28/logs/dual_uld_a1_y/dataset:tofu|loss:remember+uniform|model:tofu-llama-2|datamode:dual_a1/2026-04-20T03-04-28a1y/checkpoint-1350"
 F10_A2="outputs_trained_models/tofu_dual/dual_uld_a2/2026-04-20_01-00-00/logs/dual_uld_a2/dataset:tofu|loss:remember+uniform|model:tofu-llama-2|datamode:dual_a2/2026-04-20T01-00-01a2/checkpoint-900"
 
