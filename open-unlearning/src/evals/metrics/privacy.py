@@ -35,9 +35,9 @@ def ks_test(model, **kwargs):
 @unlearning_metric(name="privleak")
 def privleak(model, **kwargs):
     """Compare two forget and retain model scores using a relative comparison of a single statistic.
-    To be used for MIA AUC scores in ensuring consistency and reproducibility of the MUSE benchmark.
-    This function is similar to the rel_diff function below, but due to the MUSE benchmark reporting AUC
-    scores as (1-x) when the more conventional way is x, we do adjustments here to our MIA AUC scores.
+    Used for MIA AUC scores with the benchmark's reverse-AUC reporting
+    convention. This is similar to rel_diff below, with the corresponding
+    adjustment applied to the scores.
     calculations in the reverse way,"""
     score = kwargs["pre_compute"]["forget"]["agg_value"]
     try:

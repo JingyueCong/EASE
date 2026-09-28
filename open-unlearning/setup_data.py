@@ -37,7 +37,7 @@ def main():
     parser.add_argument(
         "--eval_logs",
         action="store_true",
-        help="Downloads TOFU, MUSE  - retain and finetuned models eval logs and saves them in saves/eval",
+        help="Downloads evaluation logs and saves them in saves/eval",
     )
     parser.add_argument(
         "--idk",

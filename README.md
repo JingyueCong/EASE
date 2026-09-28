@@ -2,9 +2,8 @@
 
 Anonymous code release for double-blind review.
 
-This repository contains the training and evaluation code for our method on
-two LLM-unlearning benchmarks: **TOFU** (synthetic biographical Q&A) and
-**MUSE** (Books / News pre-training corpora).
+This repository contains the training and evaluation code for EASE on
+**TOFU**, the synthetic biographical Q&A unlearning benchmark.
 
 ## Method (one paragraph)
 
@@ -32,36 +31,25 @@ filter that zeroes out small assistant probabilities to avoid noise.
 ```
 EASE/
 ├── README.md                  # this file
-├── ULD/                       # TOFU pipeline (built on the ULD framework)
-│   ├── uld/                   # core library (model, data, training utils)
-│   │   ├── model/             # Dual-ULD logit composition + relative-top filter
+├── ease/                      # canonical TOFU implementation
+│   ├── ease/                   # core library (model, data, training utils)
+│   │   ├── model/             # EASE logit composition + relative-top filter
 │   │   └── tofuutil/          # TOFU eval utilities (forget quality, model utility)
 │   ├── scripts/               # entry-point Python: hf_forget_train.py, eval_tofu.py
 │   ├── configs/               # Hydra configs (data, data_mode, eval, tune)
 │   ├── bashes/tofu/           # end-to-end shell pipelines
-│   │   └── dual_uld_pipeline.sh   # ★ canonical TOFU run
+│   │   └── ease_pipeline.sh   # ★ canonical TOFU run
 │   └── data/                  # data augmentation + retain reference results
 │       ├── aug_data/tofu/     # paraphrased + perturbed answers (provided)
 │       └── retain*_*_wd0.01/  # retain-only reference for forget_quality KS test
 │
-├── dual_uld_muse/             # MUSE training code
-│   ├── build_rsub.py          # select R_sub via embedding similarity
-│   ├── paraphrase_forget.py   # generate paraphrases via DeepSeek API
-│   ├── perturb_forget.py      # generate perturbations via DeepSeek API
-│   ├── train_assistant.py     # train one assistant (A1 or A2) on Books/News
-│   ├── run_dual_uld_muse.sh   # ★ canonical MUSE pipeline (train A1+A2 + sweep)
-│   ├── sweep_eval.sh          # eval-only sweep over a w1 grid (w2 = |w1|)
-│   ├── aug/                   # paraphrase + perturbation jsonl (provided)
-│   └── rsub/                  # precomputed R_sub indices (provided)
-│
-├── open-unlearning/           # MUSE evaluation framework (upstream + our patches)
-│   ├── src/model/dual_uld.py  # ★ our DualULD HuggingFace wrapper
-│   ├── src/model/uld.py       # single-assistant ULD baseline
-│   ├── src/evals/muse.py      # MUSE benchmark eval
+├── open-unlearning/           # TOFU evaluation framework (upstream + EASE adapter)
+│   ├── src/model/ease.py  # ★ our EASE HuggingFace wrapper
+│   ├── src/model/assistant.py # single-assistant baseline
 │   └── ...                    # rest is upstream open-unlearning
 │
 └── scripts/
-    └── run_dual_uld_1b.sh     # ★ Llama-3.2 1B TOFU run via open-unlearning
+    └── run_ease_1b.sh     # ★ Llama-3.2 1B TOFU run via open-unlearning
                                #   (override env vars to target 3B / 8B —
                                #    see "Llama-3.2 ... via open-unlearning" below)
 ```
@@ -70,13 +58,9 @@ EASE/
 
 - Python 3.10
 - One or more CUDA-capable GPUs (TOFU 1B fits on a single 24GB; TOFU 7B / 3B
-  needs 40GB+; MUSE LLaMA-2-7B needs 40GB+)
+  needs 40GB+)
 - HuggingFace token only if you fetch gated models (LLaMA-2). Set with
   `export HF_TOKEN=...` or `huggingface-cli login`.
-- DeepSeek API key (or any OpenAI-compatible endpoint) **only** if you want
-  to regenerate the MUSE paraphrase / perturbation augmentations. The
-  precomputed augmentations are already shipped in `dual_uld_muse/aug/` and
-  `ULD/data/aug_data/tofu/`, so a normal run does **not** need the API.
 
 All shell scripts expect `EASE_ROOT` to point at this repository:
 
@@ -90,29 +74,22 @@ location via `MODELS_ROOT=...` if you need to.
 
 ## Setup
 
-### TOFU (`ULD/`)
+### TOFU (`ease/`)
 
 ```bash
-cd $EASE_ROOT/ULD
-conda env create -f environment.yaml      # creates env "uld"
-conda activate uld
+cd $EASE_ROOT/ease
+conda env create -f environment.yaml      # creates env "ease"
+conda activate ease
 pip install -e .
 ```
 
-### MUSE training (`dual_uld_muse/`)
-
-Reuses the same conda env as ULD. Additional pip packages:
-```bash
-pip install sentence-transformers openai
-```
-
-### MUSE evaluation (`open-unlearning/`)
+### Evaluation with `open-unlearning/`
 
 ```bash
 cd $EASE_ROOT/open-unlearning
 pip install -r requirements.txt
 pip install -e .
-python setup_data.py    # downloads MUSE benchmark data into HF cache
+python setup_data.py --eval_logs
 ```
 
 ## Running TOFU
@@ -120,9 +97,9 @@ python setup_data.py    # downloads MUSE benchmark data into HF cache
 The end-to-end pipeline (R_sub selection → train A1 → train A2 → evaluate):
 
 ```bash
-cd $EASE_ROOT/ULD
+cd $EASE_ROOT/ease
 GPUS=0 SPLIT=forget10 K=80 \
-    bash bashes/tofu/dual_uld_pipeline.sh
+    bash bashes/tofu/ease_pipeline.sh
 ```
 
 Knobs:
@@ -131,21 +108,21 @@ Knobs:
 - `GPUS` — comma-separated CUDA device ids. Multi-GPU triggers DDP.
 
 Output:
-- LoRA checkpoints under `outputs_trained_models/tofu_dual/...`
+- LoRA checkpoints under `outputs_trained_models/tofu_ease/...`
 - Eval logs (with `forget_quality`, `forget_proba`, ROUGE-L on
   forget/retain/real_authors/world_facts) under
   `outputs/tune_log/.../eval_tofu.log`.
 
 ### Llama-3.2 1B / 3B / 8B (via the open-unlearning framework)
 
-A single script ships at [scripts/run_dual_uld_1b.sh](scripts/run_dual_uld_1b.sh).
+A single script ships at [scripts/run_ease_1b.sh](scripts/run_ease_1b.sh).
 It trains both assistants for all three forget splits and evaluates with
 open-unlearning's TOFU metrics.
 
 Default settings target **Llama-3.2-1B-Instruct**:
 
 ```bash
-GPU=0 bash scripts/run_dual_uld_1b.sh
+GPU=0 bash scripts/run_ease_1b.sh
 ```
 
 To run on a **different base model** (3B, 8B, …) override the shell
@@ -170,85 +147,24 @@ HF_BASE_PREFIX=open-unlearning/tofu_Llama-3.2-3B-Instruct \
 HF_TOKENIZER=open-unlearning/tofu_Llama-3.2-3B-Instruct_full \
 NUM_LAYER=7 WEIGHT_A2=0.5 \
 TRAIN_BS=2 TRAIN_GA=8 TRAIN_EP=5 \
-MODELS_ROOT=$EASE_ROOT/outputs_trained_models/llama3_3b_dual \
-    bash scripts/run_dual_uld_1b.sh
+MODELS_ROOT=$EASE_ROOT/outputs_trained_models/llama3_3b_ease \
+    bash scripts/run_ease_1b.sh
 ```
 
 To run a single split only (skip the others), set `ONLY=forget10` (or
 `forget01` / `forget05`).
 
-For LLaMA-2-7B on the original ULD framework, use the canonical TOFU
-pipeline shown above (`bashes/tofu/dual_uld_pipeline.sh`).
-
-## Running MUSE
-
-Step 1 — build `R_sub` (chunks of `retain1` most similar to forget chunks):
-
-```bash
-cd $EASE_ROOT/dual_uld_muse
-python build_rsub.py --split Books --k_frac 0.25
-python build_rsub.py --split News  --k_frac 0.20
-```
-
-(Outputs `rsub/{Books,News}_rsub.json`. Already shipped.)
-
-Step 2 — (optional) regenerate paraphrase / perturbation augmentations:
-
-```bash
-DEEPSEEK_API_KEY=... python paraphrase_forget.py --split Books --n_paraphrase 2
-DEEPSEEK_API_KEY=... python perturb_forget.py    --split Books --n_perturb 2
-# repeat with --split News
-```
-
-Outputs land in `aug/{Books,News}_{paraphrases,perturbations}.jsonl`.
-(Already shipped — skip this step to use ours.)
-
-Step 3 — train A1 + A2 and sweep eval weights with one command:
-
-```bash
-cd $EASE_ROOT/dual_uld_muse
-bash run_dual_uld_muse.sh                 # default: Books
-SPLIT=News bash run_dual_uld_muse.sh      # News
-```
-
-The script trains both assistants and then runs the eval over a default
-`w1` grid, printing `forget_ROUGE / privleak / retain_ROUGE` per weight.
-Results land in
-`$EASE_ROOT/open-unlearning/saves/eval/muse_Llama-2-7b-hf_<SPLIT>_DualULD_w*/MUSE_SUMMARY.json`.
-
-To use **different hyperparameters**, override env vars (no script edit):
-
-| env var | Books default | News default | meaning |
-|---|---|---|---|
-| `NUM_LAYER` | `8`    | `16`   | assistant transformer depth |
-| `LORA_R`    | `16`   | `64`   | LoRA rank (`LORA_ALPHA` defaults to `2*LORA_R`) |
-| `LR`        | `1e-3` | `5e-4` | learning rate |
-| `EPOCHS_A1` | `5`    | `10`   | A1 epochs |
-| `EPOCHS_A2` | `3`    | `5`    | A2 epochs |
-| `BATCH_SIZE` / `GRAD_ACCUM` | `1` / `4` | `1` / `4` | per-step batch & accumulation |
-| `WS`        | `"-0.3 -0.5 -0.7 -0.9 -1.1"` | same | space-separated `w1` grid (sweep_eval.sh sets `w2 = |w1|`) |
-| `GPU`       | `0`    | `0`    | CUDA device |
-
-Manual eval (skip training, sweep arbitrary weights on existing
-checkpoints):
-
-```bash
-GPU=0 bash sweep_eval.sh Books "-0.3 -0.5 -0.6 -0.8"
-```
-
-By default `sweep_eval.sh` runs the **fast** eval profile (skips verbmem +
-extraction). For the **full** MUSE eval, pass `EXP=eval/muse/default`.
+For LLaMA-2-7B, use the canonical EASE TOFU
+pipeline shown above (`bashes/tofu/ease_pipeline.sh`).
 
 ## Configuration cheatsheet
 
-The DualULD logit composition is implemented in two places that share the
-same shape:
+The EASE logit composition is implemented in:
 
-- TOFU: `ULD/uld/model/dualcontrastllm.py` (single-ULD baseline is `contrastllm.py` in the same directory; selected via `ULD/configs/model_mode/dual_uld.yaml`)
-- MUSE: `open-unlearning/src/model/dual_uld.py` (HuggingFace
-  `AutoModelForCausalLM` subclass for the open-unlearning harness)
+- `ease/ease/model/easecontrastllm.py` for the canonical TOFU pipeline.
+- `open-unlearning/src/model/ease.py` for the HuggingFace evaluation harness.
 
-Key knobs (both frameworks):
+Key knobs:
 
 | name | meaning | typical |
 |---|---|---|
@@ -277,12 +193,13 @@ calls.
 This codebase builds on top of two public projects whose licenses and
 upstream code are preserved:
 
-- **ULD** — single-assistant logit-difference unlearning. We extend it with
-  a second assistant (A2) and the R_sub mechanism. Original framework is
-  contained in `ULD/`.
+- **Upstream logit-difference framework** — the original single-assistant
+  implementation described by Ji et al. (2024). EASE extends it with a second
+  assistant and the R_sub mechanism; its MIT license is preserved in
+  `ease/LICENSE`.
 - **open-unlearning** — unlearning evaluation harness. We add
-  `src/model/dual_uld.py` and adapter configs. The rest of `open-unlearning/`
+  `src/model/ease.py` and adapter configs. The rest of `open-unlearning/`
   is upstream.
 
-We do not claim authorship of the upstream files. See `ULD/LICENSE` and
+We do not claim authorship of the upstream files. See `ease/LICENSE` and
 `open-unlearning/LICENSE`.

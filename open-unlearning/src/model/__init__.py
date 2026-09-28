@@ -5,8 +5,8 @@ import os
 import torch
 import logging
 from model.probe import ProbedLlamaForCausalLM
-from model.uld import ULDForCausalLM
-from model.dual_uld import DualULDForCausalLM
+from model.assistant import AssistantForCausalLM
+from model.ease import EASEForCausalLM
 
 hf_home = os.getenv("HF_HOME", default=None)
 
@@ -107,5 +107,5 @@ def get_tokenizer(tokenizer_cfg: DictConfig):
 # register models
 _register_model(AutoModelForCausalLM)
 _register_model(ProbedLlamaForCausalLM)
-_register_model(ULDForCausalLM)
-_register_model(DualULDForCausalLM)
+_register_model(AssistantForCausalLM)
+_register_model(EASEForCausalLM)
